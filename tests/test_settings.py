@@ -39,7 +39,7 @@ def test_load_settings_with_defaults(
     assert settings.deepseek_api_key == "test-key"
     assert settings.art_chat_id == -100123456
     assert settings.deepseek_base_url == "https://api.deepseek.com"
-    assert settings.deepseek_model == "deepseek-v4-flash"
+    assert settings.deepseek_model == "deepseek-flash"
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
     assert settings.admin_ids == frozenset()

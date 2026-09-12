@@ -15,7 +15,7 @@ class Settings:
     deepseek_api_key: str
     art_chat_id: int
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     log_level: str = "INFO"
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
@@ -45,7 +45,7 @@ def load_settings() -> Settings:
     art_chat_id_raw = os.getenv("ART_CHAT_ID")
     deepseek_model = os.getenv(
         "DEEPSEEK_MODEL",
-        "deepseek-v4-flash",
+        "deepseek-flash",
     )
 
     if not telegram_token:
