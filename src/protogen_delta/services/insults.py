@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class InsultClassifier:
                 self._prompt,
                 user_message,
             )
-        except Exception:
+        except DeepSeekError:
             logger.exception("Ошибка определения типа оскорбления")
             return "none"
 
