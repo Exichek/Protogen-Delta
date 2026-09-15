@@ -2,8 +2,10 @@
 
 import json
 import logging
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -20,12 +22,37 @@ class JsonFileRepository:
         """Сохранить путь к файлу и начальную структуру данных."""
         self._path = path
         self._default_data = default_data
+        self._lock = Lock()
 
     def load(self) -> dict[str, Any]:
-        """Загрузить данные или создать файл с начальными значениями."""
+        """Потокобезопасно загрузить данные из JSON-файла."""
+        with self._lock:
+            return self._load()
+
+    def save(self, data: dict[str, Any]) -> None:
+        """Потокобезопасно и атомарно сохранить данные."""
+        with self._lock:
+            self._save(data)
+
+    def update(
+        self,
+        updater: Callable[[dict[str, Any]], bool],
+    ) -> bool:
+        """Атомарно загрузить, изменить и при необходимости сохранить данные."""
+        with self._lock:
+            data = self._load()
+            changed = updater(data)
+
+            if changed:
+                self._save(data)
+
+            return changed
+
+    def _load(self) -> dict[str, Any]:
+        """Загрузить данные без получения блокировки."""
         if not self._path.exists():
             data = deepcopy(self._default_data)
-            self.save(data)
+            self._save(data)
             return data
 
         try:
@@ -45,8 +72,8 @@ class JsonFileRepository:
 
         return data
 
-    def save(self, data: dict[str, Any]) -> None:
-        """Атомарно сохранить данные в JSON-файл."""
+    def _save(self, data: dict[str, Any]) -> None:
+        """Атомарно сохранить данные без получения блокировки."""
         self._path.parent.mkdir(
             parents=True,
             exist_ok=True,
