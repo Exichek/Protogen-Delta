@@ -8,7 +8,15 @@ import pytest
 
 import protogen_delta.services.response_engine as response_engine_module
 from protogen_delta.core.state import BotState
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import (
+    DeepSeekAPIError,
+    DeepSeekAuthError,
+    DeepSeekConnectionError,
+    DeepSeekError,
+    DeepSeekRateLimitError,
+    DeepSeekService,
+    DeepSeekTimeoutError,
+)
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.mood import MoodClassifier
@@ -302,6 +310,189 @@ def test_response_engine_returns_fallback_on_chat_error(
     ) = _create_engine()
 
     deepseek_mock.chat.side_effect = RuntimeError("API error")
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == "Бля, у тостера что-то сломалось... ≧◡≦"
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_deepseek_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeout DeepSeek должен возвращать понятный ответ пользователю."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekTimeoutError("DeepSeek не ответил вовремя")
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_deepseek_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Лимит запросов DeepSeek должен возвращать отдельный ответ."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekRateLimitError(
+        "Превышен лимит запросов DeepSeek"
+    )
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == (
+        "Меня сейчас слишком сильно дёргают запросами... " "дай мне немного времени ≧◡≦"
+    )
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_deepseek_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка соединения с DeepSeek должна возвращать отдельный ответ."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekConnectionError(
+        "Не удалось подключиться к DeepSeek"
+    )
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_deepseek_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка доступа DeepSeek не должна раскрывать технические детали."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekAuthError("Ошибка авторизации DeepSeek")
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_deepseek_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка API DeepSeek должна возвращать безопасный ответ."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekAPIError(
+        "DeepSeek вернул ошибку API",
+        status_code=500,
+    )
+
+    result = asyncio.run(
+        engine.respond("Как дела"),
+    )
+
+    assert result == "У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦"
+    assert state.reply_count == 0
+
+
+def test_response_engine_handles_unknown_deepseek_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Неизвестная ошибка DeepSeek должна использовать общий fallback."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = DeepSeekError("Неизвестная ошибка DeepSeek")
 
     result = asyncio.run(
         engine.respond("Как дела"),

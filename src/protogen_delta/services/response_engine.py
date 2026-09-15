@@ -6,7 +6,15 @@ import re
 from dataclasses import dataclass
 
 from protogen_delta.core.state import BotState
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import (
+    DeepSeekAPIError,
+    DeepSeekAuthError,
+    DeepSeekConnectionError,
+    DeepSeekError,
+    DeepSeekRateLimitError,
+    DeepSeekService,
+    DeepSeekTimeoutError,
+)
 from protogen_delta.services.emotes import EmoteCategories, ends_with_emote, pick_emote
 from protogen_delta.services.fetishes import (
     FetishRole,
@@ -110,8 +118,35 @@ class ResponseEngine:
                 system_prompt=prompt,
                 user_message=user_message,
             )
+        except DeepSeekTimeoutError:
+            logger.warning("DeepSeek не ответил за установленное время")
+            return "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
+
+        except DeepSeekRateLimitError:
+            logger.warning("DeepSeek отклонил запрос из-за ограничения частоты")
+            return "Меня сейчас слишком сильно дёргают запросами... дай мне немного времени ≧◡≦"
+
+        except DeepSeekConnectionError:
+            logger.warning("Не удалось установить соединение с DeepSeek")
+            return "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
+
+        except DeepSeekAuthError:
+            logger.exception("Ошибка доступа к DeepSeek API")
+            return "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
+
+        except DeepSeekAPIError as error:
+            logger.exception(
+                "DeepSeek вернул ошибку API, HTTP-код: %s",
+                error.status_code,
+            )
+            return "У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦"
+
+        except DeepSeekError:
+            logger.exception("Неизвестная ошибка сервиса DeepSeek")
+            return "Бля, у тостера что-то сломалось... ≧◡≦"
+
         except Exception:
-            logger.exception("Ошибка получения ответа от DeepSeek")
+            logger.exception("Непредвиденная ошибка при получении ответа от DeepSeek")
             return "Бля, у тостера что-то сломалось... ≧◡≦"
 
         if not reply:

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.mood import MoodClassifier
@@ -89,7 +89,7 @@ def test_insult_classifier_returns_none_for_unknown_result() -> None:
 def test_insult_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek не должна ломать классификацию оскорбления."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = InsultClassifier(
         deepseek=deepseek,
@@ -170,7 +170,7 @@ def test_mood_classifier_uses_playful_for_unknown_result() -> None:
 def test_mood_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek должна возвращать None."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = MoodClassifier(
         deepseek=deepseek,
@@ -249,7 +249,7 @@ def test_fetish_role_classifier_returns_unknown_for_invalid_result() -> None:
 def test_fetish_role_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek должна возвращать unknown."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = FetishRoleClassifier(
         deepseek=deepseek,

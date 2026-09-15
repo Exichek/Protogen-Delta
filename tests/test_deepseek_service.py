@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import protogen_delta.services.deepseek as deepseek_module
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import (
+    DeepSeekAPIError,
+    DeepSeekAuthError,
+    DeepSeekConnectionError,
+    DeepSeekRateLimitError,
+    DeepSeekService,
+    DeepSeekTimeoutError,
+)
 
 
 def _create_service(
@@ -27,6 +34,9 @@ def _create_service(
     client_mock.chat.completions = Mock()
     client_mock.chat.completions.create = create_mock
     client_mock.close = close_mock
+    client_mock.with_options = Mock(
+        return_value=client_mock,
+    )
 
     constructor_mock = Mock(
         return_value=client_mock,
@@ -65,6 +75,21 @@ def _create_response(
             )
         ]
     )
+
+
+def _create_request() -> Mock:
+    """Создать HTTP-запрос для исключений OpenAI SDK."""
+    return Mock()
+
+
+def _create_error_response(
+    status_code: int,
+) -> Mock:
+    """Создать HTTP-ответ для ошибок OpenAI SDK."""
+    response = Mock()
+    response.status_code = status_code
+    response.request = _create_request()
+    return response
 
 
 def test_deepseek_service_creates_client(
@@ -159,7 +184,7 @@ def test_deepseek_classify_normalizes_result(
     """Классификатор должен очищать и приводить ответ к нижнему регистру."""
     (
         service,
-        _,
+        constructor_mock,
         create_mock,
         _,
     ) = _create_service(monkeypatch)
@@ -176,6 +201,11 @@ def test_deepseek_classify_normalizes_result(
     )
 
     assert result == "active"
+
+    constructor_mock.return_value.with_options.assert_called_once_with(
+        timeout=5.0,
+        max_retries=0,
+    )
 
     create_mock.assert_awaited_once_with(
         model="test-model",
@@ -264,3 +294,146 @@ def test_deepseek_service_rejects_negative_retries() -> None:
             model="test-model",
             max_retries=-1,
         )
+
+
+def test_deepseek_chat_translates_timeout_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeout OpenAI SDK должен превращаться в ошибку DeepSeek."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.side_effect = deepseek_module.APITimeoutError(
+        request=_create_request(),
+    )
+
+    with pytest.raises(
+        DeepSeekTimeoutError,
+        match="не ответил вовремя",
+    ):
+        asyncio.run(
+            service.chat(
+                system_prompt="SYSTEM",
+                user_message="Привет",
+            )
+        )
+
+
+def test_deepseek_chat_translates_rate_limit_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP 429 должен превращаться в ошибку лимита DeepSeek."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.side_effect = deepseek_module.RateLimitError(
+        "Rate limit",
+        response=_create_error_response(429),
+        body=None,
+    )
+
+    with pytest.raises(
+        DeepSeekRateLimitError,
+        match="лимит запросов",
+    ):
+        asyncio.run(
+            service.chat(
+                system_prompt="SYSTEM",
+                user_message="Привет",
+            )
+        )
+
+
+def test_deepseek_chat_translates_authentication_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP 401 должен превращаться в ошибку доступа DeepSeek."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.side_effect = deepseek_module.AuthenticationError(
+        "Unauthorized",
+        response=_create_error_response(401),
+        body=None,
+    )
+
+    with pytest.raises(
+        DeepSeekAuthError,
+        match="авторизации",
+    ):
+        asyncio.run(
+            service.chat(
+                system_prompt="SYSTEM",
+                user_message="Привет",
+            )
+        )
+
+
+def test_deepseek_chat_translates_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сетевая ошибка должна превращаться в ошибку соединения DeepSeek."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.side_effect = deepseek_module.APIConnectionError(
+        request=_create_request(),
+    )
+
+    with pytest.raises(
+        DeepSeekConnectionError,
+        match="подключиться",
+    ):
+        asyncio.run(
+            service.chat(
+                system_prompt="SYSTEM",
+                user_message="Привет",
+            )
+        )
+
+
+def test_deepseek_chat_translates_status_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Прочая HTTP-ошибка должна сохранять статус-код DeepSeek."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.side_effect = deepseek_module.APIStatusError(
+        "Server error",
+        response=_create_error_response(500),
+        body=None,
+    )
+
+    with pytest.raises(
+        DeepSeekAPIError,
+        match="ошибку API",
+    ) as exc_info:
+        asyncio.run(
+            service.chat(
+                system_prompt="SYSTEM",
+                user_message="Привет",
+            )
+        )
+
+    assert exc_info.value.status_code == 500

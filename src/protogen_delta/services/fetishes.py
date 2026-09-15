@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Literal
 
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class FetishRoleClassifier:
                 self._prompt,
                 user_message,
             )
-        except Exception:
+        except DeepSeekError:
             logger.exception("Ошибка определения роли фетиша")
             return "unknown"
 
