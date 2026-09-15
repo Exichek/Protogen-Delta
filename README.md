@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/aiogram-3.x-2CA5E0?logo=telegram&logoColor=white" alt="aiogram 3">
   <img src="https://img.shields.io/badge/Poetry-2.4.1-60A5FA?logo=poetry" alt="Poetry">
   <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/tests-133%20passed-2EA44F" alt="133 tests passed">
+  <img src="https://img.shields.io/badge/tests-146%20passed-2EA44F" alt="146 tests passed">
   <img src="https://img.shields.io/badge/coverage-97%25-brightgreen" alt="97% coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
@@ -46,11 +46,11 @@
 | Метрика | Значение |
 |---|---:|
 | Python | **3.14** |
-| Tests | **133 passed** |
-| Coverage | **97%** |
+| Tests | **146 passed** |
+| Coverage | **97.07%** |
 | CI | **GitHub Actions** |
 | Telegram framework | **aiogram 3** |
-| AI | **DeepSeek API** |
+| AI | **DeepSeek V4.1 Flash (`deepseek-flash`)** |
 | Package manager | **Poetry 2.4.1** |
 | Containerization | **Docker** |
 | License | **MIT** |
@@ -73,6 +73,8 @@
 - динамическое формирование контекста;
 - автоматическое добавление эмоутов;
 - разбиение длинных Telegram-сообщений;
+- типизированная обработка ошибок DeepSeek API;
+- отдельные timeout и retry-настройки для обычных запросов и классификаторов;
 - централизованная обработка ошибок.
 
 ---
@@ -416,7 +418,7 @@ TELEGRAM_TOKEN=
 DEEPSEEK_API_KEY=
 
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-flash
 
 LOG_LEVEL=INFO
 DATA_DIR=data
@@ -501,15 +503,23 @@ Docker Image
 Container
 ```
 
-Docker image содержит:
+Docker image собирается в два этапа:
 
 ```text
-Linux
-└── Python 3.14
-    ├── Poetry
-    ├── Python-зависимости
-    └── Protogen Delta
+builder
+├── Python 3.14
+├── Poetry 2.4.1
+└── сборка wheel + virtualenv
+
+runtime
+├── Python 3.14
+├── /opt/venv
+│   ├── зависимости
+│   └── Protogen Delta
+└── пользователь protogen
 ```
+
+Poetry остаётся только на этапе сборки и не попадает в runtime-образ. Приложение запускается от непривилегированного пользователя `protogen`.
 
 > [!NOTE]
 > `.env` и runtime-каталог `data/` в Docker image не копируются.
@@ -684,10 +694,10 @@ docker stop protogen-delta
 
 | Метрика | Результат |
 |---|---:|
-| Tests | **133 passed** |
-| Statements | **767** |
-| Missed | **21** |
-| Coverage | **97%** |
+| Tests | **146 passed** |
+| Statements | **819** |
+| Missed | **24** |
+| Coverage | **97.07%** |
 Тестируются:
 
 - настройки приложения;
@@ -750,7 +760,7 @@ poetry run pytest --cov=src/protogen_delta --cov-report=term-missing
 Текущий результат:
 
 ```text
-TOTAL    767    21    97%
+TOTAL    819    24    97%
 ```
 
 ---
@@ -981,6 +991,9 @@ DEEPSEEK_API_KEY
 - настроены Black, isort, Flake8 и mypy;
 - добавлен Dockerfile;
 - настроен `.dockerignore`;
+- Docker image переведён на multi-stage сборку и запуск от непривилегированного пользователя;
+- DeepSeek обновлён до V4.1 Flash через `deepseek-flash`;
+- добавлены типизированные ошибки DeepSeek и отдельные timeout/retry-настройки для классификаторов;
 - приложение успешно запущено внутри Linux Docker-контейнера;
 - выполнены реальные smoke-тесты Telegram и DeepSeek.
 
@@ -1082,7 +1095,7 @@ $env:PYTHONIOENCODING="utf-8"
 
 **Python 3.14 · aiogram 3 · DeepSeek · Poetry · Docker**
 
-`133 tests · 97% coverage`
+`146 tests · 97% coverage`
 
 ## 📄 Лицензия
 
