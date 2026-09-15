@@ -1,7 +1,11 @@
 """Тесты JSON-репозиториев приложения."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
+from time import sleep
+from typing import Any
 
 import pytest
 
@@ -207,3 +211,67 @@ def test_json_repository_does_not_leave_temporary_file(
     assert repository.load() == {
         "name": "Дельта",
     }
+
+
+def test_json_repository_skips_save_when_update_returns_false(
+    tmp_path: Path,
+) -> None:
+    """Изменения не должны сохраняться, если updater вернул False."""
+    path = tmp_path / "data.json"
+
+    repository = JsonFileRepository(
+        path=path,
+        default_data={"VALUE": 1},
+    )
+
+    repository.save({"VALUE": 1})
+
+    def updater(data: dict[str, Any]) -> bool:
+        data["VALUE"] = 2
+        return False
+
+    result = repository.update(updater)
+
+    assert result is False
+    assert repository.load() == {"VALUE": 1}
+
+
+def test_json_repository_serializes_concurrent_updates(
+    tmp_path: Path,
+) -> None:
+    """Параллельные изменения не должны терять данные."""
+    path = tmp_path / "counter.json"
+
+    repository = JsonFileRepository(
+        path=path,
+        default_data={"COUNT": 0},
+    )
+
+    repository.load()
+
+    workers = 8
+    barrier = Barrier(workers)
+
+    def increment() -> bool:
+        barrier.wait()
+
+        def updater(data: dict[str, Any]) -> bool:
+            current = data["COUNT"]
+
+            if not isinstance(current, int):
+                raise TypeError("COUNT должен быть целым числом")
+
+            sleep(0.01)
+
+            data["COUNT"] = current + 1
+            return True
+
+        return repository.update(updater)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(increment) for _ in range(workers)]
+
+        results = [future.result() for future in futures]
+
+    assert all(results)
+    assert repository.load() == {"COUNT": workers}

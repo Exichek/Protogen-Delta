@@ -1,11 +1,23 @@
 """Репозиторий изображений бота."""
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from protogen_delta.repositories.json_file import JsonFileRepository
 
 _IMAGES_KEY = "IMAGES"
+
+
+def _get_images(data: dict[str, Any]) -> list[str]:
+    """Получить и проверить список изображений из данных хранилища."""
+    images = data.get(_IMAGES_KEY, [])
+
+    if not isinstance(images, list) or not all(
+        isinstance(file_id, str) for file_id in images
+    ):
+        raise TypeError("Поле IMAGES должно содержать список строк")
+
+    return cast(list[str], images)
 
 
 class ImagesRepository:
@@ -20,37 +32,37 @@ class ImagesRepository:
 
     def get_all(self) -> list[str]:
         """Вернуть file_id всех сохранённых изображений."""
-        data = self._storage.load()
-        images = data.get(_IMAGES_KEY, [])
-
-        if not isinstance(images, list) or not all(
-            isinstance(file_id, str) for file_id in images
-        ):
-            raise TypeError("Поле IMAGES должно содержать список строк")
-
-        return cast(list[str], images)
+        return _get_images(self._storage.load())
 
     def add(self, file_id: str) -> bool:
         """Добавить изображение и вернуть True, если его ещё не было."""
-        images = self.get_all()
 
-        if file_id in images:
-            return False
+        def add_image(data: dict[str, Any]) -> bool:
+            """Добавить изображение внутри атомарной операции."""
+            images = _get_images(data)
 
-        images.append(file_id)
-        self._storage.save({_IMAGES_KEY: images})
-        return True
+            if file_id in images:
+                return False
+
+            images.append(file_id)
+            return True
+
+        return self._storage.update(add_image)
 
     def remove(self, file_id: str) -> bool:
         """Удалить изображение и вернуть True, если оно существовало."""
-        images = self.get_all()
 
-        if file_id not in images:
-            return False
+        def remove_image(data: dict[str, Any]) -> bool:
+            """Удалить изображение внутри атомарной операции."""
+            images = _get_images(data)
 
-        images.remove(file_id)
-        self._storage.save({_IMAGES_KEY: images})
-        return True
+            if file_id not in images:
+                return False
+
+            images.remove(file_id)
+            return True
+
+        return self._storage.update(remove_image)
 
     def count(self) -> int:
         """Вернуть количество сохранённых изображений."""

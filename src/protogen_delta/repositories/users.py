@@ -1,11 +1,23 @@
 """Репозиторий пользователей бота."""
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from protogen_delta.repositories.json_file import JsonFileRepository
 
 _USERS_KEY = "USERS"
+
+
+def _get_users(data: dict[str, Any]) -> list[int]:
+    """Получить и проверить список пользователей из данных хранилища."""
+    users = data.get(_USERS_KEY, [])
+
+    if not isinstance(users, list) or not all(
+        isinstance(user_id, int) for user_id in users
+    ):
+        raise TypeError("Поле USERS должно содержать список целых чисел")
+
+    return cast(list[int], users)
 
 
 class UsersRepository:
@@ -20,26 +32,22 @@ class UsersRepository:
 
     def get_all(self) -> list[int]:
         """Вернуть идентификаторы всех сохранённых пользователей."""
-        data = self._storage.load()
-        users = data.get(_USERS_KEY, [])
-
-        if not isinstance(users, list) or not all(
-            isinstance(user_id, int) for user_id in users
-        ):
-            raise TypeError("Поле USERS должно содержать список целых чисел")
-
-        return cast(list[int], users)
+        return _get_users(self._storage.load())
 
     def add(self, user_id: int) -> bool:
         """Добавить пользователя и вернуть True, если его ещё не было."""
-        users = self.get_all()
 
-        if user_id in users:
-            return False
+        def add_user(data: dict[str, Any]) -> bool:
+            """Добавить пользователя внутри атомарной операции."""
+            users = _get_users(data)
 
-        users.append(user_id)
-        self._storage.save({_USERS_KEY: users})
-        return True
+            if user_id in users:
+                return False
+
+            users.append(user_id)
+            return True
+
+        return self._storage.update(add_user)
 
     def count(self) -> int:
         """Вернуть количество сохранённых пользователей."""
