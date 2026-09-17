@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 import protogen_delta.handlers.admin as admin_module
@@ -204,7 +205,7 @@ def test_list_images_sends_requested_last_images(
     )
 
     answer_mock.assert_awaited_once_with(
-        "📂 Показываю последние 2 артов:",
+        "📂 Показываю: 2 арта.",
     )
 
     answer_photo_mock.assert_has_awaits(
@@ -223,7 +224,7 @@ def test_list_images_sends_requested_last_images(
     )
 
     assert answer_photo_mock.await_count == 2
-    assert sleep_mock.await_count == 2
+    assert sleep_mock.await_count == 1
 
 
 def test_list_images_uses_one_image_by_default(
@@ -262,7 +263,7 @@ def test_list_images_uses_one_image_by_default(
     )
 
     answer_mock.assert_awaited_once_with(
-        "📂 Показываю последние 1 артов:",
+        "📂 Показываю: 1 арт.",
     )
 
     answer_photo_mock.assert_awaited_once_with(
@@ -275,7 +276,7 @@ def test_list_images_uses_one_image_by_default(
 def test_list_images_handles_photo_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ошибка отправки отдельного арта не должна ронять обработчик."""
+    """Ошибка Telegram не должна раскрывать технические детали."""
     images_mock = Mock(spec=ImagesRepository)
     images_mock.get_all.return_value = [
         "broken-file-id",
@@ -298,7 +299,10 @@ def test_list_images_handles_photo_error(
         text="/listimages 1",
     )
 
-    answer_photo_mock.side_effect = RuntimeError("Telegram error")
+    answer_photo_mock.side_effect = TelegramAPIError(
+        method=Mock(),
+        message="Telegram secret error",
+    )
 
     asyncio.run(
         _call_handler(
@@ -312,10 +316,12 @@ def test_list_images_handles_photo_error(
 
     answer_mock.assert_has_awaits(
         [
-            call("📂 Показываю последние 1 артов:"),
-            call("⚠️ Ошибка с broken-file-id: Telegram error"),
+            call("📂 Показываю: 1 арт."),
+            call("⚠️ Не удалось отправить арт с ID: broken-file-id"),
         ]
     )
+
+    assert "Telegram secret error" not in str(answer_mock.await_args_list)
 
 
 def test_remove_image_requires_ids() -> None:
@@ -381,9 +387,7 @@ def test_remove_image_reports_removed_and_missing() -> None:
         call("id3"),
     ]
 
-    answer_mock.assert_awaited_once_with(
-        "✅ Удалено: 2 артов\n" "⚠️ Не найдено: 1 артов"
-    )
+    answer_mock.assert_awaited_once_with("✅ Удалено: 2 арта\n" "⚠️ Не найдено: 1 арт")
 
 
 def test_remove_image_handles_empty_id_list() -> None:
@@ -411,7 +415,7 @@ def test_remove_image_handles_empty_id_list() -> None:
     images_mock.remove.assert_not_called()
 
     answer_mock.assert_awaited_once_with(
-        "⚠️ Ничего не удалено.",
+        "⚠️ Укажи ID артов через запятую.\n" "Пример: /removeimage id1,id2,id3"
     )
 
 
@@ -469,7 +473,7 @@ def test_art_count_reports_number_of_images() -> None:
     )
 
     answer_mock.assert_awaited_once_with(
-        "📂 В базе 42 артов.",
+        "📂 В базе 42 арта.",
     )
 
 
@@ -584,3 +588,137 @@ def test_ping_returns_pong() -> None:
     answer_mock.assert_awaited_once_with(
         "🏓 Pong от админского роутера!",
     )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/listimages abc",
+        "/listimages 0",
+        "/listimages -1",
+        "/listimages 1.5",
+    ],
+)
+def test_list_images_rejects_invalid_count(
+    text: str,
+) -> None:
+    """Некорректное количество артов должно отклоняться."""
+    images_mock = Mock(spec=ImagesRepository)
+    users_mock = Mock(spec=UsersRepository)
+
+    router = _create_router(
+        images_mock,
+        users_mock,
+    )
+
+    message, _, answer_mock, answer_photo_mock = _create_message_mock(
+        text=text,
+    )
+
+    asyncio.run(
+        _call_handler(
+            router,
+            "list_images",
+            message,
+        )
+    )
+
+    answer_mock.assert_awaited_once_with(
+        "⚠️ Укажи положительное целое количество артов.\n" "Пример: /listimages 10"
+    )
+
+    images_mock.get_all.assert_not_called()
+    answer_photo_mock.assert_not_awaited()
+
+
+def test_list_images_limits_count_to_maximum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Количество отправляемых артов должно ограничиваться максимумом."""
+    images_mock = Mock(spec=ImagesRepository)
+    images_mock.get_all.return_value = [f"file-id-{index}" for index in range(250)]
+
+    users_mock = Mock(spec=UsersRepository)
+
+    monkeypatch.setattr(
+        admin_module.asyncio,
+        "sleep",
+        AsyncMock(),
+    )
+
+    router = _create_router(
+        images_mock,
+        users_mock,
+    )
+
+    message, _, answer_mock, answer_photo_mock = _create_message_mock(
+        text="/listimages 999",
+    )
+
+    asyncio.run(
+        _call_handler(
+            router,
+            "list_images",
+            message,
+        )
+    )
+
+    answer_mock.assert_awaited_once_with(
+        "📂 Показываю: 200 артов.",
+    )
+
+    assert answer_photo_mock.await_count == 200
+
+
+def test_remove_image_ignores_duplicate_ids() -> None:
+    """Одинаковый file_id должен обрабатываться только один раз."""
+    images_mock = Mock(spec=ImagesRepository)
+    images_mock.remove.return_value = True
+
+    users_mock = Mock(spec=UsersRepository)
+
+    router = _create_router(
+        images_mock,
+        users_mock,
+    )
+
+    message, _, answer_mock, _ = _create_message_mock(
+        text="/removeimage id1,id1,id2,id1",
+    )
+
+    asyncio.run(
+        _call_handler(
+            router,
+            "remove_image",
+            message,
+        )
+    )
+
+    assert images_mock.remove.call_args_list == [
+        call("id1"),
+        call("id2"),
+    ]
+
+    answer_mock.assert_awaited_once_with(
+        "✅ Удалено: 2 арта",
+    )
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [
+        (1, "арт"),
+        (2, "арта"),
+        (5, "артов"),
+        (11, "артов"),
+        (21, "арт"),
+        (22, "арта"),
+        (25, "артов"),
+    ],
+)
+def test_art_word_uses_correct_russian_form(
+    count: int,
+    expected: str,
+) -> None:
+    """Количество должно использовать правильную форму слова «арт»."""
+    assert admin_module._art_word(count) == expected
