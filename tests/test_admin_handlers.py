@@ -494,7 +494,7 @@ def test_status_reports_bot_state(
 
     monkeypatch.setattr(
         admin_module.time,
-        "time",
+        "monotonic",
         lambda: 4661.0,
     )
 

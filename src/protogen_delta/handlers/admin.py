@@ -196,7 +196,7 @@ def create_admin_router(
             await deny_access(message)
             return
 
-        uptime = int(time.time() - bot_state.start_time)
+        uptime = int(time.monotonic() - bot_state.start_time)
         hours = uptime // 3600
         minutes = (uptime % 3600) // 60
         seconds = uptime % 60
