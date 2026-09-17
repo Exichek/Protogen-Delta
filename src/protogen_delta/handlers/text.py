@@ -1,11 +1,10 @@
 """Обработчик обычных текстовых сообщений."""
 
-from time import monotonic
-
 from aiogram import F, Router
 from aiogram.types import Message
 
 from protogen_delta.core.message_utils import split_message
+from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.services.response_engine import ResponseEngine
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
@@ -13,11 +12,11 @@ RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару се�
 
 def create_text_router(
     response_engine: ResponseEngine,
-    cooldown_seconds: float = 2.0,
+    rate_limiter: UserRateLimiter | None = None,
 ) -> Router:
     """Создать роутер обычных текстовых сообщений."""
     router = Router(name=__name__)
-    last_request_at: dict[int, float] = {}
+    limiter = rate_limiter or UserRateLimiter()
 
     @router.message(F.text)
     async def handle_text(message: Message) -> None:
@@ -30,18 +29,10 @@ def create_text_router(
 
         if message.from_user is not None:
             user_id = message.from_user.id
-            now = monotonic()
 
-            previous_request_at = last_request_at.get(user_id)
-
-            if (
-                previous_request_at is not None
-                and now - previous_request_at < cooldown_seconds
-            ):
+            if not limiter.allow(user_id):
                 await message.answer(RATE_LIMIT_REPLY)
                 return
-
-            last_request_at[user_id] = now
 
         reply = await response_engine.respond(message.text)
 

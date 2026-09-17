@@ -23,6 +23,11 @@ def test_load_settings_with_defaults(
     """Обязательные переменные должны загружаться с настройками по умолчанию."""
     _disable_dotenv(monkeypatch)
 
+    monkeypatch.delenv("RATE_LIMIT_SECONDS", raising=False)
+    monkeypatch.delenv(
+        "RATE_LIMIT_RETENTION_SECONDS",
+        raising=False,
+    )
     monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("ART_CHAT_ID", "-100123456")
@@ -43,6 +48,8 @@ def test_load_settings_with_defaults(
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
     assert settings.admin_ids == frozenset()
+    assert settings.rate_limit_seconds == 2.0
+    assert settings.rate_limit_retention_seconds == 300.0
 
 
 def test_load_settings_with_custom_values(
@@ -51,6 +58,8 @@ def test_load_settings_with_custom_values(
     """Необязательные переменные должны переопределять значения по умолчанию."""
     _disable_dotenv(monkeypatch)
 
+    monkeypatch.setenv("RATE_LIMIT_SECONDS", "3.5")
+    monkeypatch.setenv("RATE_LIMIT_RETENTION_SECONDS", "600")
     monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
     monkeypatch.setenv("ART_CHAT_ID", "-100999")
@@ -62,6 +71,8 @@ def test_load_settings_with_custom_values(
 
     settings = load_settings()
 
+    assert settings.rate_limit_seconds == 3.5
+    assert settings.rate_limit_retention_seconds == 600.0
     assert settings.deepseek_base_url == "https://example.com"
     assert settings.deepseek_model == "test-model"
     assert settings.log_level == "DEBUG"
@@ -134,5 +145,54 @@ def test_load_settings_with_invalid_admin_ids(
     with pytest.raises(
         ValueError,
         match="ADMIN_IDS",
+    ):
+        load_settings()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("RATE_LIMIT_SECONDS", "abc"),
+        ("RATE_LIMIT_SECONDS", "-1"),
+        ("RATE_LIMIT_SECONDS", "nan"),
+        ("RATE_LIMIT_SECONDS", "inf"),
+        ("RATE_LIMIT_RETENTION_SECONDS", "0"),
+        ("RATE_LIMIT_RETENTION_SECONDS", "-1"),
+        ("RATE_LIMIT_RETENTION_SECONDS", "nan"),
+        ("RATE_LIMIT_RETENTION_SECONDS", "inf"),
+    ],
+)
+def test_load_settings_rejects_invalid_rate_limit_values(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+) -> None:
+    """Некорректные настройки rate limit должны отклоняться."""
+    _disable_dotenv(monkeypatch)
+
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=name):
+        load_settings()
+
+
+def test_load_settings_rejects_retention_shorter_than_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Время хранения не может быть меньше пользовательского cooldown."""
+    _disable_dotenv(monkeypatch)
+
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("RATE_LIMIT_SECONDS", "10")
+    monkeypatch.setenv("RATE_LIMIT_RETENTION_SECONDS", "5")
+
+    with pytest.raises(
+        ValueError,
+        match="RATE_LIMIT_RETENTION_SECONDS",
     ):
         load_settings()

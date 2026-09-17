@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -19,6 +20,8 @@ class Settings:
     log_level: str = "INFO"
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
+    rate_limit_seconds: float = 2.0
+    rate_limit_retention_seconds: float = 300.0
 
 
 def _parse_admin_ids(value: str) -> frozenset[int]:
@@ -34,6 +37,38 @@ def _parse_admin_ids(value: str) -> frozenset[int]:
         raise ValueError(
             "ADMIN_IDS должен содержать Telegram ID через запятую"
         ) from error
+
+
+def _parse_non_negative_float(
+    value: str,
+    name: str,
+) -> float:
+    """Преобразовать строку в конечное неотрицательное число."""
+    try:
+        result = float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} должен быть числом") from error
+
+    if not isfinite(result):
+        raise ValueError(f"{name} должен быть конечным числом")
+
+    if result < 0:
+        raise ValueError(f"{name} не может быть отрицательным")
+
+    return result
+
+
+def _parse_positive_float(
+    value: str,
+    name: str,
+) -> float:
+    """Преобразовать строку в положительное число."""
+    result = _parse_non_negative_float(value, name)
+
+    if result == 0:
+        raise ValueError(f"{name} должен быть больше нуля")
+
+    return result
 
 
 def load_settings() -> Settings:
@@ -62,7 +97,30 @@ def load_settings() -> Settings:
     except ValueError as error:
         raise ValueError("ART_CHAT_ID должен быть целым числом") from error
 
+    rate_limit_seconds = _parse_non_negative_float(
+        os.getenv(
+            "RATE_LIMIT_SECONDS",
+            "2.0",
+        ),
+        "RATE_LIMIT_SECONDS",
+    )
+
+    rate_limit_retention_seconds = _parse_positive_float(
+        os.getenv(
+            "RATE_LIMIT_RETENTION_SECONDS",
+            "300.0",
+        ),
+        "RATE_LIMIT_RETENTION_SECONDS",
+    )
+
+    if rate_limit_retention_seconds < rate_limit_seconds:
+        raise ValueError(
+            "RATE_LIMIT_RETENTION_SECONDS не может быть меньше " "RATE_LIMIT_SECONDS"
+        )
+
     return Settings(
+        rate_limit_seconds=rate_limit_seconds,
+        rate_limit_retention_seconds=rate_limit_retention_seconds,
         telegram_token=telegram_token,
         deepseek_api_key=deepseek_api_key,
         art_chat_id=art_chat_id,

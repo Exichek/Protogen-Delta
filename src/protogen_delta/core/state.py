@@ -1,7 +1,7 @@
 """Состояние бота во время работы приложения."""
 
-import time
 from dataclasses import dataclass, field
+from time import monotonic
 
 
 @dataclass(slots=True)
@@ -10,7 +10,7 @@ class BotState:
 
     reply_count: int = 0
     mood: str = "playful"
-    start_time: float = field(default_factory=time.time)
+    start_time: float = field(default_factory=monotonic)
 
     def register_reply(self) -> None:
         """Увеличить счётчик отправленных ботом ответов."""
