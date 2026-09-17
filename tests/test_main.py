@@ -171,6 +171,7 @@ def test_main_builds_application_and_starts_polling(
     help_router = Mock(name="help_router")
     art_router = Mock(name="art_router")
     admin_router = Mock(name="admin_router")
+    reset_router = Mock(name="reset_router")
     unknown_router = Mock(name="unknown_router")
     text_router = Mock(name="text_router")
 
@@ -185,6 +186,9 @@ def test_main_builds_application_and_starts_polling(
     )
     create_admin_router_mock = Mock(
         return_value=admin_router,
+    )
+    create_reset_router_mock = Mock(
+        return_value=reset_router,
     )
     create_unknown_router_mock = Mock(
         return_value=unknown_router,
@@ -257,6 +261,11 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "create_reset_router",
+        create_reset_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "create_unknown_command_router",
         create_unknown_router_mock,
     )
@@ -293,7 +302,31 @@ def test_main_builds_application_and_starts_polling(
         model="test-model",
     )
 
-    assert dispatcher_mock.include_router.call_count == 6
+    create_reset_router_mock.assert_called_once()
+
+    assert dispatcher_mock.include_router.call_count == 7
+
+    dispatcher_mock.include_router.assert_any_call(
+        start_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        help_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        art_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        admin_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        reset_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        unknown_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        text_router,
+    )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
         drop_pending_updates=True,

@@ -1,5 +1,7 @@
 """Сервис для работы с DeepSeek API."""
 
+from collections.abc import Sequence
+
 from openai import (
     APIConnectionError,
     APIStatusError,
@@ -10,6 +12,9 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
 )
+from openai.types.chat import ChatCompletionMessageParam
+
+from protogen_delta.core.user_state import ConversationTurn
 
 _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
@@ -104,21 +109,41 @@ class DeepSeekService:
         self,
         system_prompt: str,
         user_message: str,
+        history: Sequence[ConversationTurn] = (),
     ) -> str:
-        """Получить обычный текстовый ответ модели."""
+        """Получить обычный текстовый ответ модели с учётом истории диалога."""
+        messages: list[ChatCompletionMessageParam] = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            }
+        ]
+
+        for turn in history:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": turn.user_message,
+                }
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": turn.assistant_message,
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": user_message,
+            }
+        )
+
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_message,
-                    },
-                ],
+                messages=messages,
                 extra_body={
                     "thinking": {
                         "type": "disabled",

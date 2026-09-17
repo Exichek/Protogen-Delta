@@ -8,7 +8,10 @@ import pytest
 
 import protogen_delta.services.response_engine as response_engine_module
 from protogen_delta.core.state import BotState
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.user_state import (
+    ConversationTurn,
+    UserStateStore,
+)
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -118,6 +121,13 @@ def test_response_engine_returns_greeting_without_deepseek() -> None:
     assert result == "Приветик"
     assert state.reply_count == 1
 
+    assert list(engine._user_states.get(TEST_USER_ID).history) == [
+        ConversationTurn(
+            user_message="Привет!",
+            assistant_message="Приветик",
+        )
+    ]
+
     insult_mock.classify.assert_not_awaited()
     deepseek_mock.chat.assert_not_awaited()
 
@@ -141,6 +151,13 @@ def test_response_engine_returns_direct_insult_without_chat() -> None:
 
     assert result == "Отвали >:("
     assert state.reply_count == 1
+
+    assert list(engine._user_states.get(TEST_USER_ID).history) == [
+        ConversationTurn(
+            user_message="Ты идиот",
+            assistant_message="Отвали >:(",
+        )
+    ]
 
     mood_mock.classify.assert_not_awaited()
     deepseek_mock.chat.assert_not_awaited()
@@ -179,6 +196,7 @@ def test_response_engine_updates_mood_and_calls_chat(
     deepseek_mock.chat.assert_awaited_once_with(
         system_prompt="SYSTEM PROMPT",
         user_message="Как дела?",
+        history=(),
     )
 
     role_mock.classify.assert_not_awaited()
@@ -539,6 +557,7 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp(
     deepseek_mock.chat.assert_awaited_once_with(
         system_prompt="SYSTEM PROMPT",
         user_message="Ты меня связал?",
+        history=(),
     )
 
 
@@ -1116,3 +1135,352 @@ def test_response_engine_keeps_user_state_separate(
     assert engine._user_states.get(222).reply_count == 1
 
     assert state.reply_count == 2
+
+
+def test_response_engine_passes_user_history_to_deepseek(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Предыдущие ходы пользователя должны передаваться в DeepSeek."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    previous_turn = ConversationTurn(
+        user_message="Меня зовут Экси",
+        assistant_message="Запомнил",
+    )
+
+    user_state = engine._user_states.get(TEST_USER_ID)
+    user_state.history.append(previous_turn)
+
+    deepseek_mock.chat.return_value = "Конечно помню"
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Как меня зовут?",
+        )
+    )
+
+    assert result == "Конечно помню"
+
+    deepseek_mock.chat.assert_awaited_once_with(
+        system_prompt="SYSTEM PROMPT",
+        user_message="Как меня зовут?",
+        history=(previous_turn,),
+    )
+
+    assert list(user_state.history) == [
+        previous_turn,
+        ConversationTurn(
+            user_message="Как меня зовут?",
+            assistant_message="Конечно помню",
+        ),
+    ]
+
+
+def test_response_engine_keeps_histories_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """История одного пользователя не должна передаваться другому."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = [
+        "Ответ первому",
+        "Ответ второму",
+    ]
+
+    asyncio.run(
+        engine.respond(
+            111,
+            "Сообщение первого",
+        )
+    )
+
+    asyncio.run(
+        engine.respond(
+            222,
+            "Сообщение второго",
+        )
+    )
+
+    calls = deepseek_mock.chat.await_args_list
+
+    assert calls[0].kwargs["history"] == ()
+    assert calls[1].kwargs["history"] == ()
+
+    first_state = engine._user_states.get(111)
+    second_state = engine._user_states.get(222)
+
+    assert list(first_state.history) == [
+        ConversationTurn(
+            user_message="Сообщение первого",
+            assistant_message="Ответ первому",
+        )
+    ]
+
+    assert list(second_state.history) == [
+        ConversationTurn(
+            user_message="Сообщение второго",
+            assistant_message="Ответ второму",
+        )
+    ]
+
+
+def test_response_engine_serializes_requests_from_same_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Запросы одного пользователя должны обрабатываться последовательно."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    async def run_requests() -> tuple[list[str], int]:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        chat_calls = 0
+
+        async def chat_side_effect(
+            system_prompt: str,
+            user_message: str,
+            history: tuple[ConversationTurn, ...],
+        ) -> str:
+            nonlocal chat_calls
+
+            chat_calls += 1
+
+            if user_message == "Первое сообщение":
+                first_started.set()
+                await release_first.wait()
+                return "Первый ответ"
+
+            return "Второй ответ"
+
+        deepseek_mock.chat.side_effect = chat_side_effect
+
+        first_task = asyncio.create_task(
+            engine.respond(
+                TEST_USER_ID,
+                "Первое сообщение",
+            )
+        )
+
+        await first_started.wait()
+
+        second_task = asyncio.create_task(
+            engine.respond(
+                TEST_USER_ID,
+                "Второе сообщение",
+            )
+        )
+
+        # Даём второй coroutine возможность дойти до блокировки.
+        await asyncio.sleep(0)
+
+        calls_before_release = deepseek_mock.chat.await_count
+
+        release_first.set()
+
+        results = list(
+            await asyncio.gather(
+                first_task,
+                second_task,
+            )
+        )
+
+        return results, calls_before_release
+
+    results, calls_before_release = asyncio.run(
+        run_requests(),
+    )
+
+    assert calls_before_release == 1
+
+    assert results == [
+        "Первый ответ",
+        "Второй ответ",
+    ]
+
+    calls = deepseek_mock.chat.await_args_list
+
+    assert calls[0].kwargs["history"] == ()
+
+    assert calls[1].kwargs["history"] == (
+        ConversationTurn(
+            user_message="Первое сообщение",
+            assistant_message="Первый ответ",
+        ),
+    )
+
+    assert list(engine._user_states.get(TEST_USER_ID).history) == [
+        ConversationTurn(
+            user_message="Первое сообщение",
+            assistant_message="Первый ответ",
+        ),
+        ConversationTurn(
+            user_message="Второе сообщение",
+            assistant_message="Второй ответ",
+        ),
+    ]
+
+
+def test_response_engine_resets_only_requested_user() -> None:
+    """Сброс должен очищать состояние только выбранного пользователя."""
+    (
+        engine,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    first = engine._user_states.get(111)
+    second = engine._user_states.get(222)
+
+    first.mood = "sweet"
+    first.reply_count = 3
+    first.history.append(
+        ConversationTurn(
+            user_message="Первое",
+            assistant_message="Ответ первому",
+        )
+    )
+
+    second.mood = "angry"
+    second.reply_count = 2
+    second.history.append(
+        ConversationTurn(
+            user_message="Второе",
+            assistant_message="Ответ второму",
+        )
+    )
+
+    asyncio.run(
+        engine.reset_user_context(111),
+    )
+
+    assert first.mood == "playful"
+    assert first.reply_count == 0
+    assert list(first.history) == []
+
+    assert second.mood == "angry"
+    assert second.reply_count == 2
+    assert list(second.history) == [
+        ConversationTurn(
+            user_message="Второе",
+            assistant_message="Ответ второму",
+        )
+    ]
+
+
+def test_response_engine_reset_waits_for_active_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сброс должен дождаться активного запроса пользователя."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    async def run_test() -> tuple[str, bool]:
+        request_started = asyncio.Event()
+        release_request = asyncio.Event()
+
+        async def chat_side_effect(
+            system_prompt: str,
+            user_message: str,
+            history: tuple[ConversationTurn, ...],
+        ) -> str:
+            request_started.set()
+            await release_request.wait()
+            return "Ответ"
+
+        deepseek_mock.chat.side_effect = chat_side_effect
+
+        response_task = asyncio.create_task(
+            engine.respond(
+                TEST_USER_ID,
+                "Сообщение",
+            )
+        )
+
+        await request_started.wait()
+
+        reset_task = asyncio.create_task(
+            engine.reset_user_context(
+                TEST_USER_ID,
+            )
+        )
+
+        await asyncio.sleep(0)
+
+        reset_finished_while_request_active = reset_task.done()
+
+        release_request.set()
+
+        response = await response_task
+        await reset_task
+
+        return (
+            response,
+            reset_finished_while_request_active,
+        )
+
+    response, reset_finished_while_request_active = asyncio.run(
+        run_test(),
+    )
+
+    assert response == "Ответ"
+    assert reset_finished_while_request_active is False
+
+    user_state = engine._user_states.get(TEST_USER_ID)
+
+    assert user_state.mood == "playful"
+    assert user_state.reply_count == 0
+    assert list(user_state.history) == []

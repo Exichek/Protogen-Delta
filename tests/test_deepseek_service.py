@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import protogen_delta.services.deepseek as deepseek_module
+from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -145,6 +146,78 @@ def test_deepseek_chat_sends_expected_request(
             {
                 "role": "user",
                 "content": "Привет",
+            },
+        ],
+        extra_body={
+            "thinking": {
+                "type": "disabled",
+            }
+        },
+    )
+
+
+def test_deepseek_chat_sends_history_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Обычный запрос должен передавать историю диалога в правильном порядке."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.return_value = _create_response(
+        "Новый ответ",
+    )
+
+    history = [
+        ConversationTurn(
+            user_message="Первое сообщение",
+            assistant_message="Первый ответ",
+        ),
+        ConversationTurn(
+            user_message="Второе сообщение",
+            assistant_message="Второй ответ",
+        ),
+    ]
+
+    result = asyncio.run(
+        service.chat(
+            system_prompt="SYSTEM",
+            user_message="Текущее сообщение",
+            history=history,
+        )
+    )
+
+    assert result == "Новый ответ"
+
+    create_mock.assert_awaited_once_with(
+        model="test-model",
+        messages=[
+            {
+                "role": "system",
+                "content": "SYSTEM",
+            },
+            {
+                "role": "user",
+                "content": "Первое сообщение",
+            },
+            {
+                "role": "assistant",
+                "content": "Первый ответ",
+            },
+            {
+                "role": "user",
+                "content": "Второе сообщение",
+            },
+            {
+                "role": "assistant",
+                "content": "Второй ответ",
+            },
+            {
+                "role": "user",
+                "content": "Текущее сообщение",
             },
         ],
         extra_body={
