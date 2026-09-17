@@ -13,6 +13,7 @@ from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands
+from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.errors import register_error_handler
@@ -82,7 +83,9 @@ async def main() -> None:
 
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
+
         bot_state = BotState()
+        user_states = UserStateStore()
 
         start_data = load_json("start_messages.json")
         start_messages = _require_string_list(
@@ -176,6 +179,7 @@ async def main() -> None:
             mood_classifier=mood_classifier,
             fetish_role_classifier=fetish_role_classifier,
             bot_state=bot_state,
+            user_states=user_states,
             config=response_engine_config,
         )
 

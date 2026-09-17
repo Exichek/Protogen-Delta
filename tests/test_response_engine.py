@@ -8,6 +8,7 @@ import pytest
 
 import protogen_delta.services.response_engine as response_engine_module
 from protogen_delta.core.state import BotState
+from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -24,6 +25,8 @@ from protogen_delta.services.response_engine import (
     ResponseEngine,
     ResponseEngineConfig,
 )
+
+TEST_USER_ID = 123456
 
 
 def _create_engine() -> tuple[
@@ -46,6 +49,7 @@ def _create_engine() -> tuple[
     role_mock.classify.return_value = "unknown"
 
     state = BotState()
+    user_states = UserStateStore()
 
     config = ResponseEngineConfig(
         greetings=["Приветик"],
@@ -82,6 +86,7 @@ def _create_engine() -> tuple[
             role_mock,
         ),
         bot_state=state,
+        user_states=user_states,
         config=config,
     )
 
@@ -107,7 +112,7 @@ def test_response_engine_returns_greeting_without_deepseek() -> None:
     ) = _create_engine()
 
     result = asyncio.run(
-        engine.respond("Привет!"),
+        engine.respond(TEST_USER_ID, "Привет!"),
     )
 
     assert result == "Приветик"
@@ -131,7 +136,7 @@ def test_response_engine_returns_direct_insult_without_chat() -> None:
     insult_mock.classify.return_value = "direct"
 
     result = asyncio.run(
-        engine.respond("Ты идиот"),
+        engine.respond(TEST_USER_ID, "Ты идиот"),
     )
 
     assert result == "Отвали >:("
@@ -164,11 +169,11 @@ def test_response_engine_updates_mood_and_calls_chat(
     deepseek_mock.chat.return_value = "Обычный ответ"
 
     result = asyncio.run(
-        engine.respond("Как дела?"),
+        engine.respond(TEST_USER_ID, "Как дела?"),
     )
 
     assert result == "Обычный ответ"
-    assert state.mood == "sweet"
+    assert engine._user_states.get(TEST_USER_ID).mood == "sweet"
     assert state.reply_count == 1
 
     deepseek_mock.chat.assert_awaited_once_with(
@@ -201,7 +206,7 @@ def test_response_engine_uses_rp_prompt(
     deepseek_mock.chat.return_value = "RP ответ"
 
     result = asyncio.run(
-        engine.respond("*обнял тебя*"),
+        engine.respond(TEST_USER_ID, "*обнял тебя*"),
     )
 
     assert result == "RP ответ"
@@ -243,7 +248,7 @@ def test_response_engine_adds_fetish_context_and_role(
     deepseek_mock.chat.return_value = "RP ответ"
 
     result = asyncio.run(
-        engine.respond("*связал тебя*"),
+        engine.respond(TEST_USER_ID, "*связал тебя*"),
     )
 
     assert result == "RP ответ"
@@ -284,7 +289,7 @@ def test_response_engine_does_not_classify_role_without_fetish(
     ) = _create_engine()
 
     asyncio.run(
-        engine.respond("*погладил тебя*"),
+        engine.respond(TEST_USER_ID, "*погладил тебя*"),
     )
 
     role_mock.classify.assert_not_awaited()
@@ -312,7 +317,7 @@ def test_response_engine_returns_fallback_on_chat_error(
     deepseek_mock.chat.side_effect = RuntimeError("API error")
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "Бля, у тостера что-то сломалось... ≧◡≦"
@@ -341,7 +346,7 @@ def test_response_engine_handles_deepseek_timeout(
     deepseek_mock.chat.side_effect = DeepSeekTimeoutError("DeepSeek не ответил вовремя")
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
@@ -372,7 +377,7 @@ def test_response_engine_handles_deepseek_rate_limit(
     )
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == (
@@ -405,7 +410,7 @@ def test_response_engine_handles_deepseek_connection_error(
     )
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
@@ -434,7 +439,7 @@ def test_response_engine_handles_deepseek_auth_error(
     deepseek_mock.chat.side_effect = DeepSeekAuthError("Ошибка авторизации DeepSeek")
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
@@ -466,7 +471,7 @@ def test_response_engine_handles_deepseek_api_error(
     )
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦"
@@ -495,7 +500,7 @@ def test_response_engine_handles_unknown_deepseek_error(
     deepseek_mock.chat.side_effect = DeepSeekError("Неизвестная ошибка DeepSeek")
 
     result = asyncio.run(
-        engine.respond("Как дела"),
+        engine.respond(TEST_USER_ID, "Как дела"),
     )
 
     assert result == "Бля, у тостера что-то сломалось... ≧◡≦"
@@ -524,7 +529,7 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp(
     deepseek_mock.chat.return_value = "Обычный ответ"
 
     result = asyncio.run(
-        engine.respond("Ты меня связал?"),
+        engine.respond(TEST_USER_ID, "Ты меня связал?"),
     )
 
     assert result == "Обычный ответ"
@@ -559,7 +564,7 @@ def test_response_engine_handles_empty_deepseek_reply(
     deepseek_mock.chat.return_value = ""
 
     result = asyncio.run(
-        engine.respond("Обычное сообщение"),
+        engine.respond(TEST_USER_ID, "Обычное сообщение"),
     )
 
     assert result == "Пустой ответ от DeepSeek"
@@ -588,7 +593,7 @@ def test_response_engine_handles_whitespace_deepseek_reply(
     deepseek_mock.chat.return_value = "   "
 
     result = asyncio.run(
-        engine.respond("Обычное сообщение"),
+        engine.respond(TEST_USER_ID, "Обычное сообщение"),
     )
 
     assert result == "DeepSeek промолчал..."
@@ -634,6 +639,7 @@ def test_response_engine_rejects_empty_system_prompt() -> None:
                 role_mock,
             ),
             bot_state=BotState(),
+            user_states=UserStateStore(),
             config=config,
         )
 
@@ -651,7 +657,7 @@ def test_response_engine_returns_question_insult_reply() -> None:
 
     insult_mock.classify.return_value = "question"
 
-    result = asyncio.run(engine.respond("Ты совсем тупой?"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Ты совсем тупой?"))
 
     assert result == "Сам такой вопрос задаёшь? >///<"
     assert state.reply_count == 1
@@ -673,7 +679,7 @@ def test_response_engine_returns_general_insult_reply() -> None:
 
     insult_mock.classify.return_value = "general"
 
-    result = asyncio.run(engine.respond("Вот же идиотизм"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Вот же идиотизм"))
 
     assert result == "Отвали"
     assert state.reply_count == 1
@@ -705,7 +711,7 @@ def test_response_engine_continues_when_greetings_are_empty(
 
     deepseek_mock.chat.return_value = "Ответ модели"
 
-    result = asyncio.run(engine.respond("Привет!"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Привет!"))
 
     assert result == "Ответ модели"
     assert state.reply_count == 1
@@ -737,12 +743,12 @@ def test_response_engine_keeps_mood_when_classifier_returns_none(
         _,
     ) = _create_engine()
 
-    state.mood = "sweet"
+    engine._user_states.get(TEST_USER_ID).mood = "sweet"
     mood_mock.classify.return_value = None
 
-    asyncio.run(engine.respond("Обычное сообщение"))
+    asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
 
-    assert state.mood == "sweet"
+    assert engine._user_states.get(TEST_USER_ID).mood == "sweet"
 
 
 def test_response_engine_adds_passive_role_to_rp_prompt(
@@ -767,7 +773,7 @@ def test_response_engine_adds_passive_role_to_rp_prompt(
     role_mock.classify.return_value = "passive"
     deepseek_mock.chat.return_value = "RP ответ"
 
-    asyncio.run(engine.respond("*связал тебя*"))
+    asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
 
     call = deepseek_mock.chat.await_args
 
@@ -816,7 +822,7 @@ def test_response_engine_adds_mood_line(
 
     deepseek_mock.chat.return_value = "Ответ"
 
-    result = asyncio.run(engine.respond("Обычное сообщение"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
 
     assert result == "Ответ\n\nMood reply"
 
@@ -855,7 +861,7 @@ def test_response_engine_adds_fetish_tease(
     role_mock.classify.return_value = "unknown"
     deepseek_mock.chat.return_value = "RP ответ"
 
-    result = asyncio.run(engine.respond("*связал тебя*"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
 
     assert result == ("RP ответ\n\n" "Ммм, похоже ты любишь темы: бондаж… ^w^")
 
@@ -891,13 +897,21 @@ def test_response_engine_adds_rp_horny_reply(
         _,
     ) = _create_engine()
 
-    state.reply_count = 1
+    user_state = engine._user_states.get(TEST_USER_ID)
+    user_state.reply_count = 1
+
     deepseek_mock.chat.return_value = "RP ответ"
 
-    result = asyncio.run(engine.respond("*обнял тебя*"))
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "*обнял тебя*",
+        )
+    )
 
     assert result == "Horny reply\n\nRP ответ"
-    assert state.reply_count == 2
+    assert user_state.reply_count == 2
+    assert state.reply_count == 1
 
 
 def test_response_engine_adds_non_rp_horny_reply(
@@ -931,13 +945,21 @@ def test_response_engine_adds_non_rp_horny_reply(
         _,
     ) = _create_engine()
 
-    state.reply_count = 3
+    user_state = engine._user_states.get(TEST_USER_ID)
+    user_state.reply_count = 3
+
     deepseek_mock.chat.return_value = "Ответ"
 
-    result = asyncio.run(engine.respond("Обычное сообщение"))
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Обычное сообщение",
+        )
+    )
 
     assert result == "Ответ\n\nHorny reply"
-    assert state.reply_count == 4
+    assert user_state.reply_count == 4
+    assert state.reply_count == 1
 
 
 def test_response_engine_adds_normal_emote(
@@ -966,7 +988,7 @@ def test_response_engine_adds_normal_emote(
 
     deepseek_mock.chat.return_value = "Ответ"
 
-    result = asyncio.run(engine.respond("Обычное сообщение"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
 
     assert result == "Ответ UwU"
 
@@ -992,7 +1014,7 @@ def test_response_engine_does_not_duplicate_emote(
 
     deepseek_mock.chat.return_value = "Ответ UwU"
 
-    result = asyncio.run(engine.respond("Обычное сообщение"))
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
 
     assert result == "Ответ UwU"
 
@@ -1039,5 +1061,58 @@ def test_response_engine_rejects_empty_rp_prompt() -> None:
                 role_mock,
             ),
             bot_state=BotState(),
+            user_states=UserStateStore(),
             config=config,
         )
+
+
+def test_response_engine_keeps_user_state_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """?????????? ?????? ???????????? ?? ?????? ?????? ?? ???????."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        state,
+        deepseek_mock,
+        _,
+        mood_mock,
+        _,
+    ) = _create_engine()
+
+    mood_mock.classify.side_effect = [
+        "sweet",
+        "angry",
+    ]
+
+    deepseek_mock.chat.return_value = "?????"
+
+    first_result = asyncio.run(
+        engine.respond(
+            111,
+            "????????? ??????? ????????????",
+        )
+    )
+
+    second_result = asyncio.run(
+        engine.respond(
+            222,
+            "????????? ??????? ????????????",
+        )
+    )
+
+    assert first_result == "?????"
+    assert second_result == "?????"
+
+    assert engine._user_states.get(111).mood == "sweet"
+    assert engine._user_states.get(222).mood == "angry"
+
+    assert engine._user_states.get(111).reply_count == 1
+    assert engine._user_states.get(222).reply_count == 1
+
+    assert state.reply_count == 2

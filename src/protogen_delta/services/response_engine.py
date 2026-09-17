@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from protogen_delta.core.state import BotState
+from protogen_delta.core.user_state import UserState, UserStateStore
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -58,6 +59,7 @@ class ResponseEngine:
         mood_classifier: MoodClassifier,
         fetish_role_classifier: FetishRoleClassifier,
         bot_state: BotState,
+        user_states: UserStateStore,
         config: ResponseEngineConfig,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
@@ -72,21 +74,36 @@ class ResponseEngine:
         self._mood_classifier = mood_classifier
         self._fetish_role_classifier = fetish_role_classifier
         self._bot_state = bot_state
+        self._user_states = user_states
         self._config = config
 
-    async def respond(self, user_message: str) -> str:
+    async def respond(
+        self,
+        user_id: int,
+        user_message: str,
+    ) -> str:
         """Сформировать готовый ответ на сообщение пользователя."""
-        greeting_reply = self._handle_greeting(user_message)
+        user_state = self._user_states.get(user_id)
+        greeting_reply = self._handle_greeting(
+            user_message,
+            user_state,
+        )
 
         if greeting_reply is not None:
             return greeting_reply
 
-        insult_reply = await self._handle_insult(user_message)
+        insult_reply = await self._handle_insult(
+            user_message,
+            user_state,
+        )
 
         if insult_reply is not None:
             return insult_reply
 
-        await self._update_mood(user_message)
+        await self._update_mood(
+            user_message,
+            user_state,
+        )
 
         is_rp = self._is_rp(user_message)
 
@@ -158,15 +175,25 @@ class ResponseEngine:
             reply=reply,
             is_rp=is_rp,
             fetishes=fetishes,
+            user_state=user_state,
         )
 
-        self._bot_state.register_reply()
+        self._register_reply(user_state)
 
         return reply
+
+    def _register_reply(
+        self,
+        user_state: UserState,
+    ) -> None:
+        """Учесть ответ глобально и в состоянии пользователя."""
+        user_state.register_reply()
+        self._bot_state.register_reply()
 
     def _handle_greeting(
         self,
         user_message: str,
+        user_state: UserState,
     ) -> str | None:
         """Вернуть быстрый ответ на одиночное приветствие."""
         if not is_greeting(user_message):
@@ -175,13 +202,14 @@ class ResponseEngine:
         if not self._config.greetings:
             return None
 
-        self._bot_state.register_reply()
+        self._register_reply(user_state)
 
         return random.choice(self._config.greetings)
 
     async def _handle_insult(
         self,
         user_message: str,
+        user_state: UserState,
     ) -> str | None:
         """Вернуть специальный ответ на оскорбление."""
         insult_type = await self._insult_classifier.classify(user_message)
@@ -193,7 +221,7 @@ class ResponseEngine:
                 "BLUSH",
             )
 
-            self._bot_state.register_reply()
+            self._register_reply(user_state)
 
             return f"{reply} {emote}".rstrip()
 
@@ -204,12 +232,12 @@ class ResponseEngine:
                 "INSULT",
             )
 
-            self._bot_state.register_reply()
+            self._register_reply(user_state)
 
             return f"{reply} {emote}".rstrip()
 
         if insult_type == "general" and self._config.insults:
-            self._bot_state.register_reply()
+            self._register_reply(user_state)
 
             return random.choice(self._config.insults)
 
@@ -218,6 +246,7 @@ class ResponseEngine:
     async def _update_mood(
         self,
         user_message: str,
+        user_state: UserState,
     ) -> None:
         """Обновить настроение бота, если классификация успешна."""
         mood = await self._mood_classifier.classify(user_message)
@@ -225,14 +254,14 @@ class ResponseEngine:
         if mood is None:
             return
 
-        if mood != self._bot_state.mood:
+        if mood != user_state.mood:
             logger.info(
-                "Настроение сменилось: %s -> %s",
-                self._bot_state.mood,
+                "Настроение пользователя сменилось: %s -> %s",
+                user_state.mood,
                 mood,
             )
 
-            self._bot_state.mood = mood
+            user_state.mood = mood
 
     def _build_prompt(
         self,
@@ -306,10 +335,11 @@ class ResponseEngine:
         reply: str,
         is_rp: bool,
         fetishes: list[str],
+        user_state: UserState,
     ) -> str:
         """Добавить к ответу случайные реплики и эмоуты."""
         mood_lines = self._config.moods.get(
-            self._bot_state.mood,
+            user_state.mood,
             [],
         )
 
@@ -338,7 +368,7 @@ class ResponseEngine:
 
         if (
             is_rp
-            and self._bot_state.reply_count >= 1
+            and user_state.reply_count >= 1
             and self._config.horny_replies
             and random.random() < 0.2
         ):
@@ -351,7 +381,7 @@ class ResponseEngine:
 
         if (
             not is_rp
-            and self._bot_state.reply_count >= 3
+            and user_state.reply_count >= 3
             and self._config.horny_replies
             and random.random() < 0.15
         ):

@@ -205,8 +205,7 @@ def create_admin_router(
             "📊 Статус бота:\n"
             f"• Uptime: {hours:02d}:{minutes:02d}:{seconds:02d}\n"
             f"• Пользователей: {users_repository.count()}\n"
-            f"• Ответов отправлено: {bot_state.reply_count}\n"
-            f"• Настроение: {bot_state.mood}"
+            f"• Ответов отправлено: {bot_state.reply_count}"
         )
 
         await message.answer(reply)

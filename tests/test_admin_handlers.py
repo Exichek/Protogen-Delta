@@ -488,7 +488,6 @@ def test_status_reports_bot_state(
 
     bot_state = BotState(
         reply_count=17,
-        mood="sweet",
         start_time=1000.0,
     )
 
@@ -520,8 +519,7 @@ def test_status_reports_bot_state(
         "📊 Статус бота:\n"
         "• Uptime: 01:01:01\n"
         "• Пользователей: 5\n"
-        "• Ответов отправлено: 17\n"
-        "• Настроение: sweet"
+        "• Ответов отправлено: 17"
     )
 
 

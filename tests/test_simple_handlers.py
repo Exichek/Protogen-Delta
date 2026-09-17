@@ -18,15 +18,24 @@ from protogen_delta.handlers.unknown_command import (
 )
 from protogen_delta.services.response_engine import ResponseEngine
 
+TEST_USER_ID = 123456
+
 
 def _create_message_mock(
     text: str | None = None,
+    user_id: int | None = TEST_USER_ID,
 ) -> tuple[Message, AsyncMock, AsyncMock]:
     """Создать Message с асинхронными методами answer и reply."""
     message_mock = Mock(spec=Message)
 
     message_mock.text = text
-    message_mock.from_user = None
+
+    if user_id is None:
+        message_mock.from_user = None
+    else:
+        user_mock = Mock()
+        user_mock.id = user_id
+        message_mock.from_user = user_mock
 
     answer_mock = AsyncMock()
     reply_mock = AsyncMock()
@@ -104,7 +113,9 @@ def test_text_handler_calls_response_engine() -> None:
         cast(ResponseEngine, engine_mock),
     )
 
-    message, answer_mock, _ = _create_message_mock("Привет, как дела?")
+    message, answer_mock, _ = _create_message_mock(
+        "Привет, как дела?",
+    )
 
     asyncio.run(
         _call_first_handler(
@@ -114,6 +125,7 @@ def test_text_handler_calls_response_engine() -> None:
     )
 
     engine_mock.respond.assert_awaited_once_with(
+        TEST_USER_ID,
         "Привет, как дела?",
     )
     answer_mock.assert_awaited_once_with(
@@ -130,13 +142,20 @@ def test_text_handler_splits_long_response() -> None:
         cast(ResponseEngine, engine_mock),
     )
 
-    message, answer_mock, _ = _create_message_mock("Сообщение")
+    message, answer_mock, _ = _create_message_mock(
+        "Сообщение",
+    )
 
     asyncio.run(
         _call_first_handler(
             router,
             message,
         )
+    )
+
+    engine_mock.respond.assert_awaited_once_with(
+        TEST_USER_ID,
+        "Сообщение",
     )
 
     assert answer_mock.await_count == 2
@@ -150,7 +169,9 @@ def test_text_handler_ignores_commands() -> None:
         cast(ResponseEngine, engine_mock),
     )
 
-    message, answer_mock, _ = _create_message_mock("/something")
+    message, answer_mock, _ = _create_message_mock(
+        "/something",
+    )
 
     asyncio.run(
         _call_first_handler(
@@ -184,9 +205,38 @@ def test_text_handler_ignores_missing_text() -> None:
     answer_mock.assert_not_awaited()
 
 
+def test_text_handler_ignores_message_without_user() -> None:
+    """Текст без Telegram-пользователя не должен попадать в движок."""
+    engine_mock = AsyncMock(spec=ResponseEngine)
+
+    router = create_text_router(
+        cast(ResponseEngine, engine_mock),
+    )
+
+    message, answer_mock, _ = _create_message_mock(
+        "Сообщение",
+        user_id=None,
+    )
+
+    asyncio.run(
+        _call_first_handler(
+            router,
+            message,
+        )
+    )
+
+    engine_mock.respond.assert_not_awaited()
+    answer_mock.assert_not_awaited()
+
+
 def test_text_handler_rate_limits_repeated_messages() -> None:
-    """Повторное сообщение пользователя во время cooldown не должно вызывать движок."""
-    times = iter([100.0, 100.5])
+    """Повторное сообщение во время cooldown не должно вызывать движок."""
+    times = iter(
+        [
+            100.0,
+            100.5,
+        ]
+    )
 
     rate_limiter = UserRateLimiter(
         cooldown_seconds=2.0,
@@ -201,9 +251,10 @@ def test_text_handler_rate_limits_repeated_messages() -> None:
         rate_limiter=rate_limiter,
     )
 
-    message, answer_mock, _ = _create_message_mock("Сообщение")
-    message.from_user = Mock()
-    message.from_user.id = 123456
+    message, answer_mock, _ = _create_message_mock(
+        "Сообщение",
+        user_id=TEST_USER_ID,
+    )
 
     asyncio.run(
         _call_first_handler(
@@ -220,6 +271,7 @@ def test_text_handler_rate_limits_repeated_messages() -> None:
     )
 
     engine_mock.respond.assert_awaited_once_with(
+        TEST_USER_ID,
         "Сообщение",
     )
 
@@ -229,7 +281,12 @@ def test_text_handler_rate_limits_repeated_messages() -> None:
 
 def test_text_handler_rate_limit_is_per_user() -> None:
     """Cooldown одного пользователя не должен блокировать другого."""
-    times = iter([100.0, 100.5])
+    times = iter(
+        [
+            100.0,
+            100.5,
+        ]
+    )
 
     rate_limiter = UserRateLimiter(
         cooldown_seconds=2.0,
@@ -246,15 +303,13 @@ def test_text_handler_rate_limit_is_per_user() -> None:
 
     first_message, first_answer_mock, _ = _create_message_mock(
         "Сообщение первого",
+        user_id=111,
     )
-    first_message.from_user = Mock()
-    first_message.from_user.id = 111
 
     second_message, second_answer_mock, _ = _create_message_mock(
         "Сообщение второго",
+        user_id=222,
     )
-    second_message.from_user = Mock()
-    second_message.from_user.id = 222
 
     asyncio.run(
         _call_first_handler(
@@ -271,8 +326,19 @@ def test_text_handler_rate_limit_is_per_user() -> None:
     )
 
     assert engine_mock.respond.await_count == 2
-    engine_mock.respond.assert_any_await("Сообщение первого")
-    engine_mock.respond.assert_any_await("Сообщение второго")
 
-    first_answer_mock.assert_awaited_once_with("Ответ бота")
-    second_answer_mock.assert_awaited_once_with("Ответ бота")
+    engine_mock.respond.assert_any_await(
+        111,
+        "Сообщение первого",
+    )
+    engine_mock.respond.assert_any_await(
+        222,
+        "Сообщение второго",
+    )
+
+    first_answer_mock.assert_awaited_once_with(
+        "Ответ бота",
+    )
+    second_answer_mock.assert_awaited_once_with(
+        "Ответ бота",
+    )
