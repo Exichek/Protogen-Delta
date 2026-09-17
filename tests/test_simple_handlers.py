@@ -8,8 +8,8 @@ import pytest
 from aiogram import Router
 from aiogram.types import Message
 
-import protogen_delta.handlers.text as text_module
 import protogen_delta.handlers.unknown_command as unknown_command_module
+from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.help import HELP_TEXT, create_help_router
 from protogen_delta.handlers.text import RATE_LIMIT_REPLY, create_text_router
 from protogen_delta.handlers.unknown_command import (
@@ -184,16 +184,13 @@ def test_text_handler_ignores_missing_text() -> None:
     answer_mock.assert_not_awaited()
 
 
-def test_text_handler_rate_limits_repeated_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_text_handler_rate_limits_repeated_messages() -> None:
     """Повторное сообщение пользователя во время cooldown не должно вызывать движок."""
     times = iter([100.0, 100.5])
 
-    monkeypatch.setattr(
-        text_module,
-        "monotonic",
-        lambda: next(times),
+    rate_limiter = UserRateLimiter(
+        cooldown_seconds=2.0,
+        clock=lambda: next(times),
     )
 
     engine_mock = AsyncMock(spec=ResponseEngine)
@@ -201,7 +198,7 @@ def test_text_handler_rate_limits_repeated_messages(
 
     router = create_text_router(
         cast(ResponseEngine, engine_mock),
-        cooldown_seconds=2.0,
+        rate_limiter=rate_limiter,
     )
 
     message, answer_mock, _ = _create_message_mock("Сообщение")
@@ -230,16 +227,13 @@ def test_text_handler_rate_limits_repeated_messages(
     assert answer_mock.await_args_list[1].args == (RATE_LIMIT_REPLY,)
 
 
-def test_text_handler_rate_limit_is_per_user(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_text_handler_rate_limit_is_per_user() -> None:
     """Cooldown одного пользователя не должен блокировать другого."""
     times = iter([100.0, 100.5])
 
-    monkeypatch.setattr(
-        text_module,
-        "monotonic",
-        lambda: next(times),
+    rate_limiter = UserRateLimiter(
+        cooldown_seconds=2.0,
+        clock=lambda: next(times),
     )
 
     engine_mock = AsyncMock(spec=ResponseEngine)
@@ -247,7 +241,7 @@ def test_text_handler_rate_limit_is_per_user(
 
     router = create_text_router(
         cast(ResponseEngine, engine_mock),
-        cooldown_seconds=2.0,
+        rate_limiter=rate_limiter,
     )
 
     first_message, first_answer_mock, _ = _create_message_mock(

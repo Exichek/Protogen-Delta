@@ -10,6 +10,7 @@ from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import load_settings
 from protogen_delta.core.logging_config import setup_logging
+from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands
 from protogen_delta.handlers.admin import create_admin_router
@@ -196,8 +197,16 @@ async def main() -> None:
             admin_ids=settings.admin_ids,
         )
 
+        rate_limiter = UserRateLimiter(
+            cooldown_seconds=settings.rate_limit_seconds,
+            retention_seconds=settings.rate_limit_retention_seconds,
+        )
+
         unknown_command_router = create_unknown_command_router()
-        text_router = create_text_router(response_engine)
+        text_router = create_text_router(
+            response_engine,
+            rate_limiter=rate_limiter,
+        )
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(help_router)
