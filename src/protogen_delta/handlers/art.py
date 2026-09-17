@@ -4,6 +4,7 @@ import logging
 import random
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -70,11 +71,26 @@ def create_art_router(
 
         file_id = random.choice(images)
 
-        await message.answer_photo(
-            file_id,
-            caption="🎨 Лови артик!",
-        )
+        file_id = random.choice(images)
 
-        logger.info("Выдан случайный арт: %s", file_id)
+        try:
+            await message.answer_photo(
+                file_id,
+                caption="🎨 Лови артик!",
+            )
+        except TelegramAPIError:
+            logger.warning(
+                "Не удалось отправить случайный арт: %s",
+                file_id,
+                exc_info=True,
+            )
+
+            await message.answer("Не смог отправить арт 😢 попробуй ещё раз.")
+            return
+
+        logger.info(
+            "Выдан случайный арт: %s",
+            file_id,
+        )
 
     return router

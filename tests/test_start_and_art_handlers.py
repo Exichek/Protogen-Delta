@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 import protogen_delta.handlers.art as art_module
@@ -401,3 +402,49 @@ def test_random_art_sends_selected_image(
         "file-id-1",
         caption="🎨 Лови артик!",
     )
+
+
+def test_random_art_handles_telegram_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка отправки арта должна давать пользователю понятный ответ."""
+    images_mock = Mock(spec=ImagesRepository)
+    images_mock.get_all.return_value = [
+        "file-id-1",
+    ]
+
+    monkeypatch.setattr(
+        art_module.random,
+        "choice",
+        lambda values: values[0],
+    )
+
+    router = create_art_router(
+        images_repository=cast(
+            ImagesRepository,
+            images_mock,
+        ),
+        art_chat_id=-100123,
+    )
+
+    message, _, answer_mock, answer_photo_mock = _create_message_mock()
+
+    answer_photo_mock.side_effect = TelegramAPIError(
+        method=Mock(),
+        message="Telegram internal error",
+    )
+
+    asyncio.run(
+        _call_handler(
+            router,
+            2,
+            message,
+        )
+    )
+
+    answer_photo_mock.assert_awaited_once_with(
+        "file-id-1",
+        caption="🎨 Лови артик!",
+    )
+
+    answer_mock.assert_awaited_once_with("Не смог отправить арт 😢 попробуй ещё раз.")
