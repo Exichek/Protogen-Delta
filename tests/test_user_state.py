@@ -1,5 +1,9 @@
 """Тесты пользовательского runtime-состояния."""
 
+import asyncio
+
+import pytest
+
 from protogen_delta.core.user_state import (
     ConversationTurn,
     UserState,
@@ -18,7 +22,7 @@ def test_user_state_registers_reply() -> None:
 
 
 def test_user_state_store_returns_same_state() -> None:
-    """Один пользователь должен получать тот же объект состояния."""
+    """Один активный пользователь должен получать тот же объект состояния."""
     store = UserStateStore()
 
     first = store.get(123)
@@ -58,14 +62,53 @@ def test_user_state_store_removes_user() -> None:
     assert store.tracked_users_count == 0
 
 
+def test_user_state_store_does_not_remove_locked_user() -> None:
+    """Используемое состояние нельзя удалять из хранилища."""
+
+    async def run_test() -> None:
+        store = UserStateStore()
+        state = store.get(123)
+
+        await state.lock.acquire()
+
+        try:
+            assert store.remove(123) is False
+            assert store.tracked_users_count == 1
+        finally:
+            state.lock.release()
+
+        assert store.remove(123) is True
+        assert store.tracked_users_count == 0
+
+    asyncio.run(run_test())
+
+
 def test_user_state_store_rejects_invalid_history_limit() -> None:
     """Лимит истории должен быть положительным."""
-    try:
+    with pytest.raises(
+        ValueError,
+        match="history_limit должен быть больше нуля",
+    ):
         UserStateStore(history_limit=0)
-    except ValueError as error:
-        assert str(error) == "history_limit должен быть больше нуля"
-    else:
-        raise AssertionError("Ожидался ValueError")
+
+
+@pytest.mark.parametrize(
+    "retention_seconds",
+    [
+        0.0,
+        -1.0,
+        float("nan"),
+        float("inf"),
+    ],
+)
+def test_user_state_store_rejects_invalid_retention(
+    retention_seconds: float,
+) -> None:
+    """Время хранения состояния должно быть конечным и положительным."""
+    with pytest.raises(ValueError):
+        UserStateStore(
+            retention_seconds=retention_seconds,
+        )
 
 
 def test_user_state_stores_conversation_history() -> None:
@@ -174,3 +217,167 @@ def test_user_state_resets_context_without_replacing_lock() -> None:
     assert state.reply_count == 0
     assert list(state.history) == []
     assert state.lock is original_lock
+
+
+def test_user_state_store_removes_expired_state() -> None:
+    """Неактивное состояние должно удаляться после retention."""
+    times = iter(
+        [
+            0.0,
+            11.0,
+        ]
+    )
+
+    store = UserStateStore(
+        retention_seconds=10.0,
+        clock=lambda: next(times),
+    )
+
+    first = store.get(111)
+
+    first.mood = "sweet"
+    first.register_reply()
+    first.history.append(
+        ConversationTurn(
+            user_message="Старое сообщение",
+            assistant_message="Старый ответ",
+        )
+    )
+
+    store.get(222)
+
+    assert store.tracked_users_count == 1
+    assert store.remove(111) is False
+
+
+def test_user_state_store_recreates_expired_user() -> None:
+    """Вернувшийся после retention пользователь должен получить чистое состояние."""
+    times = iter(
+        [
+            0.0,
+            11.0,
+        ]
+    )
+
+    store = UserStateStore(
+        retention_seconds=10.0,
+        clock=lambda: next(times),
+    )
+
+    old_state = store.get(123)
+
+    old_state.mood = "sweet"
+    old_state.register_reply()
+    old_state.history.append(
+        ConversationTurn(
+            user_message="Старое сообщение",
+            assistant_message="Старый ответ",
+        )
+    )
+
+    new_state = store.get(123)
+
+    assert new_state is not old_state
+    assert new_state.mood == "playful"
+    assert new_state.reply_count == 0
+    assert list(new_state.history) == []
+
+
+def test_user_state_store_refreshes_active_user() -> None:
+    """Повторное обращение должно продлевать жизнь состояния."""
+    times = iter(
+        [
+            0.0,
+            5.0,
+            12.0,
+        ]
+    )
+
+    store = UserStateStore(
+        retention_seconds=10.0,
+        clock=lambda: next(times),
+    )
+
+    first = store.get(111)
+    refreshed = store.get(111)
+
+    store.get(222)
+
+    assert refreshed is first
+    assert store.tracked_users_count == 2
+
+
+def test_user_state_store_keeps_locked_expired_state() -> None:
+    """Просроченное, но используемое состояние нельзя удалять."""
+
+    async def run_test() -> None:
+        times = iter(
+            [
+                0.0,
+                11.0,
+            ]
+        )
+
+        store = UserStateStore(
+            retention_seconds=10.0,
+            clock=lambda: next(times),
+        )
+
+        state = store.get(111)
+
+        await state.lock.acquire()
+
+        try:
+            store.get(222)
+
+            assert store.tracked_users_count == 2
+            assert state.lock.locked()
+        finally:
+            state.lock.release()
+
+    asyncio.run(run_test())
+
+
+def test_user_state_store_keeps_state_with_waiting_operation() -> None:
+    """Состояние нельзя удалить, пока операция ожидает пользовательский lock."""
+
+    async def run_test() -> None:
+        now = 0.0
+
+        def clock() -> float:
+            return now
+
+        store = UserStateStore(
+            retention_seconds=10.0,
+            clock=clock,
+        )
+
+        state = store.get(111)
+
+        await state.lock.acquire()
+
+        operation_started = asyncio.Event()
+
+        async def waiting_operation() -> None:
+            async with store.use(111):
+                operation_started.set()
+
+        task = asyncio.create_task(
+            waiting_operation(),
+        )
+
+        await asyncio.sleep(0)
+
+        assert state.active_operations == 1
+
+        now = 20.0
+
+        state.lock.release()
+
+        store.get(222)
+
+        await task
+
+        assert store.get(111) is state
+
+    asyncio.run(run_test())

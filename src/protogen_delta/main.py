@@ -86,7 +86,10 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
 
         bot_state = BotState()
-        user_states = UserStateStore()
+        user_states = UserStateStore(
+            history_limit=settings.conversation_history_limit,
+            retention_seconds=settings.user_state_retention_seconds,
+        )
 
         start_data = load_json("start_messages.json")
         start_messages = _require_string_list(
@@ -111,7 +114,10 @@ async def main() -> None:
 
         question_insult_data = load_json("question_insult_replies.json")
         question_insult_replies = _require_string_list(
-            question_insult_data.get("QUESTION_INSULT_REPLIES", []),
+            question_insult_data.get(
+                "QUESTION_INSULT_REPLIES",
+                [],
+            ),
             "QUESTION_INSULT_REPLIES",
         )
 
@@ -136,11 +142,21 @@ async def main() -> None:
             "fetish_names.json",
         )
 
-        insult_prompt = load_prompt("insult_classification.txt")
-        mood_prompt = load_prompt("mood_classification.txt")
-        fetish_role_prompt = load_prompt("fetish_role_classification.txt")
-        system_prompt = load_prompt("system.txt")
-        rp_prompt = load_prompt("rp.txt")
+        insult_prompt = load_prompt(
+            "insult_classification.txt",
+        )
+        mood_prompt = load_prompt(
+            "mood_classification.txt",
+        )
+        fetish_role_prompt = load_prompt(
+            "fetish_role_classification.txt",
+        )
+        system_prompt = load_prompt(
+            "system.txt",
+        )
+        rp_prompt = load_prompt(
+            "rp.txt",
+        )
 
         deepseek = DeepSeekService(
             api_key=settings.deepseek_api_key,
@@ -212,6 +228,7 @@ async def main() -> None:
         )
 
         unknown_command_router = create_unknown_command_router()
+
         text_router = create_text_router(
             response_engine,
             rate_limiter=rate_limiter,
@@ -225,7 +242,9 @@ async def main() -> None:
         dispatcher.include_router(unknown_command_router)
         dispatcher.include_router(text_router)
 
-        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(
+            drop_pending_updates=True,
+        )
         await set_commands(bot)
 
         logger.info("Бот запущен")

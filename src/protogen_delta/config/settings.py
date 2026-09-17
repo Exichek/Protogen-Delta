@@ -22,6 +22,8 @@ class Settings:
     admin_ids: frozenset[int] = frozenset()
     rate_limit_seconds: float = 2.0
     rate_limit_retention_seconds: float = 300.0
+    conversation_history_limit: int = 8
+    user_state_retention_seconds: float = 86400.0
 
 
 def _parse_admin_ids(value: str) -> frozenset[int]:
@@ -37,6 +39,22 @@ def _parse_admin_ids(value: str) -> frozenset[int]:
         raise ValueError(
             "ADMIN_IDS должен содержать Telegram ID через запятую"
         ) from error
+
+
+def _parse_positive_int(
+    value: str,
+    name: str,
+) -> int:
+    """Преобразовать строку в положительное целое число."""
+    try:
+        result = int(value)
+    except ValueError as error:
+        raise ValueError(f"{name} должен быть целым числом") from error
+
+    if result <= 0:
+        raise ValueError(f"{name} должен быть больше нуля")
+
+    return result
 
 
 def _parse_non_negative_float(
@@ -78,6 +96,7 @@ def load_settings() -> Settings:
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
     art_chat_id_raw = os.getenv("ART_CHAT_ID")
+
     deepseek_model = os.getenv(
         "DEEPSEEK_MODEL",
         "deepseek-flash",
@@ -118,16 +137,27 @@ def load_settings() -> Settings:
             "RATE_LIMIT_RETENTION_SECONDS не может быть меньше " "RATE_LIMIT_SECONDS"
         )
 
+    conversation_history_limit = _parse_positive_int(
+        os.getenv(
+            "CONVERSATION_HISTORY_LIMIT",
+            "8",
+        ),
+        "CONVERSATION_HISTORY_LIMIT",
+    )
+
+    user_state_retention_seconds = _parse_positive_float(
+        os.getenv(
+            "USER_STATE_RETENTION_SECONDS",
+            "86400.0",
+        ),
+        "USER_STATE_RETENTION_SECONDS",
+    )
+
     return Settings(
-        rate_limit_seconds=rate_limit_seconds,
-        rate_limit_retention_seconds=rate_limit_retention_seconds,
         telegram_token=telegram_token,
         deepseek_api_key=deepseek_api_key,
         art_chat_id=art_chat_id,
         deepseek_model=deepseek_model,
-        admin_ids=_parse_admin_ids(
-            os.getenv("ADMIN_IDS", ""),
-        ),
         deepseek_base_url=os.getenv(
             "DEEPSEEK_BASE_URL",
             "https://api.deepseek.com",
@@ -142,4 +172,14 @@ def load_settings() -> Settings:
                 "data",
             )
         ),
+        admin_ids=_parse_admin_ids(
+            os.getenv(
+                "ADMIN_IDS",
+                "",
+            )
+        ),
+        rate_limit_seconds=rate_limit_seconds,
+        rate_limit_retention_seconds=rate_limit_retention_seconds,
+        conversation_history_limit=conversation_history_limit,
+        user_state_retention_seconds=user_state_retention_seconds,
     )

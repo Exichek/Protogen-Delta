@@ -87,9 +87,7 @@ class ResponseEngine:
         user_message: str,
     ) -> str:
         """Сформировать готовый ответ на сообщение пользователя."""
-        user_state = self._user_states.get(user_id)
-
-        async with user_state.lock:
+        async with self._user_states.use(user_id) as user_state:
             return await self._respond_for_user(
                 user_message=user_message,
                 user_state=user_state,
@@ -100,9 +98,7 @@ class ResponseEngine:
         user_id: int,
     ) -> None:
         """Безопасно сбросить контекст конкретного пользователя."""
-        user_state = self._user_states.get(user_id)
-
-        async with user_state.lock:
+        async with self._user_states.use(user_id) as user_state:
             user_state.reset_context()
 
     async def _respond_for_user(

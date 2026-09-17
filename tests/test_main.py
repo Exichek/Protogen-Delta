@@ -66,6 +66,8 @@ def test_main_builds_application_and_starts_polling(
         log_level="INFO",
         data_dir=tmp_path,
         admin_ids=frozenset({123}),
+        conversation_history_limit=12,
+        user_state_retention_seconds=3600.0,
     )
 
     load_settings_mock = Mock(
@@ -91,6 +93,13 @@ def test_main_builds_application_and_starts_polling(
     )
 
     register_error_handler_mock = Mock()
+
+    user_states = Mock(
+        name="user_states",
+    )
+    user_state_store_constructor_mock = Mock(
+        return_value=user_states,
+    )
 
     json_data: dict[str, object] = {
         "start_messages.json": {
@@ -167,13 +176,27 @@ def test_main_builds_application_and_starts_polling(
         return_value=deepseek_mock,
     )
 
-    start_router = Mock(name="start_router")
-    help_router = Mock(name="help_router")
-    art_router = Mock(name="art_router")
-    admin_router = Mock(name="admin_router")
-    reset_router = Mock(name="reset_router")
-    unknown_router = Mock(name="unknown_router")
-    text_router = Mock(name="text_router")
+    start_router = Mock(
+        name="start_router",
+    )
+    help_router = Mock(
+        name="help_router",
+    )
+    art_router = Mock(
+        name="art_router",
+    )
+    admin_router = Mock(
+        name="admin_router",
+    )
+    reset_router = Mock(
+        name="reset_router",
+    )
+    unknown_router = Mock(
+        name="unknown_router",
+    )
+    text_router = Mock(
+        name="text_router",
+    )
 
     create_start_router_mock = Mock(
         return_value=start_router,
@@ -223,6 +246,11 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "register_error_handler",
         register_error_handler_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "UserStateStore",
+        user_state_store_constructor_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -280,12 +308,19 @@ def test_main_builds_application_and_starts_polling(
         set_commands_mock,
     )
 
-    asyncio.run(main_module.main())
+    asyncio.run(
+        main_module.main(),
+    )
 
     load_settings_mock.assert_called_once_with()
 
     setup_logging_mock.assert_called_once_with(
         "INFO",
+    )
+
+    user_state_store_constructor_mock.assert_called_once_with(
+        history_limit=12,
+        retention_seconds=3600.0,
     )
 
     bot_constructor_mock.assert_called_once_with(
