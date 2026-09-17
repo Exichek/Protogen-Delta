@@ -27,14 +27,19 @@ def create_text_router(
         if message.text.startswith("/"):
             return
 
-        if message.from_user is not None:
-            user_id = message.from_user.id
+        if message.from_user is None:
+            return
 
-            if not limiter.allow(user_id):
-                await message.answer(RATE_LIMIT_REPLY)
-                return
+        user_id = message.from_user.id
 
-        reply = await response_engine.respond(message.text)
+        if not limiter.allow(user_id):
+            await message.answer(RATE_LIMIT_REPLY)
+            return
+
+        reply = await response_engine.respond(
+            user_id,
+            message.text,
+        )
 
         for chunk in split_message(reply):
             await message.answer(chunk)
