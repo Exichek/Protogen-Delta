@@ -6,7 +6,11 @@ import re
 from dataclasses import dataclass
 
 from protogen_delta.core.state import BotState
-from protogen_delta.core.user_state import UserState, UserStateStore
+from protogen_delta.core.user_state import (
+    ConversationTurn,
+    UserState,
+    UserStateStore,
+)
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -84,12 +88,30 @@ class ResponseEngine:
     ) -> str:
         """Сформировать готовый ответ на сообщение пользователя."""
         user_state = self._user_states.get(user_id)
+
+        async with user_state.lock:
+            return await self._respond_for_user(
+                user_message=user_message,
+                user_state=user_state,
+            )
+
+    async def _respond_for_user(
+        self,
+        user_message: str,
+        user_state: UserState,
+    ) -> str:
+        """Обработать сообщение внутри блокировки состояния пользователя."""
         greeting_reply = self._handle_greeting(
             user_message,
             user_state,
         )
 
         if greeting_reply is not None:
+            self._remember_turn(
+                user_state=user_state,
+                user_message=user_message,
+                assistant_message=greeting_reply,
+            )
             return greeting_reply
 
         insult_reply = await self._handle_insult(
@@ -98,6 +120,11 @@ class ResponseEngine:
         )
 
         if insult_reply is not None:
+            self._remember_turn(
+                user_state=user_state,
+                user_message=user_message,
+                assistant_message=insult_reply,
+            )
             return insult_reply
 
         await self._update_mood(
@@ -134,6 +161,7 @@ class ResponseEngine:
             reply = await self._deepseek.chat(
                 system_prompt=prompt,
                 user_message=user_message,
+                history=tuple(user_state.history),
             )
         except DeepSeekTimeoutError:
             logger.warning("DeepSeek не ответил за установленное время")
@@ -141,7 +169,10 @@ class ResponseEngine:
 
         except DeepSeekRateLimitError:
             logger.warning("DeepSeek отклонил запрос из-за ограничения частоты")
-            return "Меня сейчас слишком сильно дёргают запросами... дай мне немного времени ≧◡≦"
+            return (
+                "Меня сейчас слишком сильно дёргают запросами... "
+                "дай мне немного времени ≧◡≦"
+            )
 
         except DeepSeekConnectionError:
             logger.warning("Не удалось установить соединение с DeepSeek")
@@ -180,6 +211,12 @@ class ResponseEngine:
 
         self._register_reply(user_state)
 
+        self._remember_turn(
+            user_state=user_state,
+            user_message=user_message,
+            assistant_message=reply,
+        )
+
         return reply
 
     def _register_reply(
@@ -189,6 +226,20 @@ class ResponseEngine:
         """Учесть ответ глобально и в состоянии пользователя."""
         user_state.register_reply()
         self._bot_state.register_reply()
+
+    @staticmethod
+    def _remember_turn(
+        user_state: UserState,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        """Сохранить завершённый ход в истории пользователя."""
+        user_state.history.append(
+            ConversationTurn(
+                user_message=user_message,
+                assistant_message=assistant_message,
+            )
+        )
 
     def _handle_greeting(
         self,
