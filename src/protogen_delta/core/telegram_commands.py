@@ -9,6 +9,7 @@ async def set_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="🚀 Запустить бота"),
         BotCommand(command="randomart", description="🎨 Случайный арт"),
+        BotCommand(command="reset", description="🧹 Очистить память диалога"),
         BotCommand(command="help", description="ℹ️ Помощь"),
     ]
 

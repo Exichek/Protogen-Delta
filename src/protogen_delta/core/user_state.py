@@ -32,6 +32,12 @@ class UserState:
         """Увеличить счётчик ответов этому пользователю."""
         self.reply_count += 1
 
+    def reset_context(self) -> None:
+        """Сбросить контекст диалога пользователя к начальному состоянию."""
+        self.mood = "playful"
+        self.reply_count = 0
+        self.history.clear()
+
 
 class UserStateStore:
     """Хранить runtime-состояние пользователей текущего процесса."""

@@ -95,6 +95,16 @@ class ResponseEngine:
                 user_state=user_state,
             )
 
+    async def reset_user_context(
+        self,
+        user_id: int,
+    ) -> None:
+        """Безопасно сбросить контекст конкретного пользователя."""
+        user_state = self._user_states.get(user_id)
+
+        async with user_state.lock:
+            user_state.reset_context()
+
     async def _respond_for_user(
         self,
         user_message: str,

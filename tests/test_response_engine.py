@@ -1357,3 +1357,130 @@ def test_response_engine_serializes_requests_from_same_user(
             assistant_message="Второй ответ",
         ),
     ]
+
+
+def test_response_engine_resets_only_requested_user() -> None:
+    """Сброс должен очищать состояние только выбранного пользователя."""
+    (
+        engine,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    first = engine._user_states.get(111)
+    second = engine._user_states.get(222)
+
+    first.mood = "sweet"
+    first.reply_count = 3
+    first.history.append(
+        ConversationTurn(
+            user_message="Первое",
+            assistant_message="Ответ первому",
+        )
+    )
+
+    second.mood = "angry"
+    second.reply_count = 2
+    second.history.append(
+        ConversationTurn(
+            user_message="Второе",
+            assistant_message="Ответ второму",
+        )
+    )
+
+    asyncio.run(
+        engine.reset_user_context(111),
+    )
+
+    assert first.mood == "playful"
+    assert first.reply_count == 0
+    assert list(first.history) == []
+
+    assert second.mood == "angry"
+    assert second.reply_count == 2
+    assert list(second.history) == [
+        ConversationTurn(
+            user_message="Второе",
+            assistant_message="Ответ второму",
+        )
+    ]
+
+
+def test_response_engine_reset_waits_for_active_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сброс должен дождаться активного запроса пользователя."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    async def run_test() -> tuple[str, bool]:
+        request_started = asyncio.Event()
+        release_request = asyncio.Event()
+
+        async def chat_side_effect(
+            system_prompt: str,
+            user_message: str,
+            history: tuple[ConversationTurn, ...],
+        ) -> str:
+            request_started.set()
+            await release_request.wait()
+            return "Ответ"
+
+        deepseek_mock.chat.side_effect = chat_side_effect
+
+        response_task = asyncio.create_task(
+            engine.respond(
+                TEST_USER_ID,
+                "Сообщение",
+            )
+        )
+
+        await request_started.wait()
+
+        reset_task = asyncio.create_task(
+            engine.reset_user_context(
+                TEST_USER_ID,
+            )
+        )
+
+        await asyncio.sleep(0)
+
+        reset_finished_while_request_active = reset_task.done()
+
+        release_request.set()
+
+        response = await response_task
+        await reset_task
+
+        return (
+            response,
+            reset_finished_while_request_active,
+        )
+
+    response, reset_finished_while_request_active = asyncio.run(
+        run_test(),
+    )
+
+    assert response == "Ответ"
+    assert reset_finished_while_request_active is False
+
+    user_state = engine._user_states.get(TEST_USER_ID)
+
+    assert user_state.mood == "playful"
+    assert user_state.reply_count == 0
+    assert list(user_state.history) == []

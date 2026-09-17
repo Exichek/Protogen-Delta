@@ -203,11 +203,13 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.command for command in commands] == [
         "start",
         "randomart",
+        "reset",
         "help",
     ]
 
     assert [command.description for command in commands] == [
         "🚀 Запустить бота",
         "🎨 Случайный арт",
+        "🧹 Очистить память диалога",
         "ℹ️ Помощь",
     ]

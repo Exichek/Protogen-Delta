@@ -150,3 +150,27 @@ def test_user_states_have_separate_locks() -> None:
     second = store.get(222)
 
     assert first.lock is not second.lock
+
+
+def test_user_state_resets_context_without_replacing_lock() -> None:
+    """Сброс должен очищать контекст, сохраняя блокировку пользователя."""
+    state = UserState(
+        mood="sweet",
+        reply_count=3,
+    )
+
+    state.history.append(
+        ConversationTurn(
+            user_message="Сообщение",
+            assistant_message="Ответ",
+        )
+    )
+
+    original_lock = state.lock
+
+    state.reset_context()
+
+    assert state.mood == "playful"
+    assert state.reply_count == 0
+    assert list(state.history) == []
+    assert state.lock is original_lock
