@@ -107,32 +107,6 @@ def test_main_builds_application_and_starts_polling(
                 "Я уже работаю",
             ]
         },
-        "personality.json": {
-            "GREETINGS": [
-                "Привет",
-            ],
-            "INSULTS": [
-                "Отвали",
-            ],
-        },
-        "question_insult_replies.json": {
-            "QUESTION_INSULT_REPLIES": [
-                "Question reply",
-            ]
-        },
-        "emotes.json": {
-            "CATEGORIES": {
-                "NORMAL": [
-                    "UwU",
-                ],
-                "BLUSH": [
-                    ">///<",
-                ],
-                "INSULT": [
-                    ">:3",
-                ],
-            }
-        },
         "fetishes_triggers.json": {
             "bondage": [
                 "связал",
