@@ -34,6 +34,7 @@ include = [
     "src/protogen_delta/py.typed",
     "src/protogen_delta/config/data/*.json",
     "src/protogen_delta/config/prompts/*.txt",
+    "src/protogen_delta/config/prompts/personality/*.txt",
 ]
 
 

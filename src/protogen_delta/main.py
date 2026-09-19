@@ -107,10 +107,6 @@ async def main() -> None:
             personality_data.get("INSULTS", []),
             "INSULTS",
         )
-        horny_replies = _require_string_list(
-            personality_data.get("HORNY", []),
-            "HORNY",
-        )
 
         question_insult_data = load_json("question_insult_replies.json")
         question_insult_replies = _require_string_list(
@@ -125,12 +121,6 @@ async def main() -> None:
         emote_categories = _require_string_lists(
             emotes_data.get("CATEGORIES", {}),
             "CATEGORIES",
-        )
-
-        mood_data = load_json("mood.json")
-        moods = _require_string_lists(
-            mood_data.get("MOODS", {}),
-            "MOODS",
         )
 
         fetish_triggers = _require_string_lists(
@@ -151,11 +141,32 @@ async def main() -> None:
         fetish_role_prompt = load_prompt(
             "fetish_role_classification.txt",
         )
-        system_prompt = load_prompt(
-            "system.txt",
+
+        core_prompt = load_prompt(
+            "personality/core.txt",
         )
-        rp_prompt = load_prompt(
-            "rp.txt",
+        protogen_lore_prompt = load_prompt(
+            "personality/protogen_lore.txt",
+        )
+        body_prompt = load_prompt(
+            "personality/body.txt",
+        )
+        rp_modifier_prompt = load_prompt(
+            "personality/rp.txt",
+        )
+
+        system_prompt = "\n\n".join(
+            (
+                core_prompt,
+                protogen_lore_prompt,
+                body_prompt,
+            )
+        )
+        rp_prompt = "\n\n".join(
+            (
+                system_prompt,
+                rp_modifier_prompt,
+            )
         )
 
         deepseek = DeepSeekService(
@@ -181,8 +192,6 @@ async def main() -> None:
             greetings=greetings,
             insults=insults,
             question_insult_replies=question_insult_replies,
-            horny_replies=horny_replies,
-            moods=moods,
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
             emote_categories=emote_categories,

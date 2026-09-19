@@ -20,7 +20,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekService,
     DeepSeekTimeoutError,
 )
-from protogen_delta.services.emotes import EmoteCategories, ends_with_emote, pick_emote
+from protogen_delta.services.emotes import EmoteCategories, pick_emote
 from protogen_delta.services.fetishes import (
     FetishRole,
     FetishRoleClassifier,
@@ -33,7 +33,6 @@ from protogen_delta.services.mood import MoodClassifier
 
 logger = logging.getLogger(__name__)
 
-MoodReplies = dict[str, list[str]]
 FetishNames = dict[str, str]
 
 
@@ -44,8 +43,6 @@ class ResponseEngineConfig:
     greetings: list[str]
     insults: list[str]
     question_insult_replies: list[str]
-    horny_replies: list[str]
-    moods: MoodReplies
     fetish_triggers: FetishTriggers
     fetish_names: FetishNames
     emote_categories: EmoteCategories
@@ -161,6 +158,7 @@ class ResponseEngine:
             is_rp=is_rp,
             fetishes=fetishes,
             role=role,
+            mood=user_state.mood,
         )
 
         try:
@@ -207,13 +205,6 @@ class ResponseEngine:
             reply = "Пустой ответ от DeepSeek"
         elif not reply.strip():
             reply = "DeepSeek промолчал..."
-
-        reply = self._decorate_reply(
-            reply=reply,
-            is_rp=is_rp,
-            fetishes=fetishes,
-            user_state=user_state,
-        )
 
         self._register_reply(user_state)
 
@@ -293,11 +284,6 @@ class ResponseEngine:
 
             return f"{reply} {emote}".rstrip()
 
-        if insult_type == "general" and self._config.insults:
-            self._register_reply(user_state)
-
-            return random.choice(self._config.insults)
-
         return None
 
     async def _update_mood(
@@ -313,7 +299,7 @@ class ResponseEngine:
 
         if mood != user_state.mood:
             logger.info(
-                "Настроение пользователя сменилось: %s -> %s",
+                "Эмоциональная реакция Дельты сменилась: %s -> %s",
                 user_state.mood,
                 mood,
             )
@@ -325,16 +311,32 @@ class ResponseEngine:
         is_rp: bool,
         fetishes: list[str],
         role: FetishRole,
+        mood: str,
     ) -> str:
-        """Выбрать системный промпт и добавить динамический RP-контекст."""
-        if not is_rp:
-            return self._config.system_prompt
+        """Собрать системный промпт и динамический контекст сообщения."""
+        prompt = self._config.rp_prompt if is_rp else self._config.system_prompt
 
-        prompt = self._config.rp_prompt
+        context_lines: list[str] = []
 
-        # Сначала добавляем найденный fetish-контекст,
-        # как это происходило в старой версии бота.
-        if fetishes:
+        if mood == "sweet":
+            context_lines.append(
+                "Сообщение вызывает у Дельты тёплую эмоциональную реакцию. "
+                "Позволь ей естественно проявиться в ответе, "
+                "не превращая каждую тёплую реплику в чрезмерную ласковость."
+            )
+        elif mood == "angry":
+            context_lines.append(
+                "Сообщение вызывает у Дельты раздражение или злость. "
+                "Реакция должна соответствовать реальной силе конфликта "
+                "и не переходить мгновенно к максимальной агрессии."
+            )
+        elif mood == "playful":
+            context_lines.append(
+                "Сообщение задаёт явно игривый или шуточный тон. "
+                "Дельта может естественно поддержать эту манеру общения."
+            )
+
+        if is_rp and fetishes:
             names = [
                 self._config.fetish_names.get(
                     fetish,
@@ -343,120 +345,28 @@ class ResponseEngine:
                 for fetish in fetishes
             ]
 
-            fetish_text = ", ".join(names)
-
-            if role == "active":
-                fetish_text += " (бот актив)"
-            elif role == "passive":
-                fetish_text += " (бот пассив)"
-
-            prompt += (
-                f"\n⚡ Учитывай, что в этом сообщении есть фетиши: "
-                f"{fetish_text}. "
-                "Отыгрывай их в ролевке откровенно и детально."
+            context_lines.append(
+                "В текущем RP-сообщении обнаружен тематический контекст: "
+                f"{', '.join(names)}."
             )
 
-        prompt += (
-            "\nВАЖНО: Никогда не используй слово 'механический' "
-            "для описания тела Дельты. "
-            "Его тело синтетическое и почти как живое. "
-            "Используй 'синтетические мышцы', "
-            "'синтетическая шерсть', "
-            "но чаще просто 'руки', 'ноги', 'лапки', 'пальцы'. "
-            "Не пиши 'механический член' — просто 'член'. "
-            "Не пиши 'снял корпус' — описывай как одежду "
-            "или движение тела. "
-            "Единственное техно-исключение: визор, "
-            "внутренние датчики и вентиляторы охлаждения.\n\n"
-            "Базовая одежда Дельты: без одежды. "
-            "Протогены не носят штанов, "
-            "так что нижняя часть тела открыта. "
-            "Дельта может снимать или менять одежду по ходу ролевки, "
-            "если инициирует пользователь."
+        if is_rp and role == "active":
+            context_lines.append(
+                "По направлению действия пользователь просит Дельту "
+                "совершить действие над пользователем."
+            )
+        elif is_rp and role == "passive":
+            context_lines.append(
+                "По направлению действия пользователь описывает действие, "
+                "которое совершает над Дельтой."
+            )
+
+        if not context_lines:
+            return prompt
+
+        return (
+            prompt + "\n\n## Контекст текущего сообщения\n\n" + "\n".join(context_lines)
         )
-
-        if role == "active":
-            prompt += (
-                "\n⚡ В этой ролевке Дельта должен играть роль " "активного партнёра."
-            )
-
-        elif role == "passive":
-            prompt += (
-                "\n⚡ В этой ролевке Дельта должен играть роль " "пассивного партнёра."
-            )
-
-        return prompt
-
-    def _decorate_reply(
-        self,
-        reply: str,
-        is_rp: bool,
-        fetishes: list[str],
-        user_state: UserState,
-    ) -> str:
-        """Добавить к ответу случайные реплики и эмоуты."""
-        mood_lines = self._config.moods.get(
-            user_state.mood,
-            [],
-        )
-
-        if mood_lines and random.random() < 0.3:
-            reply += "\n\n" + random.choice(mood_lines)
-
-        if is_rp and fetishes and random.random() < 0.3:
-            fetish_names = [
-                self._config.fetish_names.get(
-                    fetish,
-                    fetish,
-                )
-                for fetish in fetishes
-            ]
-
-            names_text = ", ".join(fetish_names)
-
-            tease_lines = [
-                (f"Ммм, похоже ты любишь темы: " f"{names_text}… ^w^"),
-                (f"Ооо, так вот какие у тебя фетиши — " f"{names_text} >///<"),
-                (f"Ты явно возбуждаешься от " f"{names_text}, верно? UwU"),
-                (f"Хех, я обожаю играться с " f"{names_text} ;3"),
-            ]
-
-            reply += "\n\n" + random.choice(tease_lines)
-
-        if (
-            is_rp
-            and user_state.reply_count >= 1
-            and self._config.horny_replies
-            and random.random() < 0.2
-        ):
-            horny_reply = random.choice(self._config.horny_replies)
-
-            if random.choice([True, False]):
-                reply = horny_reply + "\n\n" + reply
-            else:
-                reply += "\n\n" + horny_reply
-
-        if (
-            not is_rp
-            and user_state.reply_count >= 3
-            and self._config.horny_replies
-            and random.random() < 0.15
-        ):
-            reply += "\n\n" + random.choice(self._config.horny_replies)
-
-        if random.random() < 0.25 and not ends_with_emote(
-            reply,
-            self._config.emote_categories,
-        ):
-            emote = pick_emote(
-                self._config.emote_categories,
-                "NORMAL",
-            )
-
-            if emote:
-                reply = f"{reply} {emote}"
-
-        return reply
 
     @staticmethod
     def _is_rp(

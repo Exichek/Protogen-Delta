@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
@@ -114,9 +114,6 @@ def test_main_builds_application_and_starts_polling(
             "INSULTS": [
                 "Отвали",
             ],
-            "HORNY": [
-                "Horny reply",
-            ],
         },
         "question_insult_replies.json": {
             "QUESTION_INSULT_REPLIES": [
@@ -134,13 +131,6 @@ def test_main_builds_application_and_starts_polling(
                 "INSULT": [
                     ">:3",
                 ],
-            }
-        },
-        "mood.json": {
-            "MOODS": {
-                "playful": [
-                    "Playful reply",
-                ]
             }
         },
         "fetishes_triggers.json": {
@@ -161,8 +151,10 @@ def test_main_builds_application_and_starts_polling(
         "insult_classification.txt": "INSULT PROMPT",
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
-        "system.txt": "SYSTEM PROMPT",
-        "rp.txt": "RP PROMPT",
+        "personality/core.txt": "CORE PROMPT",
+        "personality/protogen_lore.txt": "LORE PROMPT",
+        "personality/body.txt": "BODY PROMPT",
+        "personality/rp.txt": "RP PROMPT",
     }
 
     load_prompt_mock = Mock(
@@ -313,6 +305,16 @@ def test_main_builds_application_and_starts_polling(
     )
 
     load_settings_mock.assert_called_once_with()
+
+    assert load_prompt_mock.call_args_list == [
+        call("insult_classification.txt"),
+        call("mood_classification.txt"),
+        call("fetish_role_classification.txt"),
+        call("personality/core.txt"),
+        call("personality/protogen_lore.txt"),
+        call("personality/body.txt"),
+        call("personality/rp.txt"),
+    ]
 
     setup_logging_mock.assert_called_once_with(
         "INFO",
