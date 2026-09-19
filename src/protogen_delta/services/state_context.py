@@ -1,0 +1,86 @@
+"""Преобразование накопленного состояния в естественный контекст для модели."""
+
+from protogen_delta.core.user_state import UserState
+
+
+def build_state_context(
+    user_state: UserState,
+    *,
+    include_intimate: bool = False,
+) -> list[str]:
+    """Собрать значимые описания накопленных эмоций и отношений."""
+    context: list[str] = []
+
+    relationship = user_state.relationship
+    emotions = user_state.emotions
+
+    if relationship.familiarity >= 0.60:
+        context.append(
+            "Дельта уже хорошо знаком с пользователем и может естественно "
+            "опираться на сложившуюся между ними манеру общения."
+        )
+    elif relationship.familiarity >= 0.25:
+        context.append(
+            "Дельта уже некоторое время общается с пользователем и не "
+            "воспринимает его как совершенно незнакомого собеседника."
+        )
+
+    if relationship.trust >= 0.60:
+        context.append("Между Дельтой и пользователем сформировалось заметное доверие.")
+    elif relationship.trust >= 0.25:
+        context.append("Дельта в целом уже склонен доверять пользователю.")
+
+    if relationship.affection >= 0.50:
+        context.append(
+            "Дельта испытывает к пользователю устойчивую тёплую привязанность."
+        )
+    elif relationship.affection >= 0.20:
+        context.append("У Дельты уже сформировалась заметная симпатия к пользователю.")
+
+    if relationship.resentment >= 0.50:
+        context.append(
+            "У Дельты сохраняется сильная накопленная обида на пользователя. "
+            "Не изображай, будто предыдущие конфликты уже полностью забыты, "
+            "если текущий разговор не даёт для этого причины."
+        )
+    elif relationship.resentment >= 0.15:
+        context.append(
+            "После прошлых конфликтов у Дельты всё ещё остался некоторый "
+            "осадок на пользователя. Он может слегка проявляться в реакции, "
+            "но не должен превращать каждую реплику в новый конфликт."
+        )
+
+    if emotions.warmth >= 0.55:
+        context.append("Текущий накопленный эмоциональный фон Дельты заметно тёплый.")
+    elif emotions.warmth >= 0.25:
+        context.append(
+            "В текущем эмоциональном фоне Дельты сохраняется некоторое тепло."
+        )
+
+    if emotions.irritation >= 0.50:
+        context.append(
+            "Дельта всё ещё заметно раздражён предыдущим взаимодействием. "
+            "Раздражение может влиять на тон, но не отменяет смысл текущего "
+            "сообщения пользователя."
+        )
+    elif emotions.irritation >= 0.20:
+        context.append("У Дельты сохраняется лёгкое раздражение от недавнего общения.")
+
+    if emotions.playfulness >= 0.50:
+        context.append("У Дельты сохраняется выраженный игривый настрой.")
+    elif emotions.playfulness >= 0.25:
+        context.append("В настроении Дельты всё ещё остаётся немного игривости.")
+
+    if include_intimate:
+        if emotions.arousal >= 0.50:
+            context.append(
+                "В уже установленном интимном контексте у Дельты сохраняется "
+                "выраженное возбуждение."
+            )
+        elif emotions.arousal >= 0.25:
+            context.append(
+                "В уже установленном интимном контексте у Дельты сохраняется "
+                "остаточное возбуждение."
+            )
+
+    return context

@@ -1160,3 +1160,98 @@ def test_response_engine_adds_horny_context_to_prompt() -> None:
 
     assert prompt.startswith("SYSTEM PROMPT")
     assert "сексуальный или возбуждающий контекст" in prompt
+
+
+def test_response_engine_accumulates_interaction_state() -> None:
+    """Движок должен применять накопительные последствия каждого сообщения."""
+    (
+        engine,
+        _,
+        deepseek_mock,
+        insult_mock,
+        mood_mock,
+        _,
+    ) = _create_engine()
+
+    mood_mock.classify.side_effect = [
+        "sweet",
+        None,
+    ]
+
+    insult_mock.classify.side_effect = [
+        "none",
+        "none",
+    ]
+
+    deepseek_mock.chat.side_effect = [
+        "Первый ответ",
+        "Второй ответ",
+    ]
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Ты милый",
+        )
+    )
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    assert state.emotions.warmth == pytest.approx(0.10)
+    assert state.relationship.affection == pytest.approx(0.03)
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Не знаю",
+        )
+    )
+
+    assert state.emotions.warmth == pytest.approx(0.09)
+    assert state.relationship.affection == pytest.approx(0.03)
+    assert state.relationship.familiarity == pytest.approx(0.02)
+
+
+def test_response_engine_adds_persistent_state_context() -> None:
+    """Накопленное отношение должно передаваться основной модели."""
+    (
+        engine,
+        _,
+        deepseek_mock,
+        insult_mock,
+        mood_mock,
+        _,
+    ) = _create_engine()
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    state.relationship.adjust(
+        affection=0.30,
+        resentment=0.20,
+    )
+    state.emotions.adjust(
+        irritation=0.30,
+    )
+
+    insult_mock.classify.return_value = "none"
+    mood_mock.classify.return_value = "neutral"
+    deepseek_mock.chat.return_value = "Ответ"
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Обычное сообщение",
+        )
+    )
+
+    assert result == "Ответ"
+
+    call = deepseek_mock.chat.await_args
+
+    assert call is not None
+
+    prompt = call.kwargs["system_prompt"]
+
+    assert "сформировалась заметная симпатия" in prompt
+    assert "остался некоторый осадок" in prompt
+    assert "сохраняется лёгкое раздражение" in prompt

@@ -26,7 +26,11 @@ from protogen_delta.services.fetishes import (
     detect_fetishes,
 )
 from protogen_delta.services.insults import InsultClassifier, InsultType
-from protogen_delta.services.mood import MoodClassifier
+from protogen_delta.services.interaction_state import (
+    apply_interaction_effects,
+)
+from protogen_delta.services.mood import MoodClassifier, MoodType
+from protogen_delta.services.state_context import build_state_context
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +105,23 @@ class ResponseEngine:
             user_message,
         )
 
-        await self._update_mood(
+        mood = await self._update_mood(
             user_message,
             user_state,
         )
 
+        apply_interaction_effects(
+            user_state,
+            mood=mood,
+            insult_type=insult_type,
+        )
+
         is_rp = self._is_rp(user_message)
+
+        state_context = build_state_context(
+            user_state,
+            include_intimate=is_rp or mood == "horny",
+        )
 
         fetishes = detect_fetishes(
             user_message,
@@ -131,6 +146,7 @@ class ResponseEngine:
             role=role,
             mood=user_state.mood,
             insult_type=insult_type,
+            state_context=state_context,
         )
 
         try:
@@ -214,12 +230,12 @@ class ResponseEngine:
         self,
         user_message: str,
         user_state: UserState,
-    ) -> None:
-        """Обновить настроение бота, если классификация успешна."""
+    ) -> MoodType | None:
+        """Обновить настроение и вернуть реакцию текущего сообщения."""
         mood = await self._mood_classifier.classify(user_message)
 
         if mood is None:
-            return
+            return None
 
         if mood != user_state.mood:
             logger.info(
@@ -230,6 +246,8 @@ class ResponseEngine:
 
             user_state.mood = mood
 
+        return mood
+
     def _build_prompt(
         self,
         is_rp: bool,
@@ -237,11 +255,13 @@ class ResponseEngine:
         role: FetishRole,
         mood: str,
         insult_type: InsultType,
+        state_context: list[str],
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._config.rp_prompt if is_rp else self._config.system_prompt
 
         context_lines: list[str] = []
+        context_lines.extend(state_context)
 
         if insult_type == "direct":
             context_lines.append(

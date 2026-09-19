@@ -6,6 +6,8 @@ import pytest
 
 from protogen_delta.core.user_state import (
     ConversationTurn,
+    EmotionalState,
+    RelationshipState,
     UserState,
     UserStateStore,
 )
@@ -19,6 +21,124 @@ def test_user_state_registers_reply() -> None:
     state.register_reply()
 
     assert state.reply_count == 2
+
+
+def test_emotional_state_adjusts_values() -> None:
+    """Эмоциональное состояние должно накапливать изменения."""
+    state = EmotionalState()
+
+    state.adjust(
+        warmth=0.3,
+        irritation=0.2,
+        playfulness=0.4,
+        arousal=0.1,
+    )
+
+    assert state.warmth == pytest.approx(0.3)
+    assert state.irritation == pytest.approx(0.2)
+    assert state.playfulness == pytest.approx(0.4)
+    assert state.arousal == pytest.approx(0.1)
+
+
+def test_emotional_state_clamps_values() -> None:
+    """Эмоциональные показатели не должны выходить за диапазон."""
+    state = EmotionalState(
+        warmth=0.9,
+        irritation=0.1,
+    )
+
+    state.adjust(
+        warmth=0.5,
+        irritation=-0.5,
+    )
+
+    assert state.warmth == 1.0
+    assert state.irritation == 0.0
+
+
+def test_relationship_state_adjusts_values() -> None:
+    """Отношение к пользователю должно накапливать изменения."""
+    state = RelationshipState()
+
+    state.adjust(
+        familiarity=0.2,
+        trust=0.3,
+        affection=0.4,
+        resentment=0.1,
+    )
+
+    assert state.familiarity == pytest.approx(0.2)
+    assert state.trust == pytest.approx(0.3)
+    assert state.affection == pytest.approx(0.4)
+    assert state.resentment == pytest.approx(0.1)
+
+
+def test_relationship_state_clamps_values() -> None:
+    """Показатели отношений не должны выходить за диапазон."""
+    state = RelationshipState(
+        trust=0.9,
+        resentment=0.1,
+    )
+
+    state.adjust(
+        trust=0.5,
+        resentment=-0.5,
+    )
+
+    assert state.trust == 1.0
+    assert state.resentment == 0.0
+
+
+def test_user_states_have_isolated_emotions_and_relationships() -> None:
+    """Разные пользователи не должны делить эмоциональное состояние."""
+    first = UserState()
+    second = UserState()
+
+    first.emotions.adjust(
+        warmth=0.5,
+    )
+    first.relationship.adjust(
+        affection=0.4,
+    )
+
+    assert first.emotions.warmth == pytest.approx(0.5)
+    assert first.relationship.affection == pytest.approx(0.4)
+
+    assert second.emotions.warmth == 0.0
+    assert second.relationship.affection == 0.0
+
+
+def test_user_state_reset_preserves_persistent_state() -> None:
+    """Сброс диалога не должен стирать накопленные эмоции и отношения."""
+    state = UserState(
+        mood="angry",
+        reply_count=5,
+    )
+
+    state.emotions.adjust(
+        irritation=0.6,
+    )
+    state.relationship.adjust(
+        familiarity=0.7,
+        resentment=0.4,
+    )
+
+    state.history.append(
+        ConversationTurn(
+            user_message="Сообщение",
+            assistant_message="Ответ",
+        )
+    )
+
+    state.reset_context()
+
+    assert state.mood == "neutral"
+    assert state.reply_count == 0
+    assert list(state.history) == []
+
+    assert state.emotions.irritation == pytest.approx(0.6)
+    assert state.relationship.familiarity == pytest.approx(0.7)
+    assert state.relationship.resentment == pytest.approx(0.4)
 
 
 def test_user_state_store_returns_same_state() -> None:
