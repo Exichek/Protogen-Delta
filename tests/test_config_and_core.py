@@ -135,6 +135,32 @@ def test_load_prompt_returns_stripped_text(
     assert result == "SYSTEM PROMPT"
 
 
+def test_load_prompt_supports_subdirectories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Промпты должны загружаться и из вложенных каталогов."""
+    personality_dir = tmp_path / "personality"
+    personality_dir.mkdir()
+
+    path = personality_dir / "core.txt"
+
+    path.write_text(
+        "\n  CORE PROMPT  \n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        prompt_loader_module,
+        "PROMPTS_DIR",
+        tmp_path,
+    )
+
+    result = load_prompt("personality/core.txt")
+
+    assert result == "CORE PROMPT"
+
+
 def test_load_prompt_raises_for_missing_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

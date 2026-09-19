@@ -21,7 +21,7 @@ class ConversationTurn:
 class UserState:
     """Хранить изменяемое состояние одного пользователя."""
 
-    mood: str = "playful"
+    mood: str = "neutral"
     reply_count: int = 0
     history: deque[ConversationTurn] = field(
         default_factory=deque,
@@ -48,7 +48,7 @@ class UserState:
 
     def reset_context(self) -> None:
         """Сбросить контекст диалога пользователя к начальному состоянию."""
-        self.mood = "playful"
+        self.mood = "neutral"
         self.reply_count = 0
         self.history.clear()
 

@@ -48,7 +48,7 @@ def _create_engine() -> tuple[
 
     deepseek_mock.chat.return_value = "Ответ"
     insult_mock.classify.return_value = "none"
-    mood_mock.classify.return_value = "playful"
+    mood_mock.classify.return_value = "neutral"
     role_mock.classify.return_value = "unknown"
 
     state = BotState()
@@ -58,13 +58,6 @@ def _create_engine() -> tuple[
         greetings=["Приветик"],
         insults=["Отвали"],
         question_insult_replies=["Сам такой вопрос задаёшь?"],
-        horny_replies=["Horny reply"],
-        moods={
-            "playful": [],
-            "sweet": [],
-            "horny": [],
-            "angry": [],
-        },
         fetish_triggers={
             "bondage": ["связал"],
         },
@@ -182,7 +175,7 @@ def test_response_engine_updates_mood_and_calls_chat(
         role_mock,
     ) = _create_engine()
 
-    mood_mock.classify.return_value = "sweet"
+    mood_mock.classify.return_value = "neutral"
     deepseek_mock.chat.return_value = "Обычный ответ"
 
     result = asyncio.run(
@@ -190,7 +183,7 @@ def test_response_engine_updates_mood_and_calls_chat(
     )
 
     assert result == "Обычный ответ"
-    assert engine._user_states.get(TEST_USER_ID).mood == "sweet"
+    assert engine._user_states.get(TEST_USER_ID).mood == "neutral"
     assert state.reply_count == 1
 
     deepseek_mock.chat.assert_awaited_once_with(
@@ -205,7 +198,7 @@ def test_response_engine_updates_mood_and_calls_chat(
 def test_response_engine_uses_rp_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RP-сообщение должно использовать RP-промпт."""
+    """RP-сообщение должно использовать готовый RP-промпт без legacy-правил."""
     monkeypatch.setattr(
         response_engine_module.random,
         "random",
@@ -238,15 +231,15 @@ def test_response_engine_uses_rp_prompt(
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt.startswith("RP PROMPT")
-    assert "ВАЖНО" in prompt
-    assert "без одежды" in prompt
+    assert prompt == "RP PROMPT"
+    assert "Протогены не носят штанов" not in prompt
+    assert "Никогда не используй слово" not in prompt
 
 
 def test_response_engine_adds_fetish_context_and_role(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Фетиш и роль должны добавляться в динамический RP-промпт."""
+    """Тема и направление действия должны добавляться в динамический RP-контекст."""
     monkeypatch.setattr(
         response_engine_module.random,
         "random",
@@ -282,9 +275,10 @@ def test_response_engine_adds_fetish_context_and_role(
 
     prompt = call.kwargs["system_prompt"]
 
-    assert "бондаж (бот актив)" in prompt
-    assert "Отыгрывай их в ролевке" in prompt
-    assert "активного партнёра" in prompt
+    assert prompt.startswith("RP PROMPT")
+    assert "## Контекст текущего сообщения" in prompt
+    assert "бондаж" in prompt
+    assert "совершить действие над пользователем" in prompt
 
 
 def test_response_engine_does_not_classify_role_without_fetish(
@@ -630,8 +624,6 @@ def test_response_engine_rejects_empty_system_prompt() -> None:
         greetings=[],
         insults=[],
         question_insult_replies=[],
-        horny_replies=[],
-        moods={},
         fetish_triggers={},
         fetish_names={},
         emote_categories={},
@@ -685,8 +677,16 @@ def test_response_engine_returns_question_insult_reply() -> None:
     deepseek_mock.chat.assert_not_awaited()
 
 
-def test_response_engine_returns_general_insult_reply() -> None:
-    """Общее оскорбление должно получать локальный ответ."""
+def test_response_engine_passes_general_insult_to_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Оскорбление третьего лица должно обрабатываться в основном диалоге."""
+    monkeypatch.setattr(
+        response_engine_module.random,
+        "random",
+        lambda: 1.0,
+    )
+
     (
         engine,
         state,
@@ -697,14 +697,23 @@ def test_response_engine_returns_general_insult_reply() -> None:
     ) = _create_engine()
 
     insult_mock.classify.return_value = "general"
+    deepseek_mock.chat.return_value = "Контекстный ответ"
 
-    result = asyncio.run(engine.respond(TEST_USER_ID, "Вот же идиотизм"))
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Этот разработчик долбоёб",
+        )
+    )
 
-    assert result == "Отвали"
+    assert result == "Контекстный ответ"
     assert state.reply_count == 1
 
-    mood_mock.classify.assert_not_awaited()
-    deepseek_mock.chat.assert_not_awaited()
+    mood_mock.classify.assert_awaited_once_with(
+        "Этот разработчик долбоёб",
+    )
+
+    deepseek_mock.chat.assert_awaited_once()
 
 
 def test_response_engine_continues_when_greetings_are_empty(
@@ -773,7 +782,7 @@ def test_response_engine_keeps_mood_when_classifier_returns_none(
 def test_response_engine_adds_passive_role_to_rp_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Пассивная роль должна отражаться в динамическом RP-промпте."""
+    """Направление действия пользователя должно отражаться в RP-контексте."""
     monkeypatch.setattr(
         response_engine_module.random,
         "random",
@@ -800,30 +809,18 @@ def test_response_engine_adds_passive_role_to_rp_prompt(
 
     prompt = call.kwargs["system_prompt"]
 
-    assert "бондаж (бот пассив)" in prompt
-    assert "пассивного партнёра" in prompt
+    assert "бондаж" in prompt
+    assert "которое совершает над Дельтой" in prompt
 
 
-def test_response_engine_adds_mood_line(
+def test_response_engine_adds_emotional_context_to_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Реплика текущего настроения должна иногда добавляться к ответу."""
-    random_values = iter(
-        [
-            0.0,
-            1.0,
-        ]
-    )
-
+    """Выраженная реакция должна передаваться модели через промпт."""
     monkeypatch.setattr(
         response_engine_module.random,
         "random",
-        lambda: next(random_values),
-    )
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "choice",
-        lambda values: values[0],
+        lambda: 1.0,
     )
 
     (
@@ -831,169 +828,78 @@ def test_response_engine_adds_mood_line(
         _,
         deepseek_mock,
         _,
-        _,
-        _,
-    ) = _create_engine()
-
-    engine._config.moods["playful"] = [
-        "Mood reply",
-    ]
-
-    deepseek_mock.chat.return_value = "Ответ"
-
-    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
-
-    assert result == "Ответ\n\nMood reply"
-
-
-def test_response_engine_adds_fetish_tease(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """RP с фетишем должен иногда получать дополнительную teasing-реплику."""
-    random_values = iter(
-        [
-            0.0,
-            1.0,
-        ]
-    )
-
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "random",
-        lambda: next(random_values),
-    )
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "choice",
-        lambda values: values[0],
-    )
-
-    (
-        engine,
-        _,
-        deepseek_mock,
-        _,
-        _,
-        role_mock,
-    ) = _create_engine()
-
-    role_mock.classify.return_value = "unknown"
-    deepseek_mock.chat.return_value = "RP ответ"
-
-    result = asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
-
-    assert result == ("RP ответ\n\n" "Ммм, похоже ты любишь темы: бондаж… ^w^")
-
-
-def test_response_engine_adds_rp_horny_reply(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """После первого ответа RP может получить дополнительную horny-реплику."""
-    random_values = iter(
-        [
-            0.0,
-            1.0,
-        ]
-    )
-
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "random",
-        lambda: next(random_values),
-    )
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "choice",
-        lambda values: values[0],
-    )
-
-    (
-        engine,
-        state,
-        deepseek_mock,
-        _,
-        _,
+        mood_mock,
         _,
     ) = _create_engine()
 
-    user_state = engine._user_states.get(TEST_USER_ID)
-    user_state.reply_count = 1
-
-    deepseek_mock.chat.return_value = "RP ответ"
-
-    result = asyncio.run(
-        engine.respond(
-            TEST_USER_ID,
-            "*обнял тебя*",
-        )
-    )
-
-    assert result == "Horny reply\n\nRP ответ"
-    assert user_state.reply_count == 2
-    assert state.reply_count == 1
-
-
-def test_response_engine_adds_non_rp_horny_reply(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Обычный диалог после нескольких ответов может получить horny-реплику."""
-    random_values = iter(
-        [
-            0.0,
-            1.0,
-        ]
-    )
-
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "random",
-        lambda: next(random_values),
-    )
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "choice",
-        lambda values: values[0],
-    )
-
-    (
-        engine,
-        state,
-        deepseek_mock,
-        _,
-        _,
-        _,
-    ) = _create_engine()
-
-    user_state = engine._user_states.get(TEST_USER_ID)
-    user_state.reply_count = 3
-
+    mood_mock.classify.return_value = "sweet"
     deepseek_mock.chat.return_value = "Ответ"
 
     result = asyncio.run(
         engine.respond(
             TEST_USER_ID,
-            "Обычное сообщение",
+            "Ты очень милый",
         )
     )
 
-    assert result == "Ответ\n\nHorny reply"
-    assert user_state.reply_count == 4
-    assert state.reply_count == 1
+    assert result == "Ответ"
+
+    call = deepseek_mock.chat.await_args
+
+    assert call is not None
+
+    prompt = call.kwargs["system_prompt"]
+
+    assert prompt.startswith("SYSTEM PROMPT")
+    assert "## Контекст текущего сообщения" in prompt
+    assert "тёплую эмоциональную реакцию" in prompt
+
+    def test_response_engine_does_not_add_context_for_neutral_message(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Нейтральное сообщение не должно раздувать системный промпт."""
+        monkeypatch.setattr(
+            response_engine_module.random,
+            "random",
+            lambda: 1.0,
+        )
+
+        (
+            engine,
+            _,
+            deepseek_mock,
+            _,
+            mood_mock,
+            _,
+        ) = _create_engine()
+
+        mood_mock.classify.return_value = "neutral"
+        deepseek_mock.chat.return_value = "Ответ"
+
+        result = asyncio.run(
+            engine.respond(
+                TEST_USER_ID,
+                "Как установить Docker?",
+            )
+        )
+
+        assert result == "Ответ"
+
+        deepseek_mock.chat.assert_awaited_once_with(
+            system_prompt="SYSTEM PROMPT",
+            user_message="Как установить Docker?",
+            history=(),
+        )
 
 
-def test_response_engine_adds_normal_emote(
+def test_response_engine_does_not_add_context_for_neutral_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Обычный эмоут должен иногда добавляться в конец ответа."""
+    """Нейтральное сообщение не должно раздувать системный промпт."""
     monkeypatch.setattr(
         response_engine_module.random,
         "random",
-        lambda: 0.0,
-    )
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "choice",
-        lambda values: values[0],
+        lambda: 1.0,
     )
 
     (
@@ -1001,41 +907,27 @@ def test_response_engine_adds_normal_emote(
         _,
         deepseek_mock,
         _,
-        _,
+        mood_mock,
         _,
     ) = _create_engine()
 
+    mood_mock.classify.return_value = "neutral"
     deepseek_mock.chat.return_value = "Ответ"
 
-    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
-
-    assert result == "Ответ UwU"
-
-
-def test_response_engine_does_not_duplicate_emote(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Уже существующий эмоут не должен добавляться повторно."""
-    monkeypatch.setattr(
-        response_engine_module.random,
-        "random",
-        lambda: 0.0,
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Как установить Docker?",
+        )
     )
 
-    (
-        engine,
-        _,
-        deepseek_mock,
-        _,
-        _,
-        _,
-    ) = _create_engine()
+    assert result == "Ответ"
 
-    deepseek_mock.chat.return_value = "Ответ UwU"
-
-    result = asyncio.run(engine.respond(TEST_USER_ID, "Обычное сообщение"))
-
-    assert result == "Ответ UwU"
+    deepseek_mock.chat.assert_awaited_once_with(
+        system_prompt="SYSTEM PROMPT",
+        user_message="Как установить Docker?",
+        history=(),
+    )
 
 
 def test_response_engine_rejects_empty_rp_prompt() -> None:
@@ -1049,8 +941,6 @@ def test_response_engine_rejects_empty_rp_prompt() -> None:
         greetings=[],
         insults=[],
         question_insult_replies=[],
-        horny_replies=[],
-        moods={},
         fetish_triggers={},
         fetish_names={},
         emote_categories={},
@@ -1395,7 +1285,7 @@ def test_response_engine_resets_only_requested_user() -> None:
         engine.reset_user_context(111),
     )
 
-    assert first.mood == "playful"
+    assert first.mood == "neutral"
     assert first.reply_count == 0
     assert list(first.history) == []
 
@@ -1481,6 +1371,6 @@ def test_response_engine_reset_waits_for_active_request(
 
     user_state = engine._user_states.get(TEST_USER_ID)
 
-    assert user_state.mood == "playful"
+    assert user_state.mood == "neutral"
     assert user_state.reply_count == 0
     assert list(user_state.history) == []

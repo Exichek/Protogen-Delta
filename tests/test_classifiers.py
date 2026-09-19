@@ -124,6 +124,7 @@ def test_insult_classifier_rejects_empty_prompt() -> None:
         ("horny", "horny"),
         ("angry", "angry"),
         ("playful", "playful"),
+        ("neutral", "neutral"),
     ],
 )
 def test_mood_classifier_returns_known_moods(
@@ -150,8 +151,8 @@ def test_mood_classifier_returns_known_moods(
     )
 
 
-def test_mood_classifier_uses_playful_for_unknown_result() -> None:
-    """Неизвестное настроение должно заменяться на playful."""
+def test_mood_classifier_uses_neutral_for_unknown_result() -> None:
+    """Неизвестная реакция должна заменяться на neutral."""
     deepseek, mock = _create_deepseek_mock()
     mock.classify.return_value = "unknown"
 
@@ -164,7 +165,7 @@ def test_mood_classifier_uses_playful_for_unknown_result() -> None:
         classifier.classify("Сообщение"),
     )
 
-    assert result == "playful"
+    assert result == "neutral"
 
 
 def test_mood_classifier_handles_deepseek_error() -> None:

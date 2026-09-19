@@ -45,7 +45,7 @@ def test_user_state_store_separates_users() -> None:
     assert first.mood == "sweet"
     assert first.reply_count == 1
 
-    assert second.mood == "playful"
+    assert second.mood == "neutral"
     assert second.reply_count == 0
 
     assert store.tracked_users_count == 2
@@ -213,7 +213,7 @@ def test_user_state_resets_context_without_replacing_lock() -> None:
 
     state.reset_context()
 
-    assert state.mood == "playful"
+    assert state.mood == "neutral"
     assert state.reply_count == 0
     assert list(state.history) == []
     assert state.lock is original_lock
@@ -278,7 +278,7 @@ def test_user_state_store_recreates_expired_user() -> None:
     new_state = store.get(123)
 
     assert new_state is not old_state
-    assert new_state.mood == "playful"
+    assert new_state.mood == "neutral"
     assert new_state.reply_count == 0
     assert list(new_state.history) == []
 
