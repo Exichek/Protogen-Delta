@@ -97,32 +97,6 @@ async def main() -> None:
             "START_MESSAGES",
         )
 
-        personality_data = load_json("personality.json")
-
-        greetings = _require_string_list(
-            personality_data.get("GREETINGS", []),
-            "GREETINGS",
-        )
-        insults = _require_string_list(
-            personality_data.get("INSULTS", []),
-            "INSULTS",
-        )
-
-        question_insult_data = load_json("question_insult_replies.json")
-        question_insult_replies = _require_string_list(
-            question_insult_data.get(
-                "QUESTION_INSULT_REPLIES",
-                [],
-            ),
-            "QUESTION_INSULT_REPLIES",
-        )
-
-        emotes_data = load_json("emotes.json")
-        emote_categories = _require_string_lists(
-            emotes_data.get("CATEGORIES", {}),
-            "CATEGORIES",
-        )
-
         fetish_triggers = _require_string_lists(
             load_json("fetishes_triggers.json"),
             "fetishes_triggers.json",
@@ -189,12 +163,8 @@ async def main() -> None:
         )
 
         response_engine_config = ResponseEngineConfig(
-            greetings=greetings,
-            insults=insults,
-            question_insult_replies=question_insult_replies,
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
-            emote_categories=emote_categories,
             system_prompt=system_prompt,
             rp_prompt=rp_prompt,
         )

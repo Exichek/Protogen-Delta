@@ -1,7 +1,6 @@
 """Сборка и обработка ответов Telegram-бота."""
 
 import logging
-import random
 import re
 from dataclasses import dataclass
 
@@ -20,15 +19,13 @@ from protogen_delta.services.deepseek import (
     DeepSeekService,
     DeepSeekTimeoutError,
 )
-from protogen_delta.services.emotes import EmoteCategories, pick_emote
 from protogen_delta.services.fetishes import (
     FetishRole,
     FetishRoleClassifier,
     FetishTriggers,
     detect_fetishes,
 )
-from protogen_delta.services.greetings import is_greeting
-from protogen_delta.services.insults import InsultClassifier
+from protogen_delta.services.insults import InsultClassifier, InsultType
 from protogen_delta.services.mood import MoodClassifier
 
 logger = logging.getLogger(__name__)
@@ -40,12 +37,8 @@ FetishNames = dict[str, str]
 class ResponseEngineConfig:
     """Статические данные, необходимые движку ответов."""
 
-    greetings: list[str]
-    insults: list[str]
-    question_insult_replies: list[str]
     fetish_triggers: FetishTriggers
     fetish_names: FetishNames
-    emote_categories: EmoteCategories
     system_prompt: str
     rp_prompt: str
 
@@ -104,31 +97,9 @@ class ResponseEngine:
         user_state: UserState,
     ) -> str:
         """Обработать сообщение внутри блокировки состояния пользователя."""
-        greeting_reply = self._handle_greeting(
+        insult_type = await self._insult_classifier.classify(
             user_message,
-            user_state,
         )
-
-        if greeting_reply is not None:
-            self._remember_turn(
-                user_state=user_state,
-                user_message=user_message,
-                assistant_message=greeting_reply,
-            )
-            return greeting_reply
-
-        insult_reply = await self._handle_insult(
-            user_message,
-            user_state,
-        )
-
-        if insult_reply is not None:
-            self._remember_turn(
-                user_state=user_state,
-                user_message=user_message,
-                assistant_message=insult_reply,
-            )
-            return insult_reply
 
         await self._update_mood(
             user_message,
@@ -159,6 +130,7 @@ class ResponseEngine:
             fetishes=fetishes,
             role=role,
             mood=user_state.mood,
+            insult_type=insult_type,
         )
 
         try:
@@ -238,54 +210,6 @@ class ResponseEngine:
             )
         )
 
-    def _handle_greeting(
-        self,
-        user_message: str,
-        user_state: UserState,
-    ) -> str | None:
-        """Вернуть быстрый ответ на одиночное приветствие."""
-        if not is_greeting(user_message):
-            return None
-
-        if not self._config.greetings:
-            return None
-
-        self._register_reply(user_state)
-
-        return random.choice(self._config.greetings)
-
-    async def _handle_insult(
-        self,
-        user_message: str,
-        user_state: UserState,
-    ) -> str | None:
-        """Вернуть специальный ответ на оскорбление."""
-        insult_type = await self._insult_classifier.classify(user_message)
-
-        if insult_type == "question" and self._config.question_insult_replies:
-            reply = random.choice(self._config.question_insult_replies)
-            emote = pick_emote(
-                self._config.emote_categories,
-                "BLUSH",
-            )
-
-            self._register_reply(user_state)
-
-            return f"{reply} {emote}".rstrip()
-
-        if insult_type == "direct" and self._config.insults:
-            reply = random.choice(self._config.insults)
-            emote = pick_emote(
-                self._config.emote_categories,
-                "INSULT",
-            )
-
-            self._register_reply(user_state)
-
-            return f"{reply} {emote}".rstrip()
-
-        return None
-
     async def _update_mood(
         self,
         user_message: str,
@@ -312,17 +236,47 @@ class ResponseEngine:
         fetishes: list[str],
         role: FetishRole,
         mood: str,
+        insult_type: InsultType,
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._config.rp_prompt if is_rp else self._config.system_prompt
 
         context_lines: list[str] = []
 
+        if insult_type == "direct":
+            context_lines.append(
+                "Пользователь явно и всерьёз оскорбляет Дельту напрямую. "
+                "Учитывай это как конфликтный контекст. "
+                "Дельта может ответить раздражённо, жёстко или саркастично "
+                "в соответствии со своей личностью и текущей ситуацией, "
+                "но не должен автоматически переходить к максимальной агрессии."
+            )
+        elif insult_type == "question":
+            context_lines.append(
+                "Пользователь сформулировал явное оскорбление Дельты как вопрос. "
+                "Это конфликтный контекст, а не нейтральный вопрос. "
+                "Отвечай естественно в характере Дельты с учётом истории разговора, "
+                "без заранее заготовленной реакции и автоматической эскалации."
+            )
+        elif insult_type == "general":
+            context_lines.append(
+                "Сообщение содержит агрессию или оскорбление, "
+                "направленное не на Дельту. "
+                "Не воспринимай его как нападение на себя; "
+                "реагируй на смысл и контекст сообщения."
+            )
+
         if mood == "sweet":
             context_lines.append(
                 "Сообщение вызывает у Дельты тёплую эмоциональную реакцию. "
                 "Позволь ей естественно проявиться в ответе, "
                 "не превращая каждую тёплую реплику в чрезмерную ласковость."
+            )
+        elif mood == "horny":
+            context_lines.append(
+                "Сообщение имеет явно сексуальный или возбуждающий контекст. "
+                "Учитывай это естественно и соразмерно уже установленной "
+                "интимности, без обязательной дальнейшей эскалации."
             )
         elif mood == "angry":
             context_lines.append(
