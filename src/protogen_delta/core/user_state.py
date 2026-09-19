@@ -9,12 +9,73 @@ from math import isfinite
 from time import monotonic
 
 
+def _clamp_unit(value: float) -> float:
+    """Ограничить числовое состояние диапазоном от 0.0 до 1.0."""
+    return max(0.0, min(1.0, value))
+
+
 @dataclass(frozen=True, slots=True)
 class ConversationTurn:
     """Хранить один завершённый ход диалога."""
 
     user_message: str
     assistant_message: str
+
+
+@dataclass(slots=True)
+class EmotionalState:
+    """Хранить накопленное эмоциональное состояние Дельты."""
+
+    warmth: float = 0.0
+    irritation: float = 0.0
+    playfulness: float = 0.0
+    arousal: float = 0.0
+
+    def adjust(
+        self,
+        *,
+        warmth: float = 0.0,
+        irritation: float = 0.0,
+        playfulness: float = 0.0,
+        arousal: float = 0.0,
+    ) -> None:
+        """Изменить эмоциональные показатели с ограничением диапазона."""
+        self.warmth = _clamp_unit(self.warmth + warmth)
+        self.irritation = _clamp_unit(self.irritation + irritation)
+        self.playfulness = _clamp_unit(
+            self.playfulness + playfulness,
+        )
+        self.arousal = _clamp_unit(self.arousal + arousal)
+
+
+@dataclass(slots=True)
+class RelationshipState:
+    """Хранить накопленное отношение Дельты к пользователю."""
+
+    familiarity: float = 0.0
+    trust: float = 0.0
+    affection: float = 0.0
+    resentment: float = 0.0
+
+    def adjust(
+        self,
+        *,
+        familiarity: float = 0.0,
+        trust: float = 0.0,
+        affection: float = 0.0,
+        resentment: float = 0.0,
+    ) -> None:
+        """Изменить показатели отношений с ограничением диапазона."""
+        self.familiarity = _clamp_unit(
+            self.familiarity + familiarity,
+        )
+        self.trust = _clamp_unit(self.trust + trust)
+        self.affection = _clamp_unit(
+            self.affection + affection,
+        )
+        self.resentment = _clamp_unit(
+            self.resentment + resentment,
+        )
 
 
 @dataclass(slots=True)
@@ -25,6 +86,12 @@ class UserState:
     reply_count: int = 0
     history: deque[ConversationTurn] = field(
         default_factory=deque,
+    )
+    emotions: EmotionalState = field(
+        default_factory=EmotionalState,
+    )
+    relationship: RelationshipState = field(
+        default_factory=RelationshipState,
     )
     last_accessed_at: float = field(
         default=0.0,
