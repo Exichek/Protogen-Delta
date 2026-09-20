@@ -1,6 +1,7 @@
 """Тесты пользовательского runtime-состояния."""
 
 import asyncio
+import logging
 from unittest.mock import Mock
 
 import pytest
@@ -11,6 +12,7 @@ from protogen_delta.core.user_state import (
     PersistentUserState,
     RelationshipState,
     UserState,
+    UserStatePersistenceError,
     UserStateStore,
 )
 
@@ -610,3 +612,41 @@ def test_user_state_store_reloads_state_after_runtime_eviction() -> None:
     assert persistence.load.call_count == 2
     assert state.emotions.warmth == pytest.approx(0.6)
     assert state.relationship.familiarity == pytest.approx(0.8)
+
+
+def test_user_state_store_does_not_fail_when_persistence_save_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Ошибка сохранения не должна ломать завершённую пользовательскую операцию."""
+    persistence = Mock()
+    persistence.load.return_value = None
+    persistence.save.side_effect = UserStatePersistenceError(
+        "SQLite недоступен",
+    )
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    async def update_state() -> None:
+        async with store.use(123) as state:
+            state.emotions.adjust(
+                warmth=0.4,
+            )
+            state.relationship.adjust(
+                affection=0.3,
+            )
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="protogen_delta.core.user_state",
+    ):
+        asyncio.run(update_state())
+
+    state = store.get(123)
+
+    assert state.emotions.warmth == pytest.approx(0.4)
+    assert state.relationship.affection == pytest.approx(0.3)
+    assert state.active_operations == 0
+    assert state.lock.locked() is False
+    assert "Не удалось сохранить состояние пользователя 123" in caplog.text

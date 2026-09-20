@@ -1,13 +1,16 @@
 """Тесты SQLite-хранилища долгоживущего состояния пользователей."""
 
 import asyncio
+import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from protogen_delta.core.user_state import (
     EmotionalState,
     RelationshipState,
+    UserStatePersistenceError,
     UserStateStore,
 )
 from protogen_delta.repositories.user_state import UserStateRepository
@@ -227,3 +230,67 @@ def test_user_state_store_restores_state_after_restart(
     assert restored.mood == "neutral"
     assert restored.reply_count == 0
     assert list(restored.history) == []
+
+
+def test_user_state_repository_closes_connections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Каждая SQLite-операция должна явно закрывать соединение."""
+    connections: list[MagicMock] = []
+
+    def connect(_path: Path) -> MagicMock:
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.execute.return_value.fetchone.return_value = None
+
+        connections.append(connection)
+
+        return connection
+
+    monkeypatch.setattr(
+        "protogen_delta.repositories.user_state.sqlite3.connect",
+        connect,
+    )
+
+    repository = UserStateRepository(tmp_path)
+
+    repository.load(123)
+    repository.save(
+        123,
+        emotions=EmotionalState(),
+        relationship=RelationshipState(),
+    )
+
+    assert len(connections) == 3
+
+    for connection in connections:
+        connection.__enter__.assert_called_once_with()
+        connection.__exit__.assert_called_once()
+        connection.close.assert_called_once_with()
+
+
+def test_user_state_repository_wraps_save_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка SQLite при сохранении должна превращаться в persistence-ошибку."""
+    repository = UserStateRepository(tmp_path)
+
+    def failing_connect(_path: Path) -> None:
+        raise sqlite3.OperationalError("database unavailable")
+
+    monkeypatch.setattr(
+        "protogen_delta.repositories.user_state.sqlite3.connect",
+        failing_connect,
+    )
+
+    with pytest.raises(
+        UserStatePersistenceError,
+        match="Не удалось сохранить состояние пользователя 123",
+    ):
+        repository.save(
+            123,
+            emotions=EmotionalState(),
+            relationship=RelationshipState(),
+        )
