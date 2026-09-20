@@ -1,12 +1,14 @@
 """Тесты пользовательского runtime-состояния."""
 
 import asyncio
+from unittest.mock import Mock
 
 import pytest
 
 from protogen_delta.core.user_state import (
     ConversationTurn,
     EmotionalState,
+    PersistentUserState,
     RelationshipState,
     UserState,
     UserStateStore,
@@ -501,3 +503,110 @@ def test_user_state_store_keeps_state_with_waiting_operation() -> None:
         assert store.get(111) is state
 
     asyncio.run(run_test())
+
+
+def test_user_state_store_loads_persistent_state() -> None:
+    """Новое runtime-состояние должно восстанавливать сохранённые отношения."""
+    persistence = Mock()
+
+    persistence.load.return_value = PersistentUserState(
+        emotions=EmotionalState(
+            warmth=0.4,
+            irritation=0.2,
+        ),
+        relationship=RelationshipState(
+            familiarity=0.7,
+            affection=0.5,
+            resentment=0.3,
+        ),
+    )
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    state = store.get(123)
+
+    persistence.load.assert_called_once_with(123)
+
+    assert state.emotions.warmth == pytest.approx(0.4)
+    assert state.emotions.irritation == pytest.approx(0.2)
+    assert state.relationship.familiarity == pytest.approx(0.7)
+    assert state.relationship.affection == pytest.approx(0.5)
+    assert state.relationship.resentment == pytest.approx(0.3)
+
+
+def test_user_state_store_loads_persistent_state_only_once() -> None:
+    """Активное состояние не должно перечитываться из базы на каждый get."""
+    persistence = Mock()
+    persistence.load.return_value = None
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    first = store.get(123)
+    second = store.get(123)
+
+    assert first is second
+    persistence.load.assert_called_once_with(123)
+
+
+def test_user_state_store_saves_persistent_state_after_use() -> None:
+    """После операции долгоживущее состояние должно сохраняться."""
+    persistence = Mock()
+    persistence.load.return_value = None
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    async def update_state() -> None:
+        async with store.use(123) as state:
+            state.emotions.adjust(
+                warmth=0.4,
+            )
+            state.relationship.adjust(
+                affection=0.3,
+            )
+
+    asyncio.run(update_state())
+
+    state = store.get(123)
+
+    persistence.save.assert_called_once_with(
+        123,
+        emotions=state.emotions,
+        relationship=state.relationship,
+    )
+
+
+def test_user_state_store_reloads_state_after_runtime_eviction() -> None:
+    """После удаления из памяти состояние должно снова загрузиться из persistence."""
+    persistence = Mock()
+
+    persistence.load.side_effect = [
+        None,
+        PersistentUserState(
+            emotions=EmotionalState(
+                warmth=0.6,
+            ),
+            relationship=RelationshipState(
+                familiarity=0.8,
+            ),
+        ),
+    ]
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    store.get(123)
+
+    assert store.remove(123) is True
+
+    state = store.get(123)
+
+    assert persistence.load.call_count == 2
+    assert state.emotions.warmth == pytest.approx(0.6)
+    assert state.relationship.familiarity == pytest.approx(0.8)

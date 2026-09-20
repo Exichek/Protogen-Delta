@@ -101,6 +101,13 @@ def test_main_builds_application_and_starts_polling(
         return_value=user_states,
     )
 
+    user_state_repository = Mock(
+        name="user_state_repository",
+    )
+    user_state_repository_constructor_mock = Mock(
+        return_value=user_state_repository,
+    )
+
     json_data: dict[str, object] = {
         "start_messages.json": {
             "START_MESSAGES": [
@@ -274,6 +281,12 @@ def test_main_builds_application_and_starts_polling(
         set_commands_mock,
     )
 
+    monkeypatch.setattr(
+        main_module,
+        "UserStateRepository",
+        user_state_repository_constructor_mock,
+    )
+
     asyncio.run(
         main_module.main(),
     )
@@ -294,9 +307,14 @@ def test_main_builds_application_and_starts_polling(
         "INFO",
     )
 
+    user_state_repository_constructor_mock.assert_called_once_with(
+        tmp_path,
+    )
+
     user_state_store_constructor_mock.assert_called_once_with(
         history_limit=12,
         retention_seconds=3600.0,
+        persistence=user_state_repository,
     )
 
     bot_constructor_mock.assert_called_once_with(

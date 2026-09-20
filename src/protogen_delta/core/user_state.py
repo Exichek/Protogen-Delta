@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
 from time import monotonic
+from typing import Protocol
 
 
 def _clamp_unit(value: float) -> float:
@@ -78,6 +79,35 @@ class RelationshipState:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PersistentUserState:
+    """Хранить долгоживущую часть пользовательского состояния."""
+
+    emotions: EmotionalState
+    relationship: RelationshipState
+
+
+class UserStatePersistence(Protocol):
+    """Описывать хранилище долгоживущего пользовательского состояния."""
+
+    def load(
+        self,
+        user_id: int,
+    ) -> PersistentUserState | None:
+        """Загрузить долгоживущее состояние пользователя."""
+        ...
+
+    def save(
+        self,
+        user_id: int,
+        *,
+        emotions: EmotionalState,
+        relationship: RelationshipState,
+    ) -> None:
+        """Сохранить долгоживущее состояние пользователя."""
+        ...
+
+
 @dataclass(slots=True)
 class UserState:
     """Хранить изменяемое состояние одного пользователя."""
@@ -128,6 +158,7 @@ class UserStateStore:
         history_limit: int = 8,
         retention_seconds: float = 86400.0,
         clock: Callable[[], float] | None = None,
+        persistence: UserStatePersistence | None = None,
     ) -> None:
         """Настроить историю и время хранения неактивных состояний."""
         if history_limit <= 0:
@@ -143,6 +174,7 @@ class UserStateStore:
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
         self._clock = clock or monotonic
+        self._persistence = persistence
 
     def get(self, user_id: int) -> UserState:
         """Получить состояние пользователя или создать новое."""
@@ -153,12 +185,28 @@ class UserStateStore:
         state = self._states.get(user_id)
 
         if state is None:
+            persistent_state = None
+
+            if self._persistence is not None:
+                persistent_state = self._persistence.load(user_id)
+
             state = UserState(
                 history=deque(
                     maxlen=self._history_limit,
                 ),
+                emotions=(
+                    persistent_state.emotions
+                    if persistent_state is not None
+                    else EmotionalState()
+                ),
+                relationship=(
+                    persistent_state.relationship
+                    if persistent_state is not None
+                    else RelationshipState()
+                ),
                 last_accessed_at=now,
             )
+
             self._states[user_id] = state
         else:
             state.last_accessed_at = now
@@ -177,7 +225,15 @@ class UserStateStore:
 
         try:
             async with state.lock:
-                yield state
+                try:
+                    yield state
+                finally:
+                    if self._persistence is not None:
+                        self._persistence.save(
+                            user_id,
+                            emotions=state.emotions,
+                            relationship=state.relationship,
+                        )
         finally:
             state.last_accessed_at = self._clock()
             self._states.move_to_end(user_id)

@@ -23,6 +23,7 @@ from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.fetishes import FetishRoleClassifier
@@ -84,11 +85,13 @@ async def main() -> None:
 
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
+        user_state_repository = UserStateRepository(settings.data_dir)
 
         bot_state = BotState()
         user_states = UserStateStore(
             history_limit=settings.conversation_history_limit,
             retention_seconds=settings.user_state_retention_seconds,
+            persistence=user_state_repository,
         )
 
         start_data = load_json("start_messages.json")
