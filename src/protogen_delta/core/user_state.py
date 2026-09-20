@@ -97,14 +97,14 @@ class UserStatePersistenceError(RuntimeError):
 class UserStatePersistence(Protocol):
     """Описывать хранилище долгоживущего пользовательского состояния."""
 
-    def load(
+    async def load(
         self,
         user_id: int,
     ) -> PersistentUserState | None:
         """Загрузить долгоживущее состояние пользователя."""
         ...
 
-    def save(
+    async def save(
         self,
         user_id: int,
         *,
@@ -137,6 +137,11 @@ class UserState:
     )
     active_operations: int = field(
         default=0,
+        repr=False,
+        compare=False,
+    )
+    persistence_loaded: bool = field(
+        default=False,
         repr=False,
         compare=False,
     )
@@ -184,7 +189,7 @@ class UserStateStore:
         self._persistence = persistence
 
     def get(self, user_id: int) -> UserState:
-        """Получить состояние пользователя или создать новое."""
+        """Получить runtime-состояние пользователя или создать новое."""
         now = self._clock()
 
         self._remove_stale_states(now)
@@ -192,26 +197,12 @@ class UserStateStore:
         state = self._states.get(user_id)
 
         if state is None:
-            persistent_state = None
-
-            if self._persistence is not None:
-                persistent_state = self._persistence.load(user_id)
-
             state = UserState(
                 history=deque(
                     maxlen=self._history_limit,
                 ),
-                emotions=(
-                    persistent_state.emotions
-                    if persistent_state is not None
-                    else EmotionalState()
-                ),
-                relationship=(
-                    persistent_state.relationship
-                    if persistent_state is not None
-                    else RelationshipState()
-                ),
                 last_accessed_at=now,
+                persistence_loaded=self._persistence is None,
             )
 
             self._states[user_id] = state
@@ -232,12 +223,17 @@ class UserStateStore:
 
         try:
             async with state.lock:
+                await self._load_persistent_state(
+                    user_id,
+                    state,
+                )
+
                 try:
                     yield state
                 finally:
                     if self._persistence is not None:
                         try:
-                            self._persistence.save(
+                            await self._persistence.save(
                                 user_id,
                                 emotions=state.emotions,
                                 relationship=state.relationship,
@@ -270,6 +266,23 @@ class UserStateStore:
     def tracked_users_count(self) -> int:
         """Вернуть количество состояний в памяти."""
         return len(self._states)
+
+    async def _load_persistent_state(
+        self,
+        user_id: int,
+        state: UserState,
+    ) -> None:
+        """Однократно восстановить долгоживущее состояние под lock пользователя."""
+        if self._persistence is None or state.persistence_loaded:
+            return
+
+        persistent_state = await self._persistence.load(user_id)
+
+        if persistent_state is not None:
+            state.emotions = persistent_state.emotions
+            state.relationship = persistent_state.relationship
+
+        state.persistence_loaded = True
 
     @staticmethod
     def _is_state_in_use(state: UserState) -> bool:

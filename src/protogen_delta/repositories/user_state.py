@@ -1,5 +1,6 @@
 """SQLite-хранилище долгоживущего состояния пользователей."""
 
+import asyncio
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -26,28 +27,58 @@ class UserStateRepository:
 
         self._initialize()
 
-    def load(
+    async def load(
         self,
         user_id: int,
     ) -> PersistentUserState | None:
-        """Загрузить сохранённое состояние пользователя."""
-        with closing(sqlite3.connect(self._path)) as connection, connection:
-            row = connection.execute(
-                """
-                SELECT
-                    warmth,
-                    irritation,
-                    playfulness,
-                    arousal,
-                    familiarity,
-                    trust,
-                    affection,
-                    resentment
-                FROM user_states
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
+        """Загрузить состояние без блокировки event loop."""
+        return await asyncio.to_thread(
+            self._load_sync,
+            user_id,
+        )
+
+    async def save(
+        self,
+        user_id: int,
+        *,
+        emotions: EmotionalState,
+        relationship: RelationshipState,
+    ) -> None:
+        """Сохранить состояние без блокировки event loop."""
+        await asyncio.to_thread(
+            self._save_sync,
+            user_id,
+            emotions=emotions,
+            relationship=relationship,
+        )
+
+    def _load_sync(
+        self,
+        user_id: int,
+    ) -> PersistentUserState | None:
+        """Синхронно загрузить состояние из SQLite."""
+        try:
+            with closing(sqlite3.connect(self._path)) as connection, connection:
+                row = connection.execute(
+                    """
+                    SELECT
+                        warmth,
+                        irritation,
+                        playfulness,
+                        arousal,
+                        familiarity,
+                        trust,
+                        affection,
+                        resentment
+                    FROM user_states
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise UserStatePersistenceError(
+                f"Не удалось загрузить состояние пользователя {user_id}"
+            ) from error
 
         if row is None:
             return None
@@ -78,14 +109,14 @@ class UserStateRepository:
             ),
         )
 
-    def save(
+    def _save_sync(
         self,
         user_id: int,
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
     ) -> None:
-        """Создать или обновить долгоживущее состояние пользователя."""
+        """Синхронно сохранить состояние в SQLite."""
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
                 connection.execute(

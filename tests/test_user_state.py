@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -508,28 +508,35 @@ def test_user_state_store_keeps_state_with_waiting_operation() -> None:
 
 
 def test_user_state_store_loads_persistent_state() -> None:
-    """Новое runtime-состояние должно восстанавливать сохранённые отношения."""
+    """Первое использование должно восстановить сохранённые отношения."""
     persistence = Mock()
 
-    persistence.load.return_value = PersistentUserState(
-        emotions=EmotionalState(
-            warmth=0.4,
-            irritation=0.2,
-        ),
-        relationship=RelationshipState(
-            familiarity=0.7,
-            affection=0.5,
-            resentment=0.3,
-        ),
+    persistence.load = AsyncMock(
+        return_value=PersistentUserState(
+            emotions=EmotionalState(
+                warmth=0.4,
+                irritation=0.2,
+            ),
+            relationship=RelationshipState(
+                familiarity=0.7,
+                affection=0.5,
+                resentment=0.3,
+            ),
+        )
     )
+    persistence.save = AsyncMock()
 
     store = UserStateStore(
         persistence=persistence,
     )
 
-    state = store.get(123)
+    async def load_state() -> UserState:
+        async with store.use(123) as state:
+            return state
 
-    persistence.load.assert_called_once_with(123)
+    state = asyncio.run(load_state())
+
+    persistence.load.assert_awaited_once_with(123)
 
     assert state.emotions.warmth == pytest.approx(0.4)
     assert state.emotions.irritation == pytest.approx(0.2)
@@ -539,31 +546,41 @@ def test_user_state_store_loads_persistent_state() -> None:
 
 
 def test_user_state_store_loads_persistent_state_only_once() -> None:
-    """Активное состояние не должно перечитываться из базы на каждый get."""
+    """Активное состояние не должно перечитываться из базы при каждом use."""
     persistence = Mock()
-    persistence.load.return_value = None
+    persistence.load = AsyncMock(return_value=None)
+    persistence.save = AsyncMock()
 
     store = UserStateStore(
         persistence=persistence,
     )
 
-    first = store.get(123)
-    second = store.get(123)
+    async def use_state_twice() -> tuple[UserState, UserState]:
+        async with store.use(123) as first:
+            first_state = first
+
+        async with store.use(123) as second:
+            second_state = second
+
+        return first_state, second_state
+
+    first, second = asyncio.run(use_state_twice())
 
     assert first is second
-    persistence.load.assert_called_once_with(123)
+    persistence.load.assert_awaited_once_with(123)
 
 
 def test_user_state_store_saves_persistent_state_after_use() -> None:
     """После операции долгоживущее состояние должно сохраняться."""
     persistence = Mock()
-    persistence.load.return_value = None
+    persistence.load = AsyncMock(return_value=None)
+    persistence.save = AsyncMock()
 
     store = UserStateStore(
         persistence=persistence,
     )
 
-    async def update_state() -> None:
+    async def update_state() -> UserState:
         async with store.use(123) as state:
             state.emotions.adjust(
                 warmth=0.4,
@@ -572,11 +589,11 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
                 affection=0.3,
             )
 
-    asyncio.run(update_state())
+            return state
 
-    state = store.get(123)
+    state = asyncio.run(update_state())
 
-    persistence.save.assert_called_once_with(
+    persistence.save.assert_awaited_once_with(
         123,
         emotions=state.emotions,
         relationship=state.relationship,
@@ -587,29 +604,40 @@ def test_user_state_store_reloads_state_after_runtime_eviction() -> None:
     """После удаления из памяти состояние должно снова загрузиться из persistence."""
     persistence = Mock()
 
-    persistence.load.side_effect = [
-        None,
-        PersistentUserState(
-            emotions=EmotionalState(
-                warmth=0.6,
+    persistence.load = AsyncMock(
+        side_effect=[
+            None,
+            PersistentUserState(
+                emotions=EmotionalState(
+                    warmth=0.6,
+                ),
+                relationship=RelationshipState(
+                    familiarity=0.8,
+                ),
             ),
-            relationship=RelationshipState(
-                familiarity=0.8,
-            ),
-        ),
-    ]
+        ]
+    )
+    persistence.save = AsyncMock()
 
     store = UserStateStore(
         persistence=persistence,
     )
 
-    store.get(123)
+    async def first_use() -> None:
+        async with store.use(123):
+            pass
+
+    asyncio.run(first_use())
 
     assert store.remove(123) is True
 
-    state = store.get(123)
+    async def second_use() -> UserState:
+        async with store.use(123) as state:
+            return state
 
-    assert persistence.load.call_count == 2
+    state = asyncio.run(second_use())
+
+    assert persistence.load.await_count == 2
     assert state.emotions.warmth == pytest.approx(0.6)
     assert state.relationship.familiarity == pytest.approx(0.8)
 
@@ -619,9 +647,11 @@ def test_user_state_store_does_not_fail_when_persistence_save_fails(
 ) -> None:
     """Ошибка сохранения не должна ломать завершённую пользовательскую операцию."""
     persistence = Mock()
-    persistence.load.return_value = None
-    persistence.save.side_effect = UserStatePersistenceError(
-        "SQLite недоступен",
+    persistence.load = AsyncMock(return_value=None)
+    persistence.save = AsyncMock(
+        side_effect=UserStatePersistenceError(
+            "SQLite недоступен",
+        )
     )
 
     store = UserStateStore(
@@ -650,3 +680,121 @@ def test_user_state_store_does_not_fail_when_persistence_save_fails(
     assert state.active_operations == 0
     assert state.lock.locked() is False
     assert "Не удалось сохранить состояние пользователя 123" in caplog.text
+
+
+def test_user_state_store_does_not_save_defaults_after_load_failure() -> None:
+    """Сбой загрузки не должен приводить к сохранению пустого состояния."""
+    persistence = Mock()
+
+    persistence.load = AsyncMock(
+        side_effect=[
+            UserStatePersistenceError(
+                "SQLite недоступен",
+            ),
+            PersistentUserState(
+                emotions=EmotionalState(
+                    warmth=0.6,
+                ),
+                relationship=RelationshipState(
+                    trust=0.7,
+                ),
+            ),
+        ]
+    )
+    persistence.save = AsyncMock()
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    async def use_state() -> UserState:
+        async with store.use(123) as state:
+            return state
+
+    with pytest.raises(
+        UserStatePersistenceError,
+        match="SQLite недоступен",
+    ):
+        asyncio.run(use_state())
+
+    persistence.save.assert_not_awaited()
+
+    state = asyncio.run(use_state())
+
+    assert persistence.load.await_count == 2
+    assert state.emotions.warmth == pytest.approx(0.6)
+    assert state.relationship.trust == pytest.approx(0.7)
+
+    persistence.save.assert_awaited_once()
+
+
+def test_user_state_store_serializes_initial_persistence_load() -> None:
+    """Два первых запроса одного пользователя должны выполнить только один load."""
+    persistence = Mock()
+    persistence.load = AsyncMock()
+    persistence.save = AsyncMock()
+
+    store = UserStateStore(
+        persistence=persistence,
+    )
+
+    async def run_test() -> list[UserState]:
+        load_started = asyncio.Event()
+        release_load = asyncio.Event()
+
+        async def load_state(
+            user_id: int,
+        ) -> PersistentUserState:
+            assert user_id == 123
+
+            load_started.set()
+            await release_load.wait()
+
+            return PersistentUserState(
+                emotions=EmotionalState(
+                    warmth=0.5,
+                ),
+                relationship=RelationshipState(
+                    familiarity=0.6,
+                ),
+            )
+
+        persistence.load.side_effect = load_state
+
+        states: list[UserState] = []
+
+        async def use_state() -> None:
+            async with store.use(123) as state:
+                states.append(state)
+
+        first_task = asyncio.create_task(
+            use_state(),
+        )
+
+        await load_started.wait()
+
+        second_task = asyncio.create_task(
+            use_state(),
+        )
+
+        await asyncio.sleep(0)
+
+        assert persistence.load.await_count == 1
+
+        release_load.set()
+
+        await asyncio.gather(
+            first_task,
+            second_task,
+        )
+
+        return states
+
+    states = asyncio.run(run_test())
+
+    persistence.load.assert_awaited_once_with(123)
+
+    assert len(states) == 2
+    assert states[0] is states[1]
+    assert states[0].emotions.warmth == pytest.approx(0.5)
+    assert states[0].relationship.familiarity == pytest.approx(0.6)
