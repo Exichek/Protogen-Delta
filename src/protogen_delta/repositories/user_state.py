@@ -1,12 +1,14 @@
 """SQLite-хранилище долгоживущего состояния пользователей."""
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from protogen_delta.core.user_state import (
     EmotionalState,
     PersistentUserState,
     RelationshipState,
+    UserStatePersistenceError,
 )
 
 
@@ -29,7 +31,7 @@ class UserStateRepository:
         user_id: int,
     ) -> PersistentUserState | None:
         """Загрузить сохранённое состояние пользователя."""
-        with sqlite3.connect(self._path) as connection:
+        with closing(sqlite3.connect(self._path)) as connection, connection:
             row = connection.execute(
                 """
                 SELECT
@@ -84,47 +86,52 @@ class UserStateRepository:
         relationship: RelationshipState,
     ) -> None:
         """Создать или обновить долгоживущее состояние пользователя."""
-        with sqlite3.connect(self._path) as connection:
-            connection.execute(
-                """
-                INSERT INTO user_states (
-                    user_id,
-                    warmth,
-                    irritation,
-                    playfulness,
-                    arousal,
-                    familiarity,
-                    trust,
-                    affection,
-                    resentment
+        try:
+            with closing(sqlite3.connect(self._path)) as connection, connection:
+                connection.execute(
+                    """
+                    INSERT INTO user_states (
+                        user_id,
+                        warmth,
+                        irritation,
+                        playfulness,
+                        arousal,
+                        familiarity,
+                        trust,
+                        affection,
+                        resentment
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        warmth = excluded.warmth,
+                        irritation = excluded.irritation,
+                        playfulness = excluded.playfulness,
+                        arousal = excluded.arousal,
+                        familiarity = excluded.familiarity,
+                        trust = excluded.trust,
+                        affection = excluded.affection,
+                        resentment = excluded.resentment
+                    """,
+                    (
+                        user_id,
+                        emotions.warmth,
+                        emotions.irritation,
+                        emotions.playfulness,
+                        emotions.arousal,
+                        relationship.familiarity,
+                        relationship.trust,
+                        relationship.affection,
+                        relationship.resentment,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    warmth = excluded.warmth,
-                    irritation = excluded.irritation,
-                    playfulness = excluded.playfulness,
-                    arousal = excluded.arousal,
-                    familiarity = excluded.familiarity,
-                    trust = excluded.trust,
-                    affection = excluded.affection,
-                    resentment = excluded.resentment
-                """,
-                (
-                    user_id,
-                    emotions.warmth,
-                    emotions.irritation,
-                    emotions.playfulness,
-                    emotions.arousal,
-                    relationship.familiarity,
-                    relationship.trust,
-                    relationship.affection,
-                    relationship.resentment,
-                ),
-            )
+        except sqlite3.Error as error:
+            raise UserStatePersistenceError(
+                f"Не удалось сохранить состояние пользователя {user_id}"
+            ) from error
 
     def _initialize(self) -> None:
         """Создать таблицу состояний при первом запуске."""
-        with sqlite3.connect(self._path) as connection:
+        with closing(sqlite3.connect(self._path)) as connection, connection:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS user_states (
                     user_id INTEGER PRIMARY KEY,

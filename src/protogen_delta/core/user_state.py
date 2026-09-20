@@ -1,6 +1,7 @@
 """Состояние отдельных пользователей во время работы приложения."""
 
 import asyncio
+import logging
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -8,6 +9,8 @@ from dataclasses import dataclass, field
 from math import isfinite
 from time import monotonic
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 def _clamp_unit(value: float) -> float:
@@ -85,6 +88,10 @@ class PersistentUserState:
 
     emotions: EmotionalState
     relationship: RelationshipState
+
+
+class UserStatePersistenceError(RuntimeError):
+    """Ошибка чтения или сохранения долгоживущего состояния."""
 
 
 class UserStatePersistence(Protocol):
@@ -229,11 +236,17 @@ class UserStateStore:
                     yield state
                 finally:
                     if self._persistence is not None:
-                        self._persistence.save(
-                            user_id,
-                            emotions=state.emotions,
-                            relationship=state.relationship,
-                        )
+                        try:
+                            self._persistence.save(
+                                user_id,
+                                emotions=state.emotions,
+                                relationship=state.relationship,
+                            )
+                        except UserStatePersistenceError:
+                            logger.exception(
+                                "Не удалось сохранить состояние пользователя %s",
+                                user_id,
+                            )
         finally:
             state.last_accessed_at = self._clock()
             self._states.move_to_end(user_id)
