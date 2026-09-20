@@ -1207,7 +1207,7 @@ def test_response_engine_accumulates_interaction_state() -> None:
         )
     )
 
-    assert state.emotions.warmth == pytest.approx(0.09)
+    assert state.emotions.warmth == pytest.approx(0.10)
     assert state.relationship.affection == pytest.approx(0.03)
     assert state.relationship.familiarity == pytest.approx(0.02)
 

@@ -7,10 +7,16 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
-from time import monotonic
+from time import monotonic, time
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
+
+_SECONDS_PER_HOUR = 3600.0
+_WARMTH_DECAY_PER_HOUR = 0.01
+_IRRITATION_DECAY_PER_HOUR = 0.02
+_PLAYFULNESS_DECAY_PER_HOUR = 0.02
+_AROUSAL_DECAY_PER_HOUR = 0.02
 
 
 def _clamp_unit(value: float) -> float:
@@ -51,6 +57,23 @@ class EmotionalState:
         )
         self.arousal = _clamp_unit(self.arousal + arousal)
 
+    def decay(
+        self,
+        elapsed_seconds: float,
+    ) -> None:
+        """Ослабить краткосрочные эмоции пропорционально прошедшему времени."""
+        if elapsed_seconds <= 0.0:
+            return
+
+        elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
+
+        self.adjust(
+            warmth=-_WARMTH_DECAY_PER_HOUR * elapsed_hours,
+            irritation=-_IRRITATION_DECAY_PER_HOUR * elapsed_hours,
+            playfulness=-_PLAYFULNESS_DECAY_PER_HOUR * elapsed_hours,
+            arousal=-_AROUSAL_DECAY_PER_HOUR * elapsed_hours,
+        )
+
 
 @dataclass(slots=True)
 class RelationshipState:
@@ -88,6 +111,7 @@ class PersistentUserState:
 
     emotions: EmotionalState
     relationship: RelationshipState
+    emotions_updated_at: float
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -110,6 +134,7 @@ class UserStatePersistence(Protocol):
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
+        emotions_updated_at: float,
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -129,6 +154,11 @@ class UserState:
     )
     relationship: RelationshipState = field(
         default_factory=RelationshipState,
+    )
+    emotions_updated_at: float = field(
+        default=0.0,
+        repr=False,
+        compare=False,
     )
     last_accessed_at: float = field(
         default=0.0,
@@ -170,6 +200,7 @@ class UserStateStore:
         history_limit: int = 8,
         retention_seconds: float = 86400.0,
         clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
         persistence: UserStatePersistence | None = None,
     ) -> None:
         """Настроить историю и время хранения неактивных состояний."""
@@ -186,6 +217,7 @@ class UserStateStore:
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
         self._clock = clock or monotonic
+        self._wall_clock = wall_clock or time
         self._persistence = persistence
 
     def get(self, user_id: int) -> UserState:
@@ -200,6 +232,9 @@ class UserStateStore:
             state = UserState(
                 history=deque(
                     maxlen=self._history_limit,
+                ),
+                emotions_updated_at=(
+                    self._wall_clock() if self._persistence is None else 0.0
                 ),
                 last_accessed_at=now,
                 persistence_loaded=self._persistence is None,
@@ -228,6 +263,8 @@ class UserStateStore:
                     state,
                 )
 
+                self._decay_emotions(state)
+
                 try:
                     yield state
                 finally:
@@ -237,6 +274,7 @@ class UserStateStore:
                                 user_id,
                                 emotions=state.emotions,
                                 relationship=state.relationship,
+                                emotions_updated_at=state.emotions_updated_at,
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -281,8 +319,25 @@ class UserStateStore:
         if persistent_state is not None:
             state.emotions = persistent_state.emotions
             state.relationship = persistent_state.relationship
+            state.emotions_updated_at = persistent_state.emotions_updated_at
+        else:
+            state.emotions_updated_at = self._wall_clock()
 
         state.persistence_loaded = True
+
+    def _decay_emotions(
+        self,
+        state: UserState,
+    ) -> None:
+        """Ослабить эмоции согласно реально прошедшему времени."""
+        now = self._wall_clock()
+        elapsed_seconds = now - state.emotions_updated_at
+
+        if elapsed_seconds <= 0.0:
+            return
+
+        state.emotions.decay(elapsed_seconds)
+        state.emotions_updated_at = now
 
     @staticmethod
     def _is_state_in_use(state: UserState) -> bool:

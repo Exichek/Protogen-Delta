@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,9 @@ from protogen_delta.core.user_state import (
     UserStateStore,
 )
 from protogen_delta.repositories.user_state import UserStateRepository
+
+INITIAL_TIMESTAMP = 1000.0
+LATER_TIMESTAMP = 19000.0
 
 
 def test_user_state_repository_creates_database(
@@ -43,7 +47,7 @@ def test_user_state_repository_returns_none_for_unknown_user(
 def test_user_state_repository_saves_and_loads_state(
     tmp_path: Path,
 ) -> None:
-    """Сохранённые эмоции и отношения должны восстанавливаться."""
+    """Сохранённые эмоции, отношения и timestamp должны восстанавливаться."""
     repository = UserStateRepository(tmp_path)
 
     async def run_test() -> None:
@@ -61,6 +65,7 @@ def test_user_state_repository_saves_and_loads_state(
                 affection=0.70,
                 resentment=0.20,
             ),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
         state = await repository.load(123)
@@ -77,13 +82,17 @@ def test_user_state_repository_saves_and_loads_state(
         assert state.relationship.affection == pytest.approx(0.70)
         assert state.relationship.resentment == pytest.approx(0.20)
 
+        assert state.emotions_updated_at == pytest.approx(
+            INITIAL_TIMESTAMP,
+        )
+
     asyncio.run(run_test())
 
 
 def test_user_state_repository_updates_existing_user(
     tmp_path: Path,
 ) -> None:
-    """Повторное сохранение должно обновлять существующую запись."""
+    """Повторное сохранение должно обновлять состояние и timestamp."""
     repository = UserStateRepository(tmp_path)
 
     async def run_test() -> None:
@@ -95,6 +104,7 @@ def test_user_state_repository_updates_existing_user(
             relationship=RelationshipState(
                 familiarity=0.20,
             ),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
         await repository.save(
@@ -107,6 +117,7 @@ def test_user_state_repository_updates_existing_user(
                 familiarity=0.90,
                 affection=0.60,
             ),
+            emotions_updated_at=LATER_TIMESTAMP,
         )
 
         state = await repository.load(123)
@@ -118,6 +129,10 @@ def test_user_state_repository_updates_existing_user(
 
         assert state.relationship.familiarity == pytest.approx(0.90)
         assert state.relationship.affection == pytest.approx(0.60)
+
+        assert state.emotions_updated_at == pytest.approx(
+            LATER_TIMESTAMP,
+        )
 
     asyncio.run(run_test())
 
@@ -137,6 +152,7 @@ def test_user_state_repository_keeps_users_separate(
             relationship=RelationshipState(
                 affection=0.60,
             ),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
         await repository.save(
@@ -147,6 +163,7 @@ def test_user_state_repository_keeps_users_separate(
             relationship=RelationshipState(
                 resentment=0.50,
             ),
+            emotions_updated_at=LATER_TIMESTAMP,
         )
 
         first = await repository.load(111)
@@ -159,11 +176,17 @@ def test_user_state_repository_keeps_users_separate(
         assert first.emotions.irritation == 0.0
         assert first.relationship.affection == pytest.approx(0.60)
         assert first.relationship.resentment == 0.0
+        assert first.emotions_updated_at == pytest.approx(
+            INITIAL_TIMESTAMP,
+        )
 
         assert second.emotions.warmth == 0.0
         assert second.emotions.irritation == pytest.approx(0.80)
         assert second.relationship.affection == 0.0
         assert second.relationship.resentment == pytest.approx(0.50)
+        assert second.emotions_updated_at == pytest.approx(
+            LATER_TIMESTAMP,
+        )
 
     asyncio.run(run_test())
 
@@ -187,6 +210,7 @@ def test_user_state_repository_survives_new_instance(
                 affection=0.60,
                 resentment=0.10,
             ),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
     asyncio.run(save_state())
@@ -207,13 +231,18 @@ def test_user_state_repository_survives_new_instance(
     assert state.relationship.affection == pytest.approx(0.60)
     assert state.relationship.resentment == pytest.approx(0.10)
 
+    assert state.emotions_updated_at == pytest.approx(
+        INITIAL_TIMESTAMP,
+    )
+
 
 def test_user_state_store_restores_state_after_restart(
     tmp_path: Path,
 ) -> None:
-    """Новый store должен восстановить отношения из существующей SQLite-базы."""
+    """Рестарт без прошедшего времени не должен менять сохранённое состояние."""
     first_repository = UserStateRepository(tmp_path)
     first_store = UserStateStore(
+        wall_clock=lambda: INITIAL_TIMESTAMP,
         persistence=first_repository,
     )
 
@@ -234,6 +263,7 @@ def test_user_state_store_restores_state_after_restart(
 
     second_repository = UserStateRepository(tmp_path)
     second_store = UserStateStore(
+        wall_clock=lambda: INITIAL_TIMESTAMP,
         persistence=second_repository,
     )
 
@@ -251,9 +281,155 @@ def test_user_state_store_restores_state_after_restart(
     assert restored.relationship.affection == pytest.approx(0.55)
     assert restored.relationship.resentment == pytest.approx(0.15)
 
+    assert restored.emotions_updated_at == pytest.approx(
+        INITIAL_TIMESTAMP,
+    )
+
     assert restored.mood == "neutral"
     assert restored.reply_count == 0
     assert list(restored.history) == []
+
+
+def test_user_state_store_decays_emotions_after_restart(
+    tmp_path: Path,
+) -> None:
+    """После рестарта эмоции должны затухнуть согласно прошедшему времени."""
+    first_repository = UserStateRepository(tmp_path)
+    first_store = UserStateStore(
+        wall_clock=lambda: INITIAL_TIMESTAMP,
+        persistence=first_repository,
+    )
+
+    async def save_state() -> None:
+        async with first_store.use(123) as state:
+            state.emotions.adjust(
+                warmth=0.20,
+                irritation=0.20,
+                playfulness=0.20,
+                arousal=0.20,
+            )
+            state.relationship.adjust(
+                familiarity=0.80,
+                trust=0.70,
+                affection=0.60,
+                resentment=0.40,
+            )
+
+    asyncio.run(save_state())
+
+    second_repository = UserStateRepository(tmp_path)
+    second_store = UserStateStore(
+        wall_clock=lambda: LATER_TIMESTAMP,
+        persistence=second_repository,
+    )
+
+    async def restore_state() -> UserState:
+        async with second_store.use(123) as state:
+            return state
+
+    restored = asyncio.run(restore_state())
+
+    assert restored.emotions.warmth == pytest.approx(0.15)
+    assert restored.emotions.irritation == pytest.approx(0.10)
+    assert restored.emotions.playfulness == pytest.approx(0.10)
+    assert restored.emotions.arousal == pytest.approx(0.10)
+
+    assert restored.relationship.familiarity == pytest.approx(0.80)
+    assert restored.relationship.trust == pytest.approx(0.70)
+    assert restored.relationship.affection == pytest.approx(0.60)
+    assert restored.relationship.resentment == pytest.approx(0.40)
+
+    assert restored.emotions_updated_at == pytest.approx(
+        LATER_TIMESTAMP,
+    )
+
+    persisted = asyncio.run(
+        second_repository.load(123),
+    )
+
+    assert persisted is not None
+    assert persisted.emotions.irritation == pytest.approx(0.10)
+    assert persisted.relationship.trust == pytest.approx(0.70)
+    assert persisted.emotions_updated_at == pytest.approx(
+        LATER_TIMESTAMP,
+    )
+
+
+def test_user_state_repository_migrates_legacy_database(
+    tmp_path: Path,
+) -> None:
+    """Старая таблица должна получить timestamp без потери состояния."""
+    database_path = tmp_path / "user_states.db"
+
+    with closing(sqlite3.connect(database_path)) as connection, connection:
+        connection.execute("""
+            CREATE TABLE user_states (
+                user_id INTEGER PRIMARY KEY,
+                warmth REAL NOT NULL,
+                irritation REAL NOT NULL,
+                playfulness REAL NOT NULL,
+                arousal REAL NOT NULL,
+                familiarity REAL NOT NULL,
+                trust REAL NOT NULL,
+                affection REAL NOT NULL,
+                resentment REAL NOT NULL
+            )
+            """)
+
+        connection.execute(
+            """
+            INSERT INTO user_states (
+                user_id,
+                warmth,
+                irritation,
+                playfulness,
+                arousal,
+                familiarity,
+                trust,
+                affection,
+                resentment
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                123,
+                0.40,
+                0.30,
+                0.20,
+                0.10,
+                0.80,
+                0.70,
+                0.60,
+                0.50,
+            ),
+        )
+
+    repository = UserStateRepository(tmp_path)
+
+    state = asyncio.run(
+        repository.load(123),
+    )
+
+    assert state is not None
+
+    assert state.emotions.warmth == pytest.approx(0.40)
+    assert state.emotions.irritation == pytest.approx(0.30)
+    assert state.emotions.playfulness == pytest.approx(0.20)
+    assert state.emotions.arousal == pytest.approx(0.10)
+
+    assert state.relationship.familiarity == pytest.approx(0.80)
+    assert state.relationship.trust == pytest.approx(0.70)
+    assert state.relationship.affection == pytest.approx(0.60)
+    assert state.relationship.resentment == pytest.approx(0.50)
+
+    assert state.emotions_updated_at == 0.0
+
+    with closing(sqlite3.connect(database_path)) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(user_states)")
+        }
+
+    assert "emotions_updated_at" in columns
 
 
 def test_user_state_repository_closes_connections(
@@ -285,6 +461,7 @@ def test_user_state_repository_closes_connections(
             123,
             emotions=EmotionalState(),
             relationship=RelationshipState(),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
     asyncio.run(run_test())
@@ -321,6 +498,7 @@ def test_user_state_repository_wraps_save_errors(
                 123,
                 emotions=EmotionalState(),
                 relationship=RelationshipState(),
+                emotions_updated_at=INITIAL_TIMESTAMP,
             )
         )
 
@@ -382,6 +560,7 @@ def test_user_state_repository_runs_sqlite_off_event_loop(
             123,
             emotions=EmotionalState(),
             relationship=RelationshipState(),
+            emotions_updated_at=INITIAL_TIMESTAMP,
         )
 
     asyncio.run(run_test())

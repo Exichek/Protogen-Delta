@@ -43,6 +43,7 @@ class UserStateRepository:
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
+        emotions_updated_at: float,
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -50,6 +51,7 @@ class UserStateRepository:
             user_id,
             emotions=emotions,
             relationship=relationship,
+            emotions_updated_at=emotions_updated_at,
         )
 
     def _load_sync(
@@ -69,7 +71,8 @@ class UserStateRepository:
                         familiarity,
                         trust,
                         affection,
-                        resentment
+                        resentment,
+                        emotions_updated_at
                     FROM user_states
                     WHERE user_id = ?
                     """,
@@ -92,6 +95,7 @@ class UserStateRepository:
             trust,
             affection,
             resentment,
+            emotions_updated_at,
         ) = row
 
         return PersistentUserState(
@@ -107,6 +111,7 @@ class UserStateRepository:
                 affection=affection,
                 resentment=resentment,
             ),
+            emotions_updated_at=emotions_updated_at,
         )
 
     def _save_sync(
@@ -115,6 +120,7 @@ class UserStateRepository:
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
+        emotions_updated_at: float,
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         try:
@@ -130,9 +136,10 @@ class UserStateRepository:
                         familiarity,
                         trust,
                         affection,
-                        resentment
+                        resentment,
+                        emotions_updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -141,7 +148,8 @@ class UserStateRepository:
                         familiarity = excluded.familiarity,
                         trust = excluded.trust,
                         affection = excluded.affection,
-                        resentment = excluded.resentment
+                        resentment = excluded.resentment,
+                        emotions_updated_at = excluded.emotions_updated_at
                     """,
                     (
                         user_id,
@@ -153,6 +161,7 @@ class UserStateRepository:
                         relationship.trust,
                         relationship.affection,
                         relationship.resentment,
+                        emotions_updated_at,
                     ),
                 )
         except sqlite3.Error as error:
@@ -161,7 +170,7 @@ class UserStateRepository:
             ) from error
 
     def _initialize(self) -> None:
-        """Создать таблицу состояний при первом запуске."""
+        """Создать таблицу и применить совместимые изменения схемы."""
         with closing(sqlite3.connect(self._path)) as connection, connection:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS user_states (
@@ -173,6 +182,17 @@ class UserStateRepository:
                     familiarity REAL NOT NULL,
                     trust REAL NOT NULL,
                     affection REAL NOT NULL,
-                    resentment REAL NOT NULL
+                    resentment REAL NOT NULL,
+                    emotions_updated_at REAL NOT NULL
                 )
                 """)
+
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(user_states)")
+            }
+
+            if "emotions_updated_at" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN emotions_updated_at REAL NOT NULL DEFAULT 0.0
+                    """)
