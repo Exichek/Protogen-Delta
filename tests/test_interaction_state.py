@@ -91,7 +91,7 @@ def test_direct_insult_damages_relationship() -> None:
     )
 
     assert state.emotions.irritation == pytest.approx(0.18)
-    assert state.emotions.warmth == pytest.approx(0.44)
+    assert state.emotions.warmth == pytest.approx(0.45)
     assert state.relationship.trust == pytest.approx(0.45)
     assert state.relationship.affection == pytest.approx(0.47)
     assert state.relationship.resentment == pytest.approx(0.08)
@@ -166,13 +166,13 @@ def test_unknown_mood_does_not_repeat_previous_emotion() -> None:
         insult_type="none",
     )
 
-    assert state.emotions.warmth == pytest.approx(0.09)
+    assert state.emotions.warmth == pytest.approx(0.10)
     assert state.relationship.affection == pytest.approx(affection)
     assert state.relationship.familiarity == pytest.approx(0.02)
 
 
-def test_neutral_interactions_decay_transient_emotions() -> None:
-    """Нейтральные сообщения должны постепенно успокаивать эмоции."""
+def test_neutral_interaction_does_not_decay_emotions_by_message() -> None:
+    """Одно нейтральное сообщение не должно само по себе ослаблять эмоции."""
     state = UserState()
 
     state.emotions.adjust(
@@ -188,33 +188,34 @@ def test_neutral_interactions_decay_transient_emotions() -> None:
         insult_type="none",
     )
 
-    assert state.emotions.warmth == pytest.approx(0.19)
-    assert state.emotions.irritation == pytest.approx(0.18)
-    assert state.emotions.playfulness == pytest.approx(0.18)
-    assert state.emotions.arousal == pytest.approx(0.18)
+    assert state.emotions.warmth == pytest.approx(0.20)
+    assert state.emotions.irritation == pytest.approx(0.20)
+    assert state.emotions.playfulness == pytest.approx(0.20)
+    assert state.emotions.arousal == pytest.approx(0.20)
 
 
-def test_emotional_decay_does_not_go_below_zero() -> None:
-    """Затухание не должно уводить эмоциональные показатели ниже нуля."""
+def test_repeated_neutral_interactions_do_not_accelerate_emotional_decay() -> None:
+    """Количество нейтральных сообщений не должно определять затухание эмоций."""
     state = UserState()
 
     state.emotions.adjust(
-        warmth=0.005,
-        irritation=0.005,
-        playfulness=0.005,
-        arousal=0.005,
+        warmth=0.20,
+        irritation=0.20,
+        playfulness=0.20,
+        arousal=0.20,
     )
 
-    apply_interaction_effects(
-        state,
-        mood="neutral",
-        insult_type="none",
-    )
+    for _ in range(5):
+        apply_interaction_effects(
+            state,
+            mood="neutral",
+            insult_type="none",
+        )
 
-    assert state.emotions.warmth == 0.0
-    assert state.emotions.irritation == 0.0
-    assert state.emotions.playfulness == 0.0
-    assert state.emotions.arousal == 0.0
+    assert state.emotions.warmth == pytest.approx(0.20)
+    assert state.emotions.irritation == pytest.approx(0.20)
+    assert state.emotions.playfulness == pytest.approx(0.20)
+    assert state.emotions.arousal == pytest.approx(0.20)
 
 
 def test_interaction_effects_accumulate() -> None:
@@ -228,6 +229,6 @@ def test_interaction_effects_accumulate() -> None:
             insult_type="none",
         )
 
-    assert state.emotions.warmth == pytest.approx(0.28)
+    assert state.emotions.warmth == pytest.approx(0.30)
     assert state.relationship.familiarity == pytest.approx(0.03)
     assert state.relationship.affection == pytest.approx(0.09)

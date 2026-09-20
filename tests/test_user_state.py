@@ -522,11 +522,13 @@ def test_user_state_store_loads_persistent_state() -> None:
                 affection=0.5,
                 resentment=0.3,
             ),
+            emotions_updated_at=1000.0,
         )
     )
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -552,6 +554,7 @@ def test_user_state_store_loads_persistent_state_only_once() -> None:
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -577,6 +580,7 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -597,6 +601,7 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
         123,
         emotions=state.emotions,
         relationship=state.relationship,
+        emotions_updated_at=1000.0,
     )
 
 
@@ -614,12 +619,14 @@ def test_user_state_store_reloads_state_after_runtime_eviction() -> None:
                 relationship=RelationshipState(
                     familiarity=0.8,
                 ),
+                emotions_updated_at=1000.0,
             ),
         ]
     )
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -655,6 +662,7 @@ def test_user_state_store_does_not_fail_when_persistence_save_fails(
     )
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -698,12 +706,14 @@ def test_user_state_store_does_not_save_defaults_after_load_failure() -> None:
                 relationship=RelationshipState(
                     trust=0.7,
                 ),
+                emotions_updated_at=1000.0,
             ),
         ]
     )
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -735,6 +745,7 @@ def test_user_state_store_serializes_initial_persistence_load() -> None:
     persistence.save = AsyncMock()
 
     store = UserStateStore(
+        wall_clock=lambda: 1000.0,
         persistence=persistence,
     )
 
@@ -757,6 +768,7 @@ def test_user_state_store_serializes_initial_persistence_load() -> None:
                 relationship=RelationshipState(
                     familiarity=0.6,
                 ),
+                emotions_updated_at=1000.0,
             )
 
         persistence.load.side_effect = load_state
@@ -798,3 +810,89 @@ def test_user_state_store_serializes_initial_persistence_load() -> None:
     assert states[0] is states[1]
     assert states[0].emotions.warmth == pytest.approx(0.5)
     assert states[0].relationship.familiarity == pytest.approx(0.6)
+
+
+def test_emotional_state_decays_by_elapsed_time() -> None:
+    """Эмоции должны ослабевать пропорционально реальному времени."""
+    state = EmotionalState(
+        warmth=0.20,
+        irritation=0.20,
+        playfulness=0.20,
+        arousal=0.20,
+    )
+
+    state.decay(5 * 3600.0)
+
+    assert state.warmth == pytest.approx(0.15)
+    assert state.irritation == pytest.approx(0.10)
+    assert state.playfulness == pytest.approx(0.10)
+    assert state.arousal == pytest.approx(0.10)
+
+
+def test_emotional_state_decay_does_not_go_below_zero() -> None:
+    """Временное затухание не должно уводить эмоции ниже нуля."""
+    state = EmotionalState(
+        warmth=0.005,
+        irritation=0.005,
+        playfulness=0.005,
+        arousal=0.005,
+    )
+
+    state.decay(3600.0)
+
+    assert state.warmth == 0.0
+    assert state.irritation == 0.0
+    assert state.playfulness == 0.0
+    assert state.arousal == 0.0
+
+
+def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
+    """Store должен применять decay между сохранённым временем и новым обращением."""
+    persistence = Mock()
+
+    persistence.load = AsyncMock(
+        return_value=PersistentUserState(
+            emotions=EmotionalState(
+                warmth=0.20,
+                irritation=0.20,
+                playfulness=0.20,
+                arousal=0.20,
+            ),
+            relationship=RelationshipState(
+                familiarity=0.7,
+                trust=0.6,
+                affection=0.5,
+                resentment=0.4,
+            ),
+            emotions_updated_at=1000.0,
+        )
+    )
+    persistence.save = AsyncMock()
+
+    store = UserStateStore(
+        wall_clock=lambda: 19000.0,
+        persistence=persistence,
+    )
+
+    async def use_state() -> UserState:
+        async with store.use(123) as state:
+            return state
+
+    state = asyncio.run(use_state())
+
+    assert state.emotions.warmth == pytest.approx(0.15)
+    assert state.emotions.irritation == pytest.approx(0.10)
+    assert state.emotions.playfulness == pytest.approx(0.10)
+    assert state.emotions.arousal == pytest.approx(0.10)
+
+    assert state.relationship.familiarity == pytest.approx(0.7)
+    assert state.relationship.trust == pytest.approx(0.6)
+    assert state.relationship.affection == pytest.approx(0.5)
+    assert state.relationship.resentment == pytest.approx(0.4)
+
+    persistence.save.assert_awaited_once_with(
+        123,
+        emotions=state.emotions,
+        relationship=state.relationship,
+        emotions_updated_at=19000.0,
+    )

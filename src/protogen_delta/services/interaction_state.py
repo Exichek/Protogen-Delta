@@ -5,25 +5,13 @@ from protogen_delta.services.insults import InsultType
 from protogen_delta.services.mood import MoodType
 
 
-def _decay_emotions(user_state: UserState) -> None:
-    """Немного ослабить краткосрочные эмоции перед новой реакцией."""
-    user_state.emotions.adjust(
-        warmth=-0.01,
-        irritation=-0.02,
-        playfulness=-0.02,
-        arousal=-0.02,
-    )
-
-
 def apply_interaction_effects(
     user_state: UserState,
     *,
     mood: MoodType | None,
     insult_type: InsultType,
 ) -> None:
-    """Применить затухание и накопительные последствия сообщения."""
-    _decay_emotions(user_state)
-
+    """Применить накопительные последствия сообщения."""
     user_state.relationship.adjust(
         familiarity=0.01,
     )
