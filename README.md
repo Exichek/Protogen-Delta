@@ -2,7 +2,7 @@
 
 # 🤖 Protogen Delta
 
-### Асинхронный Telegram-бот с DeepSeek, RP-логикой и системой артов
+### Асинхронный Telegram-бот на Python 3.14 с DeepSeek, RP-логикой, накопительными эмоциями и постоянным состоянием пользователей
 
 <p>
   <a href="https://github.com/Exichek/Protogen-Delta/actions/workflows/tests.yml">
@@ -10,17 +10,19 @@
   </a>
   <img src="https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/aiogram-3.x-2CA5E0?logo=telegram&logoColor=white" alt="aiogram 3">
-  <img src="https://img.shields.io/badge/Poetry-2.4.1-60A5FA?logo=poetry" alt="Poetry">
+  <img src="https://img.shields.io/badge/Poetry-2.4.1-60A5FA?logo=poetry" alt="Poetry 2.4.1">
+  <img src="https://img.shields.io/badge/SQLite-persistence-003B57?logo=sqlite&logoColor=white" alt="SQLite">
   <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/tests-146%20passed-2EA44F" alt="146 tests passed">
-  <img src="https://img.shields.io/badge/coverage-97%25-brightgreen" alt="97% coverage">
+  <img src="https://img.shields.io/badge/tests-255%20passed-2EA44F" alt="255 tests passed">
+  <img src="https://img.shields.io/badge/coverage-%E2%89%A595%25-brightgreen" alt="Coverage >=95%">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
 
-**Python · aiogram · DeepSeek · Poetry · Docker · pytest**
+**Python · aiogram · DeepSeek · SQLite · Poetry · Docker · pytest**
 
 [О проекте](#-о-проекте) •
 [Возможности](#-возможности) •
+[Состояние и память](#-состояние-и-память) •
 [Архитектура](#-архитектура) •
 [Установка](#-установка) •
 [Docker](#-docker) •
@@ -32,91 +34,300 @@
 
 ## 📖 О проекте
 
-**Protogen Delta** — переработанная версия моего старого Telegram-бота с модульной архитектурой, интеграцией DeepSeek API, системой артов, RP-логикой и административными инструментами.
+**Protogen Delta** — Telegram-бот с собственной личностью, контекстными реакциями, RP-логикой, системой артов и интеграцией DeepSeek API.
 
-Старая монолитная структура проекта была разделена на независимые слои: Telegram-обработчики, сервисы, репозитории, конфигурацию и бизнес-логику.
+Проект вырос из старой монолитной версии и сейчас построен как нормальное Python-приложение с разделением ответственности между Telegram-обработчиками, сервисами, состоянием, репозиториями и конфигурацией.
+
+Главная цель проекта — не просто отправлять запросы в LLM, а постепенно собирать вокруг модели самостоятельную систему поведения:
+
+- отдельная личность Дельты;
+- контекстные реакции вместо пачки жёстко заданных ответов;
+- раздельное состояние каждого пользователя;
+- история текущего диалога;
+- накопительные эмоции и отношения;
+- постоянное хранение долгоживущего состояния в SQLite;
+- RP-контекст и дополнительная классификация;
+- безопасная сериализация запросов одного пользователя;
+- тестируемая и заменяемая архитектура.
 
 > [!NOTE]
-> **Главная цель рефакторинга — сделать проект не только рабочим, но и поддерживаемым.**
->
-> Проект получил нормальную архитектуру, типизацию, автоматические тесты, Poetry, Docker-контейнеризацию и разделение runtime-данных от исходного кода.
+> Личность, знания о теле и RP-модификатор вынесены в отдельные prompt-файлы.
+> Статическая часть системного prompt загружается один раз при старте, а динамический контекст добавляется только когда он действительно нужен.
 
 ### Текущее состояние
 
 | Метрика | Значение |
 |---|---:|
 | Python | **3.14** |
-| Tests | **146 passed** |
-| Coverage | **97.07%** |
+| Tests | **255 passed** |
+| Coverage | **не ниже 95% в CI** |
+| Source files under mypy | **35** |
 | CI | **GitHub Actions** |
 | Telegram framework | **aiogram 3** |
-| AI | **DeepSeek V4.1 Flash (`deepseek-flash`)** |
+| AI | **DeepSeek API (`deepseek-flash` по умолчанию)** |
+| Persistence | **SQLite + JSON runtime data** |
 | Package manager | **Poetry 2.4.1** |
 | Containerization | **Docker** |
 | License | **MIT** |
+
+Точный процент coverage специально не зафиксирован статическим числом в README: GitHub Actions проверяет актуальное покрытие на каждом PR и push и отклоняет сборку, если оно падает ниже **95%**.
+
 ---
 
 ## ⚙️ Возможности
 
 ### 💬 Диалоги и DeepSeek
 
-Бот использует DeepSeek для генерации ответов и дополнительного анализа входящих сообщений.
+Основные ответы генерируются через DeepSeek.
 
 Поддерживается:
 
-- генерация обычных ответов;
-- отдельный системный prompt;
-- классификация настроения;
+- обычный диалог;
+- история последних сообщений пользователя;
+- отдельное состояние каждого пользователя;
+- контекстная классификация настроения;
 - классификация оскорблений;
-- специальные ответы на разные типы сообщений;
-- изменение текущего состояния бота;
-- динамическое формирование контекста;
-- автоматическое добавление эмоутов;
-- разбиение длинных Telegram-сообщений;
+- RP-определение по действиям в `*звёздочках*`;
+- определение направления RP-действия при fetish-контексте;
+- динамическое формирование системного prompt;
 - типизированная обработка ошибок DeepSeek API;
-- отдельные timeout и retry-настройки для обычных запросов и классификаторов;
-- централизованная обработка ошибок.
+- отдельная обработка timeout, rate limit, connection и auth ошибок;
+- разбиение слишком длинных Telegram-сообщений;
+- пользовательский rate limit;
+- последовательная обработка одновременных запросов одного пользователя.
+
+Заготовленные сервисы для отдельных приветствий, оскорблений и автоматических эмоутов больше не управляют обычным диалогом. Контекст сообщения передаётся основной модели, чтобы реакция формировалась естественно с учётом личности Дельты и истории общения.
+
+---
+
+### 🧠 Личность и динамический контекст
+
+Личность разделена на несколько независимых prompt-файлов:
+
+```text
+config/prompts/personality/
+├── core.txt
+├── protogen_lore.txt
+├── body.txt
+└── rp.txt
+```
+
+| Файл | Назначение |
+|---|---|
+| `core.txt` | характер, стиль общения, общие правила поведения |
+| `protogen_lore.txt` | базовый лор вида Protogen |
+| `body.txt` | описание тела и физических особенностей Дельты |
+| `rp.txt` | дополнительный модификатор для RP |
+
+Обычный системный prompt:
+
+```text
+core + protogen_lore + body
+```
+
+RP-prompt:
+
+```text
+core + protogen_lore + body + rp
+```
+
+Дополнительный динамический контекст добавляется только при необходимости: например, при выраженном настроении, конфликте, накопленной обиде, RP или других значимых состояниях.
+
+---
+
+### ❤️ Накопительные эмоции и отношения
+
+Для каждого пользователя Дельта хранит две группы долгоживущего состояния.
+
+**Эмоции:**
+
+```text
+warmth
+irritation
+playfulness
+arousal
+```
+
+**Отношения:**
+
+```text
+familiarity
+trust
+affection
+resentment
+```
+
+Все значения ограничены диапазоном `0.0 ... 1.0`.
+
+Состояние меняется после взаимодействий:
+
+- тёплые сообщения повышают `warmth`, `trust` и `affection`;
+- игривые сообщения повышают `playfulness`;
+- конфликт может увеличить `irritation` и `resentment`;
+- прямое оскорбление влияет сильнее, чем конфликтный вопрос;
+- агрессия в адрес третьего лица не считается нападением на Дельту;
+- краткосрочные эмоции постепенно затухают между сообщениями;
+- положительное взаимодействие может уменьшать накопленный негатив.
+
+Модель **не получает сырые числа** вроде `resentment=0.37`.
+`state_context.py` переводит значимое накопленное состояние в естественный текстовый контекст только после достижения нужных порогов.
+
+> [!IMPORTANT]
+> Накопленное возбуждение не прокидывается в обычный разговор само по себе.
+> Интимный state-context добавляется только при уже установленном RP или текущем явно интимном сообщении.
+
+---
+
+### 💾 Постоянное состояние через SQLite
+
+Долгоживущие эмоции и отношения сохраняются в:
+
+```text
+data/user_states.db
+```
+
+SQLite-репозиторий хранит состояние отдельно от runtime-контекста и использует UPSERT по Telegram `user_id`.
+
+После перезапуска процесса восстанавливаются:
+
+```text
+warmth
+irritation
+playfulness
+arousal
+familiarity
+trust
+affection
+resentment
+```
+
+Намеренно **не восстанавливаются**:
+
+```text
+mood
+reply_count
+history
+asyncio.Lock
+runtime timestamps
+active operation counters
+```
+
+То есть после рестарта Дельта помнит сложившееся отношение к человеку, но не пытается притворяться, что незавершённая оперативная сессия продолжает существовать.
+
+Хранилище подключено через абстракцию `UserStatePersistence`, поэтому `UserStateStore` не зависит напрямую от SQLite. В будущем SQLite-реализацию можно заменить, например, PostgreSQL-репозиторием без переписывания `ResponseEngine`.
+
+---
+
+### 🗨️ История диалога
+
+Для каждого пользователя хранится ограниченная история завершённых ходов:
+
+```text
+user message
+assistant reply
+```
+
+По умолчанию:
+
+```env
+CONVERSATION_HISTORY_LIMIT=8
+```
+
+История находится в памяти процесса и используется DeepSeek при следующем сообщении.
+
+Команда:
+
+```text
+/reset
+```
+
+сбрасывает:
+
+- текущий `mood`;
+- `reply_count` пользователя;
+- историю текущего разговора.
+
+При этом `/reset` **не стирает накопленные эмоции и отношения** из SQLite.
+
+---
+
+### 👥 Изоляция пользователей и конкурентные запросы
+
+`UserStateStore` создаёт отдельный `UserState` для каждого Telegram `user_id`.
+
+У каждого состояния есть собственный `asyncio.Lock`, поэтому два одновременно пришедших сообщения одного пользователя обрабатываются последовательно. Это защищает историю, эмоциональное состояние, счётчики и сохранение persistence-state.
+
+Состояния разных пользователей при этом не блокируют друг друга.
+
+Неактивные runtime-состояния удаляются из памяти по retention timeout:
+
+```env
+USER_STATE_RETENTION_SECONDS=86400.0
+```
+
+После повторного обращения пользователя долгоживущее состояние заново загружается из SQLite.
 
 ---
 
 ### 🎭 RP-режим
 
-Бот поддерживает RP-действия в формате:
+RP-действия определяются по формату:
 
 ```text
 *действие персонажа*
 ```
 
-Для RP используется отдельный prompt и дополнительная классификация контекста.
+Для RP используется отдельный prompt-модификатор.
 
-Упрощённо обработка выглядит так:
+При наличии дополнительных тематических триггеров Дельта также может определить направление действия:
 
 ```text
-сообщение пользователя
-        │
-        ▼
-определение контекста
-        │
-        ├── настроение
-        ├── оскорбление
-        ├── RP
-        └── дополнительные триггеры
-        │
-        ▼
-формирование prompt
-        │
-        ▼
+active
+passive
+unknown
+```
+
+Упрощённый pipeline:
+
+```text
+Telegram message
+      │
+      ▼
+Insult classifier
+      │
+      ▼
+Mood classifier
+      │
+      ▼
+Interaction state update
+      │
+      ├── emotions
+      └── relationship
+      │
+      ▼
+RP / triggers / role
+      │
+      ▼
+Persistent state context
+      │
+      ▼
+Dynamic system prompt
+      │
+      ▼
 DeepSeek
-        │
-        ▼
-готовый ответ
+      │
+      ▼
+Reply + history update
+      │
+      ▼
+SQLite state save
 ```
 
 ---
 
 ### 🖼️ Система артов
 
-Бот умеет сохранять изображения из выбранной Telegram-группы и выдавать случайный арт по команде:
+Бот сохраняет Telegram `file_id` изображений из заданной группы и умеет выдавать случайный арт по команде:
 
 ```text
 /randomart
@@ -124,31 +335,38 @@ DeepSeek
 
 Поддерживается:
 
-- сохранение фотографий;
-- сохранение изображений, отправленных как документ;
-- добавление только из разрешённой Telegram-группы;
+- добавление фотографий;
+- добавление изображений, отправленных как документ;
+- приём артов только из настроенной Telegram-группы;
 - защита от повторного добавления;
-- случайная выдача изображения;
-- просмотр количества сохранённых артов;
+- случайная выдача;
+- просмотр количества артов;
 - просмотр последних артов администратором;
-- удаление артов по Telegram `file_id`.
+- удаление по Telegram `file_id`.
 
 > [!IMPORTANT]
-> **Сами изображения локально не скачиваются.**
->
-> Бот хранит Telegram `file_id`, который позволяет повторно отправлять уже загруженный в Telegram файл без хранения оригинального изображения на сервере.
+> Оригинальные изображения локально не скачиваются.
+> В `images.json` сохраняются Telegram `file_id`.
 
 ---
 
-### 👤 Пользователи
+### 👤 Регистрация пользователей
 
-При первом использовании `/start` пользователь регистрируется в локальном runtime-хранилище.
-
-Данные приложения располагаются в:
+При первом `/start` Telegram ID пользователя добавляется в:
 
 ```text
-data/
+data/users.json
 ```
+
+Первый запуск получает отдельное приветствие.
+
+Повторный `/start` выбирает случайную реплику из:
+
+```text
+config/data/start_messages.json
+```
+
+Этот набор используется как personality-flavor с реакциями в духе очередного запуска/«перезагрузки».
 
 ---
 
@@ -157,9 +375,10 @@ data/
 ### Пользовательские
 
 ```text
-/start      Запустить бота и зарегистрироваться
+/start      Запустить бота / зарегистрироваться
 /help       Показать справку
 /randomart  Получить случайный арт
+/reset      Очистить текущую память диалога
 ```
 
 ### Административные
@@ -167,72 +386,61 @@ data/
 ```text
 /listimages <N>          Показать последние N артов
 /removeimage <id1,id2>   Удалить арты по Telegram file_id
-/artcount                Показать количество артов
-/status                  Показать состояние текущего процесса
+/artcount                Показать количество сохранённых артов
+/status                  Показать uptime, пользователей и число ответов процесса
 /ping                    Проверить административный роутер
 /ownhelp                 Показать список админских команд
-```
-
-Доступ определяется через переменную:
-
-```env
-ADMIN_IDS=
 ```
 
 ---
 
 ## 🧩 Архитектура
 
-Проект использует `src-layout` и разделён на слои с разной ответственностью.
+Проект использует `src-layout`.
 
 ```mermaid
 flowchart TD
     Telegram[Telegram API]
-    Handler[Handlers]
+    Handlers[Handlers]
     Engine[ResponseEngine]
-    Mood[Mood Classifier]
-    Insults[Insult Classifier]
-    RP[RP Classifier]
+    Insults[InsultClassifier]
+    Mood[MoodClassifier]
+    Role[FetishRoleClassifier]
+    Interaction[Interaction State]
+    Context[State Context]
+    Runtime[UserStateStore]
+    SQLiteRepo[UserStateRepository]
+    SQLite[(SQLite)]
     DeepSeek[DeepSeek API]
-    Repositories[Repositories]
-    State[BotState]
+    JsonRepos[JSON Repositories]
+    BotState[BotState]
 
-    Telegram --> Handler
-    Handler --> Engine
-
-    Engine --> Mood
+    Telegram --> Handlers
+    Handlers --> Engine
     Engine --> Insults
-    Engine --> RP
-
-    Mood --> Engine
-    Insults --> Engine
-    RP --> Engine
-
+    Engine --> Mood
+    Engine --> Interaction
+    Engine --> Role
+    Engine --> Context
+    Engine --> Runtime
+    Runtime --> SQLiteRepo
+    SQLiteRepo --> SQLite
     Engine --> DeepSeek
     DeepSeek --> Engine
-
-    Engine --> State
-    Handler --> Repositories
-
-    Engine --> Handler
-    Handler --> Telegram
+    Handlers --> JsonRepos
+    Engine --> BotState
+    Engine --> Handlers
+    Handlers --> Telegram
 ```
-
-### Ответственность слоёв
 
 | Слой | Назначение |
 |---|---|
-| `handlers` | взаимодействие с Telegram |
-| `services` | бизнес-логика и работа с DeepSeek |
-| `repositories` | чтение и сохранение runtime-данных |
-| `config` | настройки, prompts и статические JSON |
-| `core` | инфраструктура приложения |
-| `main.py` | создание и связывание зависимостей |
-
-> [!NOTE]
-> `main.py` является **composition root** приложения.
->
-> Именно там создаются репозитории, сервисы, классификаторы, `ResponseEngine`, Telegram-роутеры и остальные зависимости.
+| `handlers` | Telegram-команды и входящие события |
+| `services` | DeepSeek, классификаторы, ResponseEngine и state-context |
+| `repositories` | JSON- и SQLite-хранилища |
+| `config` | env settings, статические JSON и prompts |
+| `core` | runtime-state, rate limiting, logging, Telegram helpers |
+| `main.py` | composition root |
 
 ---
 
@@ -240,54 +448,59 @@ flowchart TD
 
 ```text
 Protogen-Delta/
-│
 ├── src/
 │   └── protogen_delta/
-│       │
 │       ├── config/
 │       │   ├── data/
+│       │   │   ├── fetish_names.json
+│       │   │   ├── fetishes_triggers.json
+│       │   │   └── start_messages.json
 │       │   ├── prompts/
+│       │   │   ├── personality/
+│       │   │   │   ├── body.txt
+│       │   │   │   ├── core.txt
+│       │   │   │   ├── protogen_lore.txt
+│       │   │   │   └── rp.txt
+│       │   │   ├── fetish_role_classification.txt
+│       │   │   ├── insult_classification.txt
+│       │   │   └── mood_classification.txt
 │       │   ├── json_loader.py
 │       │   ├── prompt_loader.py
 │       │   └── settings.py
-│       │
 │       ├── core/
 │       │   ├── logging_config.py
 │       │   ├── message_utils.py
+│       │   ├── rate_limiter.py
 │       │   ├── state.py
-│       │   └── telegram_commands.py
-│       │
+│       │   ├── telegram_commands.py
+│       │   └── user_state.py
 │       ├── handlers/
 │       │   ├── admin.py
 │       │   ├── art.py
 │       │   ├── errors.py
 │       │   ├── help.py
+│       │   ├── reset.py
 │       │   ├── start.py
 │       │   ├── text.py
 │       │   └── unknown_command.py
-│       │
 │       ├── repositories/
 │       │   ├── images.py
 │       │   ├── json_file.py
+│       │   ├── user_state.py
 │       │   └── users.py
-│       │
 │       ├── services/
 │       │   ├── deepseek.py
-│       │   ├── emotes.py
 │       │   ├── fetishes.py
-│       │   ├── greetings.py
 │       │   ├── insults.py
+│       │   ├── interaction_state.py
 │       │   ├── mood.py
-│       │   └── response_engine.py
-│       │
+│       │   ├── response_engine.py
+│       │   └── state_context.py
 │       └── main.py
-│
 ├── tests/
 ├── data/
-│
 ├── .env.example
-├── .gitignore
-├── .dockerignore
+├── .github/workflows/tests.yml
 ├── Dockerfile
 ├── pyproject.toml
 ├── poetry.lock
@@ -300,19 +513,24 @@ Protogen-Delta/
 
 | Технология | Назначение |
 |---|---|
-| Python 3.14 | основной язык проекта |
+| Python 3.14 | основной язык |
 | aiogram 3 | Telegram Bot API |
 | DeepSeek API | генерация и классификация текста |
-| OpenAI Python SDK | асинхронный API-клиент |
-| Poetry | управление зависимостями и окружением |
-| python-dotenv | загрузка переменных окружения |
-| pytest | автоматические тесты |
-| pytest-cov | измерение покрытия |
-| Black | форматирование Python-кода |
+| OpenAI Python SDK | API-клиент для DeepSeek-compatible endpoint |
+| SQLite (`sqlite3`) | постоянное состояние эмоций и отношений |
+| JSON | пользователи и Telegram `file_id` артов |
+| Poetry | зависимости, окружение и сборка |
+| python-dotenv | загрузка `.env` |
+| pytest | тесты |
+| pytest-cov | coverage |
+| Black | форматирование |
 | isort | сортировка импортов |
 | Flake8 | linting |
-| mypy | статическая проверка типов |
-| Docker | контейнеризация приложения |
+| mypy | статическая типизация |
+| GitHub Actions | CI |
+| Docker | контейнеризация |
+
+Для SQLite отдельная зависимость не нужна: используется стандартный модуль Python `sqlite3`.
 
 ---
 
@@ -320,38 +538,18 @@ Protogen-Delta/
 
 ## Требования
 
-Для локального запуска необходимы:
-
 ```text
 Python >=3.14,<3.15
 Poetry
 Git
 ```
 
-Проверить версию Python:
-
-```bash
-python --version
-```
-
-Проверить Poetry:
-
-```bash
-poetry --version
-```
-
----
-
-## Клонирование репозитория
-
-Через SSH:
+## Клонирование
 
 ```bash
 git clone git@github.com:Exichek/Protogen-Delta.git
 cd Protogen-Delta
 ```
-
----
 
 ## Установка зависимостей
 
@@ -359,45 +557,9 @@ cd Protogen-Delta
 poetry install
 ```
 
-Poetry установит зависимости из:
-
-```text
-pyproject.toml
-poetry.lock
-```
-
-Посмотреть информацию о виртуальном окружении:
-
-```bash
-poetry env info
-```
-
-> [!TIP]
-> **Активировать виртуальное окружение вручную необязательно.**
->
-> Команды проекта можно запускать через:
->
-> ```bash
-> poetry run <command>
-> ```
-
-Например:
-
-```bash
-poetry run python --version
-```
-
 ---
 
 # ⚙️ Настройка окружения
-
-В репозитории находится шаблон:
-
-```text
-.env.example
-```
-
-Создай из него настоящий `.env`.
 
 ### Windows PowerShell
 
@@ -411,7 +573,7 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
-Содержимое:
+Актуальный шаблон:
 
 ```env
 TELEGRAM_TOKEN=
@@ -423,130 +585,99 @@ DEEPSEEK_MODEL=deepseek-flash
 LOG_LEVEL=INFO
 DATA_DIR=data
 
+RATE_LIMIT_SECONDS=2.0
+RATE_LIMIT_RETENTION_SECONDS=300.0
+
+CONVERSATION_HISTORY_LIMIT=8
+USER_STATE_RETENTION_SECONDS=86400.0
+
 ADMIN_IDS=
 
 ART_CHAT_ID=
 ```
 
-### Переменные
-
 | Переменная | Назначение |
 |---|---|
 | `TELEGRAM_TOKEN` | токен Telegram-бота |
 | `DEEPSEEK_API_KEY` | API-ключ DeepSeek |
-| `DEEPSEEK_BASE_URL` | адрес API |
-| `DEEPSEEK_MODEL` | используемая модель |
+| `DEEPSEEK_BASE_URL` | API endpoint |
+| `DEEPSEEK_MODEL` | имя модели |
 | `LOG_LEVEL` | уровень логирования |
-| `DATA_DIR` | директория runtime-данных |
-| `ADMIN_IDS` | Telegram ID администраторов |
-| `ART_CHAT_ID` | ID группы для загрузки артов |
-
-Несколько администраторов можно указать через запятую:
-
-```env
-ADMIN_IDS=123456789,987654321
-```
+| `DATA_DIR` | runtime-каталог |
+| `RATE_LIMIT_SECONDS` | cooldown между сообщениями пользователя |
+| `RATE_LIMIT_RETENTION_SECONDS` | retention rate-limit записей |
+| `CONVERSATION_HISTORY_LIMIT` | число ходов истории на пользователя |
+| `USER_STATE_RETENTION_SECONDS` | retention runtime-state в RAM |
+| `ADMIN_IDS` | Telegram ID администраторов через запятую |
+| `ART_CHAT_ID` | ID группы для добавления артов |
 
 > [!CAUTION]
-> **Никогда не коммить настоящий `.env`.**
->
-> `TELEGRAM_TOKEN` и `DEEPSEEK_API_KEY` являются секретами.
->
-> Если такой ключ попал в публичную историю Git, его необходимо считать скомпрометированным и перевыпустить.
+> Не коммить настоящий `.env`.
+> Если `TELEGRAM_TOKEN` или `DEEPSEEK_API_KEY` попали в публичную историю Git, их нужно перевыпустить.
 
 ---
 
 # ▶️ Локальный запуск
 
-Запустить приложение:
-
 ```bash
 poetry run python -m protogen_delta.main
 ```
 
-При успешном старте появятся логи примерно такого вида:
+Protogen Delta использует Telegram **long polling**, поэтому отдельный HTTP-порт не требуется.
+
+При первом запуске автоматически создаётся:
 
 ```text
-Бот запущен
-Start polling
-Run polling for bot ...
+data/user_states.db
 ```
 
-Остановка:
+---
+
+# 💾 Runtime data
+
+При стандартном `DATA_DIR=data`:
 
 ```text
-Ctrl+C
+data/
+├── users.json
+├── images.json
+└── user_states.db
 ```
 
-> [!NOTE]
-> Protogen Delta использует Telegram **long polling**.
->
-> Для обычного запуска бота не требуется открывать HTTP-порт.
+| Файл | Содержимое |
+|---|---|
+| `users.json` | зарегистрированные Telegram user IDs |
+| `images.json` | Telegram `file_id` артов |
+| `user_states.db` | накопленные эмоции и отношения |
+
+Каталог `data/` находится в `.gitignore`.
 
 ---
 
 # 🐳 Docker
 
-Проект поддерживает запуск внутри Linux Docker-контейнера.
-
-Главная схема:
-
-```text
-Dockerfile
-    │
-    │ docker build
-    ▼
-Docker Image
-    │
-    │ docker run
-    ▼
-Container
-```
-
-Docker image собирается в два этапа:
+Проект собирается multi-stage Dockerfile.
 
 ```text
 builder
 ├── Python 3.14
 ├── Poetry 2.4.1
-└── сборка wheel + virtualenv
+└── wheel + /opt/venv
 
 runtime
-├── Python 3.14
+├── Python 3.14 slim
 ├── /opt/venv
-│   ├── зависимости
-│   └── Protogen Delta
-└── пользователь protogen
+├── /app/data
+└── non-root user: protogen
 ```
 
-Poetry остаётся только на этапе сборки и не попадает в runtime-образ. Приложение запускается от непривилегированного пользователя `protogen`.
-
-> [!NOTE]
-> `.env` и runtime-каталог `data/` в Docker image не копируются.
->
-> Секреты передаются только при запуске контейнера, а persistent data подключается отдельно.
-
----
-
-## Сборка Docker image
-
-Из корня проекта:
+## Сборка
 
 ```bash
 docker build -t protogen-delta .
 ```
 
-Проверить созданный image:
-
-```bash
-docker images
-```
-
----
-
-## Запуск контейнера на Windows
-
-PowerShell:
+## Windows PowerShell
 
 ```powershell
 docker run --rm `
@@ -556,9 +687,7 @@ docker run --rm `
   protogen-delta
 ```
 
----
-
-## Запуск контейнера на Linux / macOS
+## Linux / macOS
 
 ```bash
 docker run --rm \
@@ -568,537 +697,165 @@ docker run --rm \
   protogen-delta
 ```
 
----
+Bind mount `data:/app/data` особенно важен для SQLite: без него база будет находиться внутри контейнера.
 
-## Параметры запуска
-
-```text
---name protogen-delta
-```
-
-задаёт понятное имя контейнера.
-
-```text
---env-file .env
-```
-
-передаёт настройки и секреты в контейнер во время запуска.
-
-```text
--v <host>/data:/app/data
-```
-
-связывает локальную директорию `data` с `/app/data` внутри контейнера.
-
-```text
---rm
-```
-
-автоматически удаляет контейнер после завершения процесса.
-
-> [!IMPORTANT]
-> **`--rm` удаляет только контейнер.**
->
-> Docker image `protogen-delta` и файлы из локальной директории `data/` остаются на месте.
-
----
-
-## 💾 Persistent data
-
-Контейнер следует считать временным.
-
-Без bind mount:
-
-```text
-Container
-└── /app/data
-    ├── users.json
-    └── images.json
-```
-
-эти данные принадлежат контейнеру.
-
-При использовании bind mount:
-
-```text
-HOST
-data/
-   ▲
-   │
-   │ bind mount
-   │
-   ▼
-CONTAINER
-/app/data/
-```
-
-runtime-состояние остаётся на основной системе.
-
-> [!IMPORTANT]
-> **Runtime-данные должны жить вне контейнера.**
->
-> Благодаря bind mount контейнер можно удалить, пересобрать или заменить новой версией без потери базы пользователей и артов.
-
----
-
-## Запуск Docker в фоне
-
-Добавь параметр:
-
-```text
--d
-```
-
-Пример для PowerShell:
-
-```powershell
-docker run -d --rm `
-  --name protogen-delta `
-  --env-file .env `
-  -v "${PWD}\data:/app/data" `
-  protogen-delta
-```
-
-Посмотреть работающие контейнеры:
-
-```bash
-docker ps
-```
-
-Посмотреть логи:
+Логи:
 
 ```bash
 docker logs -f protogen-delta
 ```
 
-Остановить:
+Остановка:
 
 ```bash
 docker stop protogen-delta
 ```
 
 > [!WARNING]
-> **Не запускай одновременно два экземпляра бота с одним Telegram Bot Token.**
->
-> Например, локальный Poetry-процесс и Docker-контейнер одновременно.
->
-> Два процесса long polling будут конфликтовать между собой.
+> Не запускай одновременно два экземпляра long-polling бота с одним Telegram Bot Token.
 
 ---
 
 # 🧪 Тестирование
 
-Проект покрыт автоматическими unit- и composition-тестами.
+Текущее состояние:
 
-### Результат последнего полного прогона
+```text
+255 passed
+35 source files проходят mypy
+coverage gate в CI: >=95%
+```
 
-| Метрика | Результат |
-|---|---:|
-| Tests | **146 passed** |
-| Statements | **819** |
-| Missed | **24** |
-| Coverage | **97.07%** |
-Тестируются:
+Проверяются:
 
-- настройки приложения;
-- JSON-загрузчики;
-- prompt-загрузчики;
-- repositories;
-- пользователи;
-- система артов;
-- Telegram handlers;
-- административные команды;
-- error handler;
+- settings и env parsing;
+- prompt- и JSON-loaders;
 - DeepSeek service;
-- классификаторы;
-- mood-логика;
-- insult-логика;
-- RP-логика;
-- `ResponseEngine`;
-- форматирование сообщений;
-- точка входа `main()`;
-- создание зависимостей;
-- подключение роутеров;
-- корректное закрытие API-клиентов.
+- classifiers;
+- rate limiter;
+- JSON repositories;
+- SQLite persistence;
+- восстановление state новым экземпляром repository/store;
+- изоляция пользователей;
+- concurrent locks;
+- runtime retention;
+- накопительные эмоции и отношения;
+- decay краткосрочных эмоций;
+- dynamic state-context;
+- RP;
+- conversation history;
+- `/reset`;
+- Telegram handlers;
+- система артов;
+- admin commands;
+- `main.py`.
 
-> [!NOTE]
-> **Unit-тесты не отправляют настоящие запросы в Telegram и DeepSeek.**
->
-> Внешние сервисы подменяются mock-объектами.
->
-> Реальная работа Telegram API, DeepSeek API и Docker отдельно проверялась smoke-тестами.
-
-> [!IMPORTANT]
-> `main.py` также покрыт тестами.
->
-> Точка входа проверяется без реального запуска Telegram polling: внешние зависимости заменяются mock-объектами.
-
----
-
-## Запуск тестов
+## Локальный полный QA
 
 ```bash
-poetry run pytest
-```
-
-Подробный режим:
-
-```bash
-poetry run pytest -v
-```
-
----
-
-# 📊 Покрытие тестами
-
-Показать общий coverage и непокрытые строки:
-
-```bash
-poetry run pytest --cov=src/protogen_delta --cov-report=term-missing
-```
-
-Текущий результат:
-
-```text
-TOTAL    819    24    97%
-```
-
----
-
-## HTML-отчёт
-
-Создать интерактивный HTML coverage:
-
-```bash
-poetry run pytest --cov=src/protogen_delta --cov-report=html
-```
-
-Результат:
-
-```text
-htmlcov/index.html
-```
-
-Открыть на Windows:
-
-```powershell
-Start-Process .\htmlcov\index.html
-```
-
-HTML-отчёт позволяет открыть конкретный Python-файл и увидеть:
-
-```text
-зелёные строки   — выполнены тестами
-красные строки   — не выполнялись
-```
-
----
-
-## XML-отчёт
-
-```bash
-poetry run pytest --cov=src/protogen_delta --cov-report=xml
-```
-
-Создаётся:
-
-```text
-coverage.xml
-```
-
-XML-report можно использовать в CI/CD и внешних сервисах анализа покрытия.
-
----
-
-## Все coverage-отчёты одним запуском
-
-### Windows PowerShell
-
-```powershell
-poetry run pytest `
-  --cov=src/protogen_delta `
-  --cov-report=term-missing `
-  --cov-report=html `
-  --cov-report=xml
-```
-
-### Linux / macOS
-
-```bash
-poetry run pytest \
-  --cov=src/protogen_delta \
-  --cov-report=term-missing \
-  --cov-report=html \
-  --cov-report=xml
-```
-
----
-
-# ✅ Проверка качества кода
-
-Проект использует несколько независимых инструментов проверки.
-
-### Black
-
-```bash
-poetry run black src tests
-```
-
-### isort
-
-```bash
-poetry run isort src tests
-```
-
-### Flake8
-
-```bash
+poetry run black --check src tests
+poetry run isort --check-only src tests
 poetry run flake8 src tests
-```
-
-### mypy
-
-```bash
-poetry run mypy src tests
-```
-
-### pytest
-
-```bash
+poetry run mypy src
 poetry run pytest
-```
-
-Полный ручной quality check:
-
-```bash
-poetry run black src tests
-poetry run isort src tests
-poetry run flake8 src tests
-poetry run mypy src tests
-poetry run pytest
-```
-
-Текущий проект успешно проходит:
-
-```text
-Black
-isort
-Flake8
-mypy
-pytest
-```
-
----
-
-# 💾 Runtime-хранилище
-
-Runtime-данные хранятся отдельно от исходного кода:
-
-```text
-data/
-├── users.json
-└── images.json
-```
-
-### `users.json`
-
-Хранит зарегистрированных пользователей.
-
-### `images.json`
-
-Хранит Telegram `file_id` сохранённых изображений.
-
-> [!IMPORTANT]
-> `data/` является состоянием работающего приложения, а не частью исходного кода.
->
-> Поэтому каталог исключён из Git и Docker build context.
-
----
-
-# 📦 Сборка Python-пакета
-
-Проверить корректность сборки проекта:
-
-```bash
 poetry build
 ```
 
-Результат будет создан в:
-
-```text
-dist/
-```
-
----
-
-# 🔐 Безопасность
-
-Не должны попадать в публичный репозиторий:
-
-```text
-.env
-data/
-.coverage
-coverage.xml
-htmlcov/
-```
-
-Особенно нельзя публиковать:
-
-```text
-TELEGRAM_TOKEN
-DEEPSEEK_API_KEY
-```
-
-> [!CAUTION]
-> **Удаление секрета из последнего коммита не удаляет его автоматически из истории Git.**
->
-> Случайно опубликованный Telegram Token или API Key следует заменить.
-
----
-
-# 🧠 Что было переработано
-
-<details>
-
-<summary><b>История рефакторинга Protogen Delta</b></summary>
-
-<br>
-
-В ходе переработки проекта:
-
-- создан `src-layout`;
-- настроен Poetry;
-- зависимости перенесены в `pyproject.toml`;
-- проект переведён на Python 3.14;
-- настройки вынесены в `.env`;
-- создан `.env.example`;
-- статические JSON-конфиги отделены от runtime-данных;
-- prompts вынесены в `.txt`;
-- Telegram handlers отделены от бизнес-логики;
-- создан слой repositories;
-- создан `DeepSeekService`;
-- добавлены отдельные классификаторы;
-- создан `ResponseEngine`;
-- добавлен `BotState`;
-- добавлена глобальная обработка ошибок;
-- восстановлена система артов;
-- добавлена фильтрация разрешённой Telegram-группы;
-- добавлены административные команды;
-- добавлены unit-тесты;
-- добавлены composition-тесты;
-- достигнуто 97% test coverage;
-- настроены Black, isort, Flake8 и mypy;
-- добавлен Dockerfile;
-- настроен `.dockerignore`;
-- Docker image переведён на multi-stage сборку и запуск от непривилегированного пользователя;
-- DeepSeek обновлён до V4.1 Flash через `deepseek-flash`;
-- добавлены типизированные ошибки DeepSeek и отдельные timeout/retry-настройки для классификаторов;
-- приложение успешно запущено внутри Linux Docker-контейнера;
-- выполнены реальные smoke-тесты Telegram и DeepSeek.
-
-</details>
-
----
-
-# 🛠️ Полезные команды
+Coverage:
 
 ```bash
-# Установка зависимостей
+poetry run pytest --cov=src/protogen_delta --cov-report=term-missing --cov-fail-under=95
+```
+
+---
+
+# 🔄 CI
+
+GitHub Actions запускается на `push` и pull request для `develop` и `main`.
+
+Pipeline:
+
+```text
+checkout
+  ↓
+Python 3.14
+  ↓
+Poetry 2.4.1
+  ↓
+poetry check
+  ↓
 poetry install
-
-# Информация об окружении
-poetry env info
-
-# Запуск бота
-poetry run python -m protogen_delta.main
-
-# Тесты
-poetry run pytest
-
-# Coverage
-poetry run pytest --cov=src/protogen_delta --cov-report=term-missing
-
-# Форматирование
-poetry run black src tests
-
-# Сортировка импортов
-poetry run isort src tests
-
-# Lint
-poetry run flake8 src tests
-
-# Типизация
-poetry run mypy src tests
-
-# Сборка Python-пакета
+  ↓
+Black
+  ↓
+isort
+  ↓
+Flake8
+  ↓
+mypy
+  ↓
+pytest + coverage >=95%
+  ↓
 poetry build
-
-# Сборка Docker image
-docker build -t protogen-delta .
-
-# Docker images
-docker images
-
-# Работающие контейнеры
-docker ps
-
-# Логи контейнера
-docker logs -f protogen-delta
-
-# Остановка контейнера
-docker stop protogen-delta
 ```
 
 ---
 
-## ⚠️ Возможные проблемы
+# 🗃️ Persistence и дальнейший рост
 
-### Бот уже запущен в другом месте
-
-Если одновременно работают:
+Сейчас SQLite выбран намеренно: отдельный сервер базы проекту пока не нужен, а состояние уже должно переживать рестарты.
 
 ```text
-Poetry process
-+
-Docker container
+ResponseEngine
+      ↓
+UserStateStore
+      ↓
+UserStatePersistence
+      ↓
+UserStateRepository
+      ↓
+SQLite
 ```
 
-с одним Telegram Token, polling будет конфликтовать.
-
-Останови предыдущий экземпляр перед запуском нового.
+При росте проекта нижний слой можно заменить PostgreSQL-репозиторием без переноса persistence-логики в `ResponseEngine`.
 
 ---
 
-### Проблемы с Unicode в Windows PowerShell
+# 🛣️ Ближайшие направления развития
 
-Можно включить UTF-8 для текущей PowerShell-сессии:
+То, чего в текущей версии **ещё нет**:
 
-```powershell
-$env:PYTHONUTF8="1"
-$env:PYTHONIOENCODING="utf-8"
-```
+- proactive messages после длительного отсутствия пользователя;
+- time-based развитие и затухание состояния;
+- более долгосрочная память;
+- persistent RP mode;
+- сокращение лишних classifier-вызовов;
+- при росте нагрузки — миграция persistence на PostgreSQL.
 
 ---
 
-### Время в Docker отличается от Windows
+# 🔐 Безопасность и эксплуатация
 
-Контейнер может использовать UTC, поэтому timestamp в Docker-логах может отличаться от локального времени основной системы.
+- `.env` не хранится в Git;
+- `data/` не хранится в Git;
+- Docker runtime работает не от root;
+- админские команды проверяют `ADMIN_IDS`;
+- состояние пользователей изолировано по Telegram `user_id`;
+- concurrent requests одного пользователя сериализуются.
 
-Это не является ошибкой приложения.
+---
+
+# 📄 Лицензия
+
+Проект распространяется по лицензии **MIT**.
 
 ---
 
 <div align="center">
 
-## Protogen Delta
+**Protogen Delta**
 
-**Python 3.14 · aiogram 3 · DeepSeek · Poetry · Docker**
-
-`146 tests · 97% coverage`
-
-## 📄 Лицензия
-
-Проект распространяется под лицензией **MIT**.
+`develop` — актуальная ветка разработки  
+`main` — основная стабильная ветка
 
 </div>
