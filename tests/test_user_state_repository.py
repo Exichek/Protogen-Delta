@@ -589,3 +589,107 @@ def test_user_state_repository_runs_sqlite_off_event_loop(
 
     assert len(sqlite_thread_ids) == 2
     assert all(thread_id != event_loop_thread_id for thread_id in sqlite_thread_ids)
+
+
+def test_user_state_repository_deletes_only_requested_user(
+    tmp_path: Path,
+) -> None:
+    """Удаление должно стирать только выбранное persistent-состояние."""
+    repository = UserStateRepository(tmp_path)
+
+    async def run_test() -> None:
+        await repository.save(
+            111,
+            emotions=EmotionalState(
+                warmth=0.70,
+            ),
+            relationship=RelationshipState(
+                trust=0.80,
+            ),
+            emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=True,
+        )
+
+        await repository.save(
+            222,
+            emotions=EmotionalState(
+                irritation=0.60,
+            ),
+            relationship=RelationshipState(
+                resentment=0.50,
+            ),
+            emotions_updated_at=LATER_TIMESTAMP,
+            roleplay_active=True,
+        )
+
+        await repository.delete(111)
+
+        first = await repository.load(111)
+        second = await repository.load(222)
+
+        assert first is None
+
+        assert second is not None
+        assert second.emotions.irritation == pytest.approx(0.60)
+        assert second.relationship.resentment == pytest.approx(0.50)
+        assert second.roleplay_active is True
+
+    asyncio.run(run_test())
+
+
+def test_user_state_repository_wraps_delete_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка SQLite при удалении должна превращаться в persistence-ошибку."""
+    repository = UserStateRepository(tmp_path)
+
+    def failing_connect(_path: Path) -> None:
+        raise sqlite3.OperationalError("database unavailable")
+
+    monkeypatch.setattr(
+        "protogen_delta.repositories.user_state.sqlite3.connect",
+        failing_connect,
+    )
+
+    with pytest.raises(
+        UserStatePersistenceError,
+        match="Не удалось удалить состояние пользователя 123",
+    ):
+        asyncio.run(
+            repository.delete(123),
+        )
+
+
+def test_user_state_repository_runs_delete_off_event_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SQLite delete должен выполняться в worker thread."""
+    repository = UserStateRepository(tmp_path)
+
+    event_loop_thread_id = threading.get_ident()
+    sqlite_thread_ids: list[int] = []
+
+    original_connect = sqlite3.connect
+
+    def tracked_connect(
+        database: Path,
+    ) -> sqlite3.Connection:
+        sqlite_thread_ids.append(
+            threading.get_ident(),
+        )
+
+        return original_connect(database)
+
+    monkeypatch.setattr(
+        "protogen_delta.repositories.user_state.sqlite3.connect",
+        tracked_connect,
+    )
+
+    asyncio.run(
+        repository.delete(123),
+    )
+
+    assert len(sqlite_thread_ids) == 1
+    assert sqlite_thread_ids[0] != event_loop_thread_id

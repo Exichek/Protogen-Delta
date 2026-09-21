@@ -898,3 +898,133 @@ def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
         emotions_updated_at=19000.0,
         roleplay_active=False,
     )
+
+
+def test_user_state_store_fully_resets_user() -> None:
+    """Полный сброс должен очистить runtime и удалить persistent-состояние."""
+    persistence = Mock()
+    persistence.load = AsyncMock(return_value=None)
+    persistence.save = AsyncMock()
+    persistence.delete = AsyncMock()
+
+    store = UserStateStore(
+        wall_clock=lambda: 1000.0,
+        persistence=persistence,
+    )
+
+    async def run_test() -> UserState:
+        async with store.use(123) as state:
+            state.mood = "angry"
+            state.reply_count = 5
+            state.roleplay_active = True
+
+            state.history.append(
+                ConversationTurn(
+                    user_message="Сообщение",
+                    assistant_message="Ответ",
+                )
+            )
+
+            state.emotions.adjust(
+                warmth=0.4,
+                irritation=0.6,
+                playfulness=0.3,
+                arousal=0.5,
+            )
+
+            state.relationship.adjust(
+                familiarity=0.8,
+                trust=0.7,
+                affection=0.6,
+                resentment=0.5,
+            )
+
+        persistence.save.reset_mock()
+
+        await store.reset_user(123)
+
+        return store.get(123)
+
+    state = asyncio.run(run_test())
+
+    persistence.delete.assert_awaited_once_with(123)
+    persistence.save.assert_not_awaited()
+
+    assert state.mood == "neutral"
+    assert state.reply_count == 0
+    assert list(state.history) == []
+    assert state.roleplay_active is False
+
+    assert state.emotions.warmth == 0.0
+    assert state.emotions.irritation == 0.0
+    assert state.emotions.playfulness == 0.0
+    assert state.emotions.arousal == 0.0
+
+    assert state.relationship.familiarity == 0.0
+    assert state.relationship.trust == 0.0
+    assert state.relationship.affection == 0.0
+    assert state.relationship.resentment == 0.0
+
+    assert state.emotions_updated_at == pytest.approx(1000.0)
+    assert state.persistence_loaded is True
+
+
+def test_user_state_store_preserves_state_when_delete_fails() -> None:
+    """Неудачный persistent-delete не должен создавать ложный полный сброс."""
+    persistence = Mock()
+    persistence.load = AsyncMock(return_value=None)
+    persistence.save = AsyncMock()
+    persistence.delete = AsyncMock(
+        side_effect=UserStatePersistenceError(
+            "SQLite недоступен",
+        )
+    )
+
+    store = UserStateStore(
+        wall_clock=lambda: 1000.0,
+        persistence=persistence,
+    )
+
+    async def prepare_state() -> UserState:
+        async with store.use(123) as state:
+            state.mood = "angry"
+            state.reply_count = 3
+            state.roleplay_active = True
+
+            state.history.append(
+                ConversationTurn(
+                    user_message="Сообщение",
+                    assistant_message="Ответ",
+                )
+            )
+
+            state.emotions.adjust(
+                irritation=0.6,
+            )
+            state.relationship.adjust(
+                resentment=0.7,
+            )
+
+            return state
+
+    state = asyncio.run(prepare_state())
+
+    persistence.save.reset_mock()
+
+    with pytest.raises(
+        UserStatePersistenceError,
+        match="SQLite недоступен",
+    ):
+        asyncio.run(
+            store.reset_user(123),
+        )
+
+    assert state.mood == "angry"
+    assert state.reply_count == 3
+    assert len(state.history) == 1
+    assert state.roleplay_active is True
+
+    assert state.emotions.irritation == pytest.approx(0.6)
+    assert state.relationship.resentment == pytest.approx(0.7)
+
+    persistence.save.assert_not_awaited()

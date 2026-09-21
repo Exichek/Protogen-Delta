@@ -141,6 +141,13 @@ class UserStatePersistence(Protocol):
         """Сохранить долгоживущее состояние пользователя."""
         ...
 
+    async def delete(
+        self,
+        user_id: int,
+    ) -> None:
+        """Удалить долгоживущее состояние пользователя."""
+        ...
+
 
 @dataclass(slots=True)
 class UserState:
@@ -194,6 +201,12 @@ class UserState:
         self.reply_count = 0
         self.history.clear()
         self.roleplay_active = False
+
+    def reset_all(self) -> None:
+        """Полностью сбросить пользовательское состояние."""
+        self.reset_context()
+        self.emotions = EmotionalState()
+        self.relationship = RelationshipState()
 
 
 class UserStateStore:
@@ -304,6 +317,27 @@ class UserStateStore:
         del self._states[user_id]
 
         return True
+
+    async def reset_user(
+        self,
+        user_id: int,
+    ) -> None:
+        """Полностью забыть состояние конкретного пользователя."""
+        state = self.get(user_id)
+        state.active_operations += 1
+
+        try:
+            async with state.lock:
+                if self._persistence is not None:
+                    await self._persistence.delete(user_id)
+
+                state.reset_all()
+                state.emotions_updated_at = self._wall_clock()
+                state.persistence_loaded = True
+        finally:
+            state.last_accessed_at = self._clock()
+            self._states.move_to_end(user_id)
+            state.active_operations -= 1
 
     @property
     def tracked_users_count(self) -> int:

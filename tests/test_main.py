@@ -129,6 +129,7 @@ def test_main_builds_application_and_starts_polling(
     )
 
     prompts = {
+        "start_greeting.txt": "START GREETING PROMPT",
         "insult_classification.txt": "INSULT PROMPT",
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
@@ -297,6 +298,7 @@ def test_main_builds_application_and_starts_polling(
         call("insult_classification.txt"),
         call("mood_classification.txt"),
         call("fetish_role_classification.txt"),
+        call("start_greeting.txt"),
         call("personality/core.txt"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
@@ -331,7 +333,40 @@ def test_main_builds_application_and_starts_polling(
         model="test-model",
     )
 
+    create_start_router_mock.assert_called_once()
+
+    start_router_call = create_start_router_mock.call_args
+
+    assert start_router_call is not None
+
+    assert isinstance(
+        start_router_call.kwargs["users_repository"],
+        main_module.UsersRepository,
+    )
+    assert start_router_call.kwargs["start_messages"] == [
+        "Я уже работаю",
+    ]
+    assert start_router_call.kwargs["deepseek"] is deepseek_mock
+    assert start_router_call.kwargs["first_start_prompt"] == "START GREETING PROMPT"
+
     create_reset_router_mock.assert_called_once()
+
+    reset_router_call = create_reset_router_mock.call_args
+
+    assert reset_router_call is not None
+    assert len(reset_router_call.args) == 2
+
+    reset_response_engine = reset_router_call.args[0]
+    reset_users_repository = reset_router_call.args[1]
+
+    assert isinstance(
+        reset_response_engine,
+        main_module.ResponseEngine,
+    )
+    assert isinstance(
+        reset_users_repository,
+        main_module.UsersRepository,
+    )
 
     assert dispatcher_mock.include_router.call_count == 7
 

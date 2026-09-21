@@ -56,6 +56,16 @@ class UserStateRepository:
             roleplay_active=roleplay_active,
         )
 
+    async def delete(
+        self,
+        user_id: int,
+    ) -> None:
+        """Удалить долгоживущее состояние без блокировки event loop."""
+        await asyncio.to_thread(
+            self._delete_sync,
+            user_id,
+        )
+
     def _load_sync(
         self,
         user_id: int,
@@ -176,6 +186,25 @@ class UserStateRepository:
         except sqlite3.Error as error:
             raise UserStatePersistenceError(
                 f"Не удалось сохранить состояние пользователя {user_id}"
+            ) from error
+
+    def _delete_sync(
+        self,
+        user_id: int,
+    ) -> None:
+        """Синхронно удалить долгоживущее состояние пользователя."""
+        try:
+            with closing(sqlite3.connect(self._path)) as connection, connection:
+                connection.execute(
+                    """
+                    DELETE FROM user_states
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                )
+        except sqlite3.Error as error:
+            raise UserStatePersistenceError(
+                f"Не удалось удалить состояние пользователя {user_id}"
             ) from error
 
     def _initialize(self) -> None:

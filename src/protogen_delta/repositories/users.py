@@ -49,6 +49,21 @@ class UsersRepository:
 
         return self._storage.update(add_user)
 
+    def remove(self, user_id: int) -> bool:
+        """Удалить пользователя и вернуть True, если он был сохранён."""
+
+        def remove_user(data: dict[str, Any]) -> bool:
+            """Удалить пользователя внутри атомарной операции."""
+            users = _get_users(data)
+
+            if user_id not in users:
+                return False
+
+            users.remove(user_id)
+            return True
+
+        return self._storage.update(remove_user)
+
     def count(self) -> int:
         """Вернуть количество сохранённых пользователей."""
         return len(self.get_all())
