@@ -1,6 +1,8 @@
 """Сервис для работы с DeepSeek API."""
 
+import logging
 from collections.abc import Sequence
+from time import perf_counter
 
 from openai import (
     APIConnectionError,
@@ -15,6 +17,8 @@ from openai import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from protogen_delta.core.user_state import ConversationTurn
+
+logger = logging.getLogger(__name__)
 
 _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
@@ -79,6 +83,99 @@ def _translate_openai_error(error: OpenAIError) -> DeepSeekError:
     return DeepSeekAPIError("Неизвестная ошибка DeepSeek API")
 
 
+def _usage_value(
+    usage: object,
+    field_name: str,
+) -> int | None:
+    """Безопасно получить целочисленное поле usage из ответа API."""
+    value = getattr(
+        usage,
+        field_name,
+        None,
+    )
+
+    if isinstance(value, int):
+        return value
+
+    model_extra = getattr(
+        usage,
+        "model_extra",
+        None,
+    )
+
+    if isinstance(model_extra, dict):
+        extra_value = model_extra.get(field_name)
+
+        if isinstance(extra_value, int):
+            return extra_value
+
+    return None
+
+
+def _log_request_metrics(
+    *,
+    request_type: str,
+    started_at: float,
+    response: object,
+    system_prompt: str,
+    user_message: str,
+    history_turns: int,
+) -> None:
+    """Записать технические метрики запроса без содержимого сообщений."""
+    usage = getattr(
+        response,
+        "usage",
+        None,
+    )
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cache_hit_tokens: int | None = None
+    cache_miss_tokens: int | None = None
+
+    if usage is not None:
+        prompt_tokens = _usage_value(
+            usage,
+            "prompt_tokens",
+        )
+        completion_tokens = _usage_value(
+            usage,
+            "completion_tokens",
+        )
+        total_tokens = _usage_value(
+            usage,
+            "total_tokens",
+        )
+        cache_hit_tokens = _usage_value(
+            usage,
+            "prompt_cache_hit_tokens",
+        )
+        cache_miss_tokens = _usage_value(
+            usage,
+            "prompt_cache_miss_tokens",
+        )
+
+    duration = perf_counter() - started_at
+
+    logger.info(
+        "DeepSeek %s | duration=%.3fs | "
+        "prompt_tokens=%s | completion_tokens=%s | total_tokens=%s | "
+        "cache_hit_tokens=%s | cache_miss_tokens=%s | "
+        "system_chars=%d | history_turns=%d | user_chars=%d",
+        request_type,
+        duration,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cache_hit_tokens,
+        cache_miss_tokens,
+        len(system_prompt),
+        history_turns,
+        len(user_message),
+    )
+
+
 class DeepSeekService:
     """Выполнять текстовые запросы к DeepSeek."""
 
@@ -140,6 +237,8 @@ class DeepSeekService:
             }
         )
 
+        started_at = perf_counter()
+
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -153,6 +252,15 @@ class DeepSeekService:
         except OpenAIError as error:
             raise _translate_openai_error(error) from error
 
+        _log_request_metrics(
+            request_type="chat",
+            started_at=started_at,
+            response=response,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=len(history),
+        )
+
         return response.choices[0].message.content or ""
 
     async def classify(
@@ -165,6 +273,8 @@ class DeepSeekService:
             timeout=_CLASSIFY_TIMEOUT,
             max_retries=_CLASSIFY_MAX_RETRIES,
         )
+
+        started_at = perf_counter()
 
         try:
             response = await client.chat.completions.create(
@@ -189,6 +299,15 @@ class DeepSeekService:
             )
         except OpenAIError as error:
             raise _translate_openai_error(error) from error
+
+        _log_request_metrics(
+            request_type="classify",
+            started_at=started_at,
+            response=response,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=0,
+        )
 
         return (response.choices[0].message.content or "").strip().lower()
 
