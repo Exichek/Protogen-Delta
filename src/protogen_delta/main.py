@@ -137,6 +137,10 @@ async def main() -> None:
             "fetish_role_classification.txt",
         )
 
+        first_start_prompt = load_prompt(
+            "start_greeting.txt",
+        )
+
         core_prompt = load_prompt(
             "personality/core.txt",
         )
@@ -201,8 +205,10 @@ async def main() -> None:
         )
 
         start_router = create_start_router(
-            users_repository,
-            start_messages,
+            users_repository=users_repository,
+            start_messages=start_messages,
+            deepseek=deepseek,
+            first_start_prompt=first_start_prompt,
         )
         help_router = create_help_router()
 
@@ -225,6 +231,7 @@ async def main() -> None:
 
         reset_router = create_reset_router(
             response_engine,
+            users_repository,
         )
 
         unknown_command_router = create_unknown_command_router()

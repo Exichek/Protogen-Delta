@@ -3,7 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 from aiogram import Router
@@ -13,9 +13,17 @@ from aiogram.types import Message
 import protogen_delta.handlers.art as art_module
 import protogen_delta.handlers.start as start_module
 from protogen_delta.handlers.art import create_art_router
-from protogen_delta.handlers.start import FIRST_START_MESSAGE, create_start_router
+from protogen_delta.handlers.start import (
+    FIRST_START_FALLBACK_BODY,
+    FIRST_START_PREFIXES,
+    create_start_router,
+)
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.deepseek import (
+    DeepSeekError,
+    DeepSeekService,
+)
 
 
 async def _call_handler(
@@ -52,14 +60,49 @@ def _create_message_mock() -> tuple[
     )
 
 
-def test_start_registers_new_user() -> None:
-    """Новый пользователь должен сохраниться и получить первое приветствие."""
+def _create_deepseek_mock() -> AsyncMock:
+    """Создать мок DeepSeek для приветствия нового пользователя."""
+    deepseek_mock = AsyncMock(spec=DeepSeekService)
+    deepseek_mock.chat.return_value = "Сгенерированное приветствие."
+
+    return deepseek_mock
+
+
+def _assert_first_start_reply(
+    answer_mock: AsyncMock,
+    expected_body: str,
+) -> None:
+    """Проверить вариативное начало и ожидаемое тело первого приветствия."""
+    answer_mock.assert_awaited_once()
+
+    call = answer_mock.await_args
+
+    assert call is not None
+
+    reply = call.args[0]
+
+    prefix, separator, body = reply.partition("\n\n")
+
+    assert prefix in FIRST_START_PREFIXES
+    assert separator == "\n\n"
+    assert body == expected_body
+
+
+def test_start_generates_greeting_for_new_user() -> None:
+    """Новый пользователь должен получить сгенерированное приветствие."""
     users_mock = Mock(spec=UsersRepository)
     users_mock.add.return_value = True
+
+    deepseek_mock = _create_deepseek_mock()
+    deepseek_mock.chat.return_value = (
+        "Могу поболтать, помочь с вопросами и показать, что здесь есть."
+    )
 
     router = create_start_router(
         users_repository=cast(UsersRepository, users_mock),
         start_messages=["Повторное приветствие"],
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
     )
 
     message, raw_message, answer_mock, _ = _create_message_mock()
@@ -75,7 +118,84 @@ def test_start_registers_new_user() -> None:
     )
 
     users_mock.add.assert_called_once_with(123)
-    answer_mock.assert_awaited_once_with(FIRST_START_MESSAGE)
+
+    deepseek_mock.chat.assert_awaited_once_with(
+        system_prompt="START PROMPT",
+        user_message=ANY,
+    )
+
+    _assert_first_start_reply(
+        answer_mock,
+        "Могу поболтать, помочь с вопросами и показать, что здесь есть.",
+    )
+
+
+def test_start_uses_fallback_for_empty_generated_greeting() -> None:
+    """Пустой ответ модели должен заменяться безопасным приветствием."""
+    users_mock = Mock(spec=UsersRepository)
+    users_mock.add.return_value = True
+
+    deepseek_mock = _create_deepseek_mock()
+    deepseek_mock.chat.return_value = "   "
+
+    router = create_start_router(
+        users_repository=cast(UsersRepository, users_mock),
+        start_messages=[],
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
+    )
+
+    message, raw_message, answer_mock, _ = _create_message_mock()
+
+    raw_message.from_user = SimpleNamespace(id=123)
+
+    asyncio.run(
+        _call_handler(
+            router,
+            0,
+            message,
+        )
+    )
+
+    _assert_first_start_reply(
+        answer_mock,
+        FIRST_START_FALLBACK_BODY,
+    )
+
+
+def test_start_uses_fallback_when_generation_fails() -> None:
+    """Ошибка DeepSeek не должна оставлять нового пользователя без приветствия."""
+    users_mock = Mock(spec=UsersRepository)
+    users_mock.add.return_value = True
+
+    deepseek_mock = _create_deepseek_mock()
+    deepseek_mock.chat.side_effect = DeepSeekError(
+        "DeepSeek недоступен",
+    )
+
+    router = create_start_router(
+        users_repository=cast(UsersRepository, users_mock),
+        start_messages=[],
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
+    )
+
+    message, raw_message, answer_mock, _ = _create_message_mock()
+
+    raw_message.from_user = SimpleNamespace(id=123)
+
+    asyncio.run(
+        _call_handler(
+            router,
+            0,
+            message,
+        )
+    )
+
+    _assert_first_start_reply(
+        answer_mock,
+        FIRST_START_FALLBACK_BODY,
+    )
 
 
 def test_start_returns_random_message_for_existing_user(
@@ -84,6 +204,8 @@ def test_start_returns_random_message_for_existing_user(
     """Повторный /start должен возвращать одно из обычных приветствий."""
     users_mock = Mock(spec=UsersRepository)
     users_mock.add.return_value = False
+
+    deepseek_mock = _create_deepseek_mock()
 
     start_messages = [
         "Первое",
@@ -99,6 +221,8 @@ def test_start_returns_random_message_for_existing_user(
     router = create_start_router(
         users_repository=cast(UsersRepository, users_mock),
         start_messages=start_messages,
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
     )
 
     message, raw_message, answer_mock, _ = _create_message_mock()
@@ -114,17 +238,22 @@ def test_start_returns_random_message_for_existing_user(
     )
 
     users_mock.add.assert_called_once_with(123)
+    deepseek_mock.chat.assert_not_awaited()
     answer_mock.assert_awaited_once_with("Первое")
 
 
 def test_start_uses_fallback_without_start_messages() -> None:
-    """При пустом списке приветствий должен использоваться fallback."""
+    """Повторный /start без списка приветствий должен использовать fallback."""
     users_mock = Mock(spec=UsersRepository)
     users_mock.add.return_value = False
+
+    deepseek_mock = _create_deepseek_mock()
 
     router = create_start_router(
         users_repository=cast(UsersRepository, users_mock),
         start_messages=[],
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
     )
 
     message, raw_message, answer_mock, _ = _create_message_mock()
@@ -139,6 +268,8 @@ def test_start_uses_fallback_without_start_messages() -> None:
         )
     )
 
+    deepseek_mock.chat.assert_not_awaited()
+
     answer_mock.assert_awaited_once_with(
         "Я уже запущен :D",
     )
@@ -147,10 +278,13 @@ def test_start_uses_fallback_without_start_messages() -> None:
 def test_start_ignores_message_without_user() -> None:
     """Сообщение без from_user не должно регистрироваться."""
     users_mock = Mock(spec=UsersRepository)
+    deepseek_mock = _create_deepseek_mock()
 
     router = create_start_router(
         users_repository=cast(UsersRepository, users_mock),
         start_messages=[],
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
     )
 
     message, raw_message, answer_mock, _ = _create_message_mock()
@@ -166,6 +300,7 @@ def test_start_ignores_message_without_user() -> None:
     )
 
     users_mock.add.assert_not_called()
+    deepseek_mock.chat.assert_not_awaited()
     answer_mock.assert_not_awaited()
 
 

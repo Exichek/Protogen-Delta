@@ -275,3 +275,31 @@ def test_json_repository_serializes_concurrent_updates(
 
     assert all(results)
     assert repository.load() == {"COUNT": workers}
+
+
+def test_users_repository_removes_user(tmp_path: Path) -> None:
+    """Сохранённый пользователь должен удаляться из хранилища."""
+    repository = UsersRepository(tmp_path)
+
+    repository.add(111)
+    repository.add(222)
+
+    result = repository.remove(111)
+
+    assert result is True
+    assert repository.get_all() == [222]
+    assert repository.count() == 1
+
+
+def test_users_repository_returns_false_for_missing_user(
+    tmp_path: Path,
+) -> None:
+    """Удаление неизвестного пользователя должно вернуть False."""
+    repository = UsersRepository(tmp_path)
+
+    repository.add(111)
+
+    result = repository.remove(222)
+
+    assert result is False
+    assert repository.get_all() == [111]

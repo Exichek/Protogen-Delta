@@ -96,6 +96,13 @@ class ResponseEngine:
         async with self._user_states.use(user_id) as user_state:
             user_state.reset_context()
 
+    async def reset_user(
+        self,
+        user_id: int,
+    ) -> None:
+        """Полностью забыть состояние конкретного пользователя."""
+        await self._user_states.reset_user(user_id)
+
     async def _respond_for_user(
         self,
         user_message: str,

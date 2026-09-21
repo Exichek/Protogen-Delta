@@ -1130,6 +1130,60 @@ def test_response_engine_reset_waits_for_active_request() -> None:
     assert list(user_state.history) == []
 
 
+def test_response_engine_fully_resets_user() -> None:
+    """Полный сброс должен очищать всё состояние выбранного пользователя."""
+    (
+        engine,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    state.mood = "angry"
+    state.reply_count = 4
+    state.roleplay_active = True
+
+    state.history.append(
+        ConversationTurn(
+            user_message="Сообщение",
+            assistant_message="Ответ",
+        )
+    )
+
+    state.emotions.adjust(
+        irritation=0.6,
+        warmth=0.3,
+    )
+
+    state.relationship.adjust(
+        familiarity=0.8,
+        trust=0.7,
+        affection=0.5,
+        resentment=0.4,
+    )
+
+    asyncio.run(
+        engine.reset_user(TEST_USER_ID),
+    )
+
+    assert state.mood == "neutral"
+    assert state.reply_count == 0
+    assert list(state.history) == []
+    assert state.roleplay_active is False
+
+    assert state.emotions.warmth == 0.0
+    assert state.emotions.irritation == 0.0
+
+    assert state.relationship.familiarity == 0.0
+    assert state.relationship.trust == 0.0
+    assert state.relationship.affection == 0.0
+    assert state.relationship.resentment == 0.0
+
+
 def test_response_engine_adds_horny_context_to_prompt() -> None:
     """Сексуальная реакция должна передаваться основной модели."""
     (

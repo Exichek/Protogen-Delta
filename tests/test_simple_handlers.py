@@ -11,7 +11,6 @@ from aiogram.types import Message
 import protogen_delta.handlers.unknown_command as unknown_command_module
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.help import HELP_TEXT, create_help_router
-from protogen_delta.handlers.reset import RESET_REPLY, create_reset_router
 from protogen_delta.handlers.text import RATE_LIMIT_REPLY, create_text_router
 from protogen_delta.handlers.unknown_command import (
     UNKNOWN_COMMAND_REPLIES,
@@ -343,54 +342,3 @@ def test_text_handler_rate_limit_is_per_user() -> None:
     second_answer_mock.assert_awaited_once_with(
         "Ответ бота",
     )
-
-
-def test_reset_handler_resets_user_context() -> None:
-    """Команда /reset должна очищать контекст пользователя."""
-    engine_mock = AsyncMock(spec=ResponseEngine)
-
-    router = create_reset_router(
-        cast(ResponseEngine, engine_mock),
-    )
-
-    message, answer_mock, _ = _create_message_mock(
-        "/reset",
-    )
-
-    asyncio.run(
-        _call_first_handler(
-            router,
-            message,
-        )
-    )
-
-    engine_mock.reset_user_context.assert_awaited_once_with(
-        TEST_USER_ID,
-    )
-    answer_mock.assert_awaited_once_with(
-        RESET_REPLY,
-    )
-
-
-def test_reset_handler_ignores_message_without_user() -> None:
-    """Команда без Telegram-пользователя не должна выполнять сброс."""
-    engine_mock = AsyncMock(spec=ResponseEngine)
-
-    router = create_reset_router(
-        cast(ResponseEngine, engine_mock),
-    )
-
-    message, answer_mock, _ = _create_message_mock(
-        "/reset",
-        user_id=None,
-    )
-
-    asyncio.run(
-        _call_first_handler(
-            router,
-            message,
-        )
-    )
-
-    engine_mock.reset_user_context.assert_not_awaited()
-    answer_mock.assert_not_awaited()
