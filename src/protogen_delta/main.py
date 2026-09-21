@@ -5,10 +5,11 @@ import logging
 from typing import cast
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
-from protogen_delta.config.settings import load_settings
+from protogen_delta.config.settings import Settings, load_settings
 from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.state import BotState
@@ -71,12 +72,29 @@ def _require_string_dict(
     return cast(dict[str, str], value)
 
 
+def _create_bot(settings: Settings) -> Bot:
+    """Создать Telegram-бота с необязательным прокси."""
+    if settings.telegram_proxy_url is None:
+        return Bot(
+            token=settings.telegram_token,
+        )
+
+    session = AiohttpSession(
+        proxy=settings.telegram_proxy_url,
+    )
+
+    return Bot(
+        token=settings.telegram_token,
+        session=session,
+    )
+
+
 async def main() -> None:
     """Создать зависимости приложения и запустить Telegram polling."""
     settings = load_settings()
     setup_logging(settings.log_level)
 
-    bot = Bot(token=settings.telegram_token)
+    bot = _create_bot(settings)
     deepseek: DeepSeekService | None = None
 
     try:

@@ -371,3 +371,85 @@ def test_main_builds_application_and_starts_polling(
 
     deepseek_mock.close.assert_awaited_once_with()
     bot_mock.session.close.assert_awaited_once_with()
+
+
+def test_create_bot_without_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Без настройки прокси Telegram-бот должен использовать обычную сессию."""
+    settings = Settings(
+        telegram_token="telegram-token",
+        deepseek_api_key="deepseek-key",
+        art_chat_id=-1001234567890,
+    )
+
+    bot_mock = Mock()
+    bot_constructor_mock = Mock(
+        return_value=bot_mock,
+    )
+    session_constructor_mock = Mock()
+
+    monkeypatch.setattr(
+        main_module,
+        "Bot",
+        bot_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "AiohttpSession",
+        session_constructor_mock,
+    )
+
+    result = main_module._create_bot(settings)
+
+    assert result is bot_mock
+
+    bot_constructor_mock.assert_called_once_with(
+        token="telegram-token",
+    )
+    session_constructor_mock.assert_not_called()
+
+
+def test_create_bot_with_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """При заданном URL Telegram-бот должен использовать proxy-сессию."""
+    settings = Settings(
+        telegram_token="telegram-token",
+        deepseek_api_key="deepseek-key",
+        art_chat_id=-1001234567890,
+        telegram_proxy_url="socks5://127.0.0.1:10808",
+    )
+
+    session_mock = Mock()
+    session_constructor_mock = Mock(
+        return_value=session_mock,
+    )
+
+    bot_mock = Mock()
+    bot_constructor_mock = Mock(
+        return_value=bot_mock,
+    )
+
+    monkeypatch.setattr(
+        main_module,
+        "AiohttpSession",
+        session_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "Bot",
+        bot_constructor_mock,
+    )
+
+    result = main_module._create_bot(settings)
+
+    assert result is bot_mock
+
+    session_constructor_mock.assert_called_once_with(
+        proxy="socks5://127.0.0.1:10808",
+    )
+    bot_constructor_mock.assert_called_once_with(
+        token="telegram-token",
+        session=session_mock,
+    )

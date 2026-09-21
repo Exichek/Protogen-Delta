@@ -17,6 +17,7 @@ class Settings:
     art_chat_id: int
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
+    telegram_proxy_url: str | None = None
     log_level: str = "INFO"
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
@@ -102,6 +103,11 @@ def load_settings() -> Settings:
         "deepseek-flash",
     )
 
+    telegram_proxy_url = os.getenv(
+        "TELEGRAM_PROXY_URL",
+        "",
+    ).strip()
+
     if not telegram_token:
         raise RuntimeError("TELEGRAM_TOKEN не найден в окружении")
 
@@ -162,6 +168,7 @@ def load_settings() -> Settings:
             "DEEPSEEK_BASE_URL",
             "https://api.deepseek.com",
         ),
+        telegram_proxy_url=telegram_proxy_url or None,
         log_level=os.getenv(
             "LOG_LEVEL",
             "INFO",

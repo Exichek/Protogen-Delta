@@ -45,6 +45,10 @@ def test_load_settings_with_defaults(
         "USER_STATE_RETENTION_SECONDS",
         raising=False,
     )
+    monkeypatch.delenv(
+        "TELEGRAM_PROXY_URL",
+        raising=False,
+    )
 
     settings = load_settings()
 
@@ -53,6 +57,7 @@ def test_load_settings_with_defaults(
     assert settings.art_chat_id == -100123456
     assert settings.deepseek_base_url == "https://api.deepseek.com"
     assert settings.deepseek_model == "deepseek-flash"
+    assert settings.telegram_proxy_url is None
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
     assert settings.admin_ids == frozenset()
@@ -103,6 +108,10 @@ def test_load_settings_with_custom_values(
         "USER_STATE_RETENTION_SECONDS",
         "3600",
     )
+    monkeypatch.setenv(
+        "TELEGRAM_PROXY_URL",
+        "socks5://127.0.0.1:10808",
+    )
 
     settings = load_settings()
 
@@ -110,6 +119,7 @@ def test_load_settings_with_custom_values(
     assert settings.deepseek_api_key == "deepseek"
     assert settings.art_chat_id == -100999
     assert settings.deepseek_base_url == "https://example.com"
+    assert settings.telegram_proxy_url == "socks5://127.0.0.1:10808"
     assert settings.deepseek_model == "test-model"
     assert settings.log_level == "DEBUG"
     assert settings.data_dir == Path("custom-data")
