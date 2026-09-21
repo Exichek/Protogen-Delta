@@ -1,6 +1,7 @@
 """Тесты сервиса DeepSeek."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -65,6 +66,7 @@ def _create_service(
 
 def _create_response(
     content: str | None,
+    usage: SimpleNamespace | None = None,
 ) -> SimpleNamespace:
     """Создать минимальный ответ, похожий на ответ OpenAI API."""
     return SimpleNamespace(
@@ -74,7 +76,26 @@ def _create_response(
                     content=content,
                 )
             )
-        ]
+        ],
+        usage=usage,
+    )
+
+
+def _create_usage(
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    cache_hit_tokens: int | None = None,
+    cache_miss_tokens: int | None = None,
+) -> SimpleNamespace:
+    """Создать usage-данные ответа DeepSeek."""
+    return SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        prompt_cache_hit_tokens=cache_hit_tokens,
+        prompt_cache_miss_tokens=cache_miss_tokens,
     )
 
 
@@ -510,3 +531,111 @@ def test_deepseek_chat_translates_status_error(
         )
 
     assert exc_info.value.status_code == 500
+
+
+def test_deepseek_chat_logs_request_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Обычный запрос должен логировать latency, usage и размеры контекста."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.return_value = _create_response(
+        "Ответ",
+        usage=_create_usage(
+            prompt_tokens=1200,
+            completion_tokens=80,
+            total_tokens=1280,
+            cache_hit_tokens=1000,
+            cache_miss_tokens=200,
+        ),
+    )
+
+    history = [
+        ConversationTurn(
+            user_message="Предыдущее сообщение",
+            assistant_message="Предыдущий ответ",
+        )
+    ]
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="protogen_delta.services.deepseek",
+    ):
+        result = asyncio.run(
+            service.chat(
+                system_prompt="СЕКРЕТНЫЙ SYSTEM",
+                user_message="СЕКРЕТНОЕ СООБЩЕНИЕ",
+                history=history,
+            )
+        )
+
+    assert result == "Ответ"
+
+    assert "DeepSeek chat" in caplog.text
+    assert "duration=" in caplog.text
+    assert "prompt_tokens=1200" in caplog.text
+    assert "completion_tokens=80" in caplog.text
+    assert "total_tokens=1280" in caplog.text
+    assert "cache_hit_tokens=1000" in caplog.text
+    assert "cache_miss_tokens=200" in caplog.text
+    assert "history_turns=1" in caplog.text
+
+    assert "СЕКРЕТНЫЙ SYSTEM" not in caplog.text
+    assert "СЕКРЕТНОЕ СООБЩЕНИЕ" not in caplog.text
+    assert "Предыдущее сообщение" not in caplog.text
+    assert "Предыдущий ответ" not in caplog.text
+
+
+def test_deepseek_classify_logs_request_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Классификатор должен логировать usage без содержимого запроса."""
+    (
+        service,
+        _,
+        create_mock,
+        _,
+    ) = _create_service(monkeypatch)
+
+    create_mock.return_value = _create_response(
+        "neutral",
+        usage=_create_usage(
+            prompt_tokens=300,
+            completion_tokens=1,
+            total_tokens=301,
+            cache_hit_tokens=256,
+            cache_miss_tokens=44,
+        ),
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="protogen_delta.services.deepseek",
+    ):
+        result = asyncio.run(
+            service.classify(
+                system_prompt="СЕКРЕТНЫЙ CLASSIFIER",
+                user_message="СЕКРЕТНЫЙ ТЕКСТ",
+            )
+        )
+
+    assert result == "neutral"
+
+    assert "DeepSeek classify" in caplog.text
+    assert "duration=" in caplog.text
+    assert "prompt_tokens=300" in caplog.text
+    assert "completion_tokens=1" in caplog.text
+    assert "total_tokens=301" in caplog.text
+    assert "cache_hit_tokens=256" in caplog.text
+    assert "cache_miss_tokens=44" in caplog.text
+    assert "history_turns=0" in caplog.text
+
+    assert "СЕКРЕТНЫЙ CLASSIFIER" not in caplog.text
+    assert "СЕКРЕТНЫЙ ТЕКСТ" not in caplog.text
