@@ -218,6 +218,7 @@ def test_response_engine_uses_rp_prompt() -> None:
 
     assert result == "RP ответ"
     assert state.reply_count == 1
+    assert engine._user_states.get(TEST_USER_ID).roleplay_active is True
 
     role_mock.classify.assert_not_awaited()
 
@@ -1330,3 +1331,104 @@ def test_response_engine_runs_message_classifiers_in_parallel() -> None:
     mood_mock.classify.assert_awaited_once_with(
         "Обычное сообщение",
     )
+
+
+def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
+    """После RP-действия следующие сообщения должны продолжать RP-режим."""
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = [
+        "RP ответ",
+        "Продолжение RP",
+    ]
+
+    first_result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "*обнял тебя*",
+        )
+    )
+
+    second_result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Что будешь делать дальше?",
+        )
+    )
+
+    assert first_result == "RP ответ"
+    assert second_result == "Продолжение RP"
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    assert state.roleplay_active is True
+
+    assert deepseek_mock.chat.await_count == 2
+
+    second_call = deepseek_mock.chat.await_args_list[1]
+
+    assert second_call.kwargs["system_prompt"] == "RP PROMPT"
+
+    assert second_call.kwargs["history"] == (
+        ConversationTurn(
+            user_message="*обнял тебя*",
+            assistant_message="RP ответ",
+        ),
+    )
+
+
+def test_response_engine_reset_disables_roleplay() -> None:
+    """Сброс контекста должен завершать активный RP-режим."""
+    (
+        engine,
+        _,
+        deepseek_mock,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    deepseek_mock.chat.side_effect = [
+        "RP ответ",
+        "Обычный ответ",
+    ]
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "*обнял тебя*",
+        )
+    )
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    assert state.roleplay_active is True
+
+    asyncio.run(
+        engine.reset_user_context(TEST_USER_ID),
+    )
+
+    assert state.roleplay_active is False
+    assert list(state.history) == []
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Привет",
+        )
+    )
+
+    assert result == "Обычный ответ"
+
+    last_call = deepseek_mock.chat.await_args
+
+    assert last_call is not None
+    assert last_call.kwargs["system_prompt"] == "SYSTEM PROMPT"
+    assert last_call.kwargs["history"] == ()

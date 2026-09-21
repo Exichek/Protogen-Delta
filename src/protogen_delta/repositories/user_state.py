@@ -14,7 +14,7 @@ from protogen_delta.core.user_state import (
 
 
 class UserStateRepository:
-    """Сохранять долгоживущие эмоции и отношения пользователей в SQLite."""
+    """Сохранять долгоживущие эмоции, отношения и RP-состояние пользователей."""
 
     def __init__(self, data_dir: Path) -> None:
         """Создать SQLite-базу и подготовить таблицу состояний."""
@@ -44,6 +44,7 @@ class UserStateRepository:
         emotions: EmotionalState,
         relationship: RelationshipState,
         emotions_updated_at: float,
+        roleplay_active: bool,
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -52,6 +53,7 @@ class UserStateRepository:
             emotions=emotions,
             relationship=relationship,
             emotions_updated_at=emotions_updated_at,
+            roleplay_active=roleplay_active,
         )
 
     def _load_sync(
@@ -72,7 +74,8 @@ class UserStateRepository:
                         trust,
                         affection,
                         resentment,
-                        emotions_updated_at
+                        emotions_updated_at,
+                        roleplay_active
                     FROM user_states
                     WHERE user_id = ?
                     """,
@@ -96,6 +99,7 @@ class UserStateRepository:
             affection,
             resentment,
             emotions_updated_at,
+            roleplay_active,
         ) = row
 
         return PersistentUserState(
@@ -112,6 +116,7 @@ class UserStateRepository:
                 resentment=resentment,
             ),
             emotions_updated_at=emotions_updated_at,
+            roleplay_active=bool(roleplay_active),
         )
 
     def _save_sync(
@@ -121,6 +126,7 @@ class UserStateRepository:
         emotions: EmotionalState,
         relationship: RelationshipState,
         emotions_updated_at: float,
+        roleplay_active: bool,
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         try:
@@ -137,9 +143,10 @@ class UserStateRepository:
                         trust,
                         affection,
                         resentment,
-                        emotions_updated_at
+                        emotions_updated_at,
+                        roleplay_active
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -149,7 +156,8 @@ class UserStateRepository:
                         trust = excluded.trust,
                         affection = excluded.affection,
                         resentment = excluded.resentment,
-                        emotions_updated_at = excluded.emotions_updated_at
+                        emotions_updated_at = excluded.emotions_updated_at,
+                        roleplay_active = excluded.roleplay_active
                     """,
                     (
                         user_id,
@@ -162,6 +170,7 @@ class UserStateRepository:
                         relationship.affection,
                         relationship.resentment,
                         emotions_updated_at,
+                        int(roleplay_active),
                     ),
                 )
         except sqlite3.Error as error:
@@ -183,7 +192,8 @@ class UserStateRepository:
                     trust REAL NOT NULL,
                     affection REAL NOT NULL,
                     resentment REAL NOT NULL,
-                    emotions_updated_at REAL NOT NULL
+                    emotions_updated_at REAL NOT NULL,
+                    roleplay_active INTEGER NOT NULL DEFAULT 0
                 )
                 """)
 
@@ -195,4 +205,10 @@ class UserStateRepository:
                 connection.execute("""
                     ALTER TABLE user_states
                     ADD COLUMN emotions_updated_at REAL NOT NULL DEFAULT 0.0
+                    """)
+
+            if "roleplay_active" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_active INTEGER NOT NULL DEFAULT 0
                     """)
