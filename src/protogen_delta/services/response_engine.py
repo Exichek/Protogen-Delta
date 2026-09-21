@@ -118,7 +118,12 @@ class ResponseEngine:
             insult_type=insult_type,
         )
 
-        is_rp = self._is_rp(user_message)
+        has_rp_action = self._is_rp(user_message)
+
+        if has_rp_action:
+            user_state.roleplay_active = True
+
+        is_rp = user_state.roleplay_active
 
         state_context = build_state_context(
             user_state,

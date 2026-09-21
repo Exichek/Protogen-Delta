@@ -112,6 +112,7 @@ class PersistentUserState:
     emotions: EmotionalState
     relationship: RelationshipState
     emotions_updated_at: float
+    roleplay_active: bool = False
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -135,6 +136,7 @@ class UserStatePersistence(Protocol):
         emotions: EmotionalState,
         relationship: RelationshipState,
         emotions_updated_at: float,
+        roleplay_active: bool,
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -155,6 +157,7 @@ class UserState:
     relationship: RelationshipState = field(
         default_factory=RelationshipState,
     )
+    roleplay_active: bool = False
     emotions_updated_at: float = field(
         default=0.0,
         repr=False,
@@ -190,6 +193,7 @@ class UserState:
         self.mood = "neutral"
         self.reply_count = 0
         self.history.clear()
+        self.roleplay_active = False
 
 
 class UserStateStore:
@@ -275,6 +279,7 @@ class UserStateStore:
                                 emotions=state.emotions,
                                 relationship=state.relationship,
                                 emotions_updated_at=state.emotions_updated_at,
+                                roleplay_active=state.roleplay_active,
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -320,6 +325,7 @@ class UserStateStore:
             state.emotions = persistent_state.emotions
             state.relationship = persistent_state.relationship
             state.emotions_updated_at = persistent_state.emotions_updated_at
+            state.roleplay_active = persistent_state.roleplay_active
         else:
             state.emotions_updated_at = self._wall_clock()
 

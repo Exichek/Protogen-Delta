@@ -47,7 +47,7 @@ def test_user_state_repository_returns_none_for_unknown_user(
 def test_user_state_repository_saves_and_loads_state(
     tmp_path: Path,
 ) -> None:
-    """Сохранённые эмоции, отношения и timestamp должны восстанавливаться."""
+    """Сохранённое состояние пользователя должно полностью восстанавливаться."""
     repository = UserStateRepository(tmp_path)
 
     async def run_test() -> None:
@@ -66,6 +66,7 @@ def test_user_state_repository_saves_and_loads_state(
                 resentment=0.20,
             ),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=True,
         )
 
         state = await repository.load(123)
@@ -85,6 +86,7 @@ def test_user_state_repository_saves_and_loads_state(
         assert state.emotions_updated_at == pytest.approx(
             INITIAL_TIMESTAMP,
         )
+        assert state.roleplay_active is True
 
     asyncio.run(run_test())
 
@@ -92,7 +94,7 @@ def test_user_state_repository_saves_and_loads_state(
 def test_user_state_repository_updates_existing_user(
     tmp_path: Path,
 ) -> None:
-    """Повторное сохранение должно обновлять состояние и timestamp."""
+    """Повторное сохранение должно обновлять всё долгоживущее состояние."""
     repository = UserStateRepository(tmp_path)
 
     async def run_test() -> None:
@@ -105,6 +107,7 @@ def test_user_state_repository_updates_existing_user(
                 familiarity=0.20,
             ),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=False,
         )
 
         await repository.save(
@@ -118,6 +121,7 @@ def test_user_state_repository_updates_existing_user(
                 affection=0.60,
             ),
             emotions_updated_at=LATER_TIMESTAMP,
+            roleplay_active=True,
         )
 
         state = await repository.load(123)
@@ -133,6 +137,7 @@ def test_user_state_repository_updates_existing_user(
         assert state.emotions_updated_at == pytest.approx(
             LATER_TIMESTAMP,
         )
+        assert state.roleplay_active is True
 
     asyncio.run(run_test())
 
@@ -153,6 +158,7 @@ def test_user_state_repository_keeps_users_separate(
                 affection=0.60,
             ),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=True,
         )
 
         await repository.save(
@@ -164,6 +170,7 @@ def test_user_state_repository_keeps_users_separate(
                 resentment=0.50,
             ),
             emotions_updated_at=LATER_TIMESTAMP,
+            roleplay_active=False,
         )
 
         first = await repository.load(111)
@@ -179,6 +186,7 @@ def test_user_state_repository_keeps_users_separate(
         assert first.emotions_updated_at == pytest.approx(
             INITIAL_TIMESTAMP,
         )
+        assert first.roleplay_active is True
 
         assert second.emotions.warmth == 0.0
         assert second.emotions.irritation == pytest.approx(0.80)
@@ -187,6 +195,7 @@ def test_user_state_repository_keeps_users_separate(
         assert second.emotions_updated_at == pytest.approx(
             LATER_TIMESTAMP,
         )
+        assert second.roleplay_active is False
 
     asyncio.run(run_test())
 
@@ -211,6 +220,7 @@ def test_user_state_repository_survives_new_instance(
                 resentment=0.10,
             ),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=True,
         )
 
     asyncio.run(save_state())
@@ -234,12 +244,13 @@ def test_user_state_repository_survives_new_instance(
     assert state.emotions_updated_at == pytest.approx(
         INITIAL_TIMESTAMP,
     )
+    assert state.roleplay_active is True
 
 
 def test_user_state_store_restores_state_after_restart(
     tmp_path: Path,
 ) -> None:
-    """Рестарт без прошедшего времени не должен менять сохранённое состояние."""
+    """Рестарт без прошедшего времени должен восстановить persistent-состояние."""
     first_repository = UserStateRepository(tmp_path)
     first_store = UserStateStore(
         wall_clock=lambda: INITIAL_TIMESTAMP,
@@ -258,6 +269,7 @@ def test_user_state_store_restores_state_after_restart(
                 affection=0.55,
                 resentment=0.15,
             )
+            state.roleplay_active = True
 
     asyncio.run(save_state())
 
@@ -284,6 +296,7 @@ def test_user_state_store_restores_state_after_restart(
     assert restored.emotions_updated_at == pytest.approx(
         INITIAL_TIMESTAMP,
     )
+    assert restored.roleplay_active is True
 
     assert restored.mood == "neutral"
     assert restored.reply_count == 0
@@ -314,6 +327,7 @@ def test_user_state_store_decays_emotions_after_restart(
                 affection=0.60,
                 resentment=0.40,
             )
+            state.roleplay_active = True
 
     asyncio.run(save_state())
 
@@ -342,6 +356,7 @@ def test_user_state_store_decays_emotions_after_restart(
     assert restored.emotions_updated_at == pytest.approx(
         LATER_TIMESTAMP,
     )
+    assert restored.roleplay_active is True
 
     persisted = asyncio.run(
         second_repository.load(123),
@@ -353,12 +368,13 @@ def test_user_state_store_decays_emotions_after_restart(
     assert persisted.emotions_updated_at == pytest.approx(
         LATER_TIMESTAMP,
     )
+    assert persisted.roleplay_active is True
 
 
 def test_user_state_repository_migrates_legacy_database(
     tmp_path: Path,
 ) -> None:
-    """Старая таблица должна получить timestamp без потери состояния."""
+    """Старая таблица должна получить новые поля без потери состояния."""
     database_path = tmp_path / "user_states.db"
 
     with closing(sqlite3.connect(database_path)) as connection, connection:
@@ -423,6 +439,7 @@ def test_user_state_repository_migrates_legacy_database(
     assert state.relationship.resentment == pytest.approx(0.50)
 
     assert state.emotions_updated_at == 0.0
+    assert state.roleplay_active is False
 
     with closing(sqlite3.connect(database_path)) as connection:
         columns = {
@@ -430,6 +447,7 @@ def test_user_state_repository_migrates_legacy_database(
         }
 
     assert "emotions_updated_at" in columns
+    assert "roleplay_active" in columns
 
 
 def test_user_state_repository_closes_connections(
@@ -457,11 +475,13 @@ def test_user_state_repository_closes_connections(
 
     async def run_test() -> None:
         await repository.load(123)
+
         await repository.save(
             123,
             emotions=EmotionalState(),
             relationship=RelationshipState(),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=False,
         )
 
     asyncio.run(run_test())
@@ -499,6 +519,7 @@ def test_user_state_repository_wraps_save_errors(
                 emotions=EmotionalState(),
                 relationship=RelationshipState(),
                 emotions_updated_at=INITIAL_TIMESTAMP,
+                roleplay_active=False,
             )
         )
 
@@ -561,6 +582,7 @@ def test_user_state_repository_runs_sqlite_off_event_loop(
             emotions=EmotionalState(),
             relationship=RelationshipState(),
             emotions_updated_at=INITIAL_TIMESTAMP,
+            roleplay_active=False,
         )
 
     asyncio.run(run_test())

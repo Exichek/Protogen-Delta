@@ -602,6 +602,7 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
         emotions=state.emotions,
         relationship=state.relationship,
         emotions_updated_at=1000.0,
+        roleplay_active=False,
     )
 
 
@@ -895,4 +896,5 @@ def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
         emotions=state.emotions,
         relationship=state.relationship,
         emotions_updated_at=19000.0,
+        roleplay_active=False,
     )
