@@ -1,5 +1,6 @@
 """Сборка и обработка ответов Telegram-бота."""
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -101,13 +102,14 @@ class ResponseEngine:
         user_state: UserState,
     ) -> str:
         """Обработать сообщение внутри блокировки состояния пользователя."""
-        insult_type = await self._insult_classifier.classify(
-            user_message,
-        )
-
-        mood = await self._update_mood(
-            user_message,
-            user_state,
+        insult_type, mood = await asyncio.gather(
+            self._insult_classifier.classify(
+                user_message,
+            ),
+            self._update_mood(
+                user_message,
+                user_state,
+            ),
         )
 
         apply_interaction_effects(

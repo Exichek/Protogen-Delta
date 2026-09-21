@@ -1255,3 +1255,78 @@ def test_response_engine_adds_persistent_state_context() -> None:
     assert "сформировалась заметная симпатия" in prompt
     assert "остался некоторый осадок" in prompt
     assert "сохраняется лёгкое раздражение" in prompt
+
+
+def test_response_engine_runs_message_classifiers_in_parallel() -> None:
+    """Классификаторы сообщения должны запускаться параллельно."""
+    (
+        engine,
+        _,
+        _,
+        insult_mock,
+        mood_mock,
+        _,
+    ) = _create_engine()
+
+    async def run_test() -> tuple[str, bool]:
+        insult_started = asyncio.Event()
+        mood_started = asyncio.Event()
+        release_classifiers = asyncio.Event()
+
+        async def classify_insult(
+            user_message: str,
+        ) -> str:
+            assert user_message == "Обычное сообщение"
+
+            insult_started.set()
+            await release_classifiers.wait()
+
+            return "none"
+
+        async def classify_mood(
+            user_message: str,
+        ) -> str:
+            assert user_message == "Обычное сообщение"
+
+            mood_started.set()
+            await release_classifiers.wait()
+
+            return "neutral"
+
+        insult_mock.classify.side_effect = classify_insult
+        mood_mock.classify.side_effect = classify_mood
+
+        response_task = asyncio.create_task(
+            engine.respond(
+                TEST_USER_ID,
+                "Обычное сообщение",
+            )
+        )
+
+        await insult_started.wait()
+        await asyncio.sleep(0)
+
+        classifiers_started_together = mood_started.is_set()
+
+        release_classifiers.set()
+
+        response = await response_task
+
+        return (
+            response,
+            classifiers_started_together,
+        )
+
+    response, classifiers_started_together = asyncio.run(
+        run_test(),
+    )
+
+    assert response == "Ответ"
+    assert classifiers_started_together is True
+
+    insult_mock.classify.assert_awaited_once_with(
+        "Обычное сообщение",
+    )
+    mood_mock.classify.assert_awaited_once_with(
+        "Обычное сообщение",
+    )
