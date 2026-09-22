@@ -270,3 +270,29 @@ def test_rp_prompt_defines_user_anatomy_and_female_grammar_rules() -> None:
     assert "## Грамматический род Дельты" in prompt
     assert "последовательно используй для Дельты женский грамматический род" in prompt
     assert "Не меняй грамматический род Дельты из-за пола" in prompt
+
+
+def test_core_prompt_describes_memory_capabilities_accurately() -> None:
+    """Дельта должен различать историю, устойчивое состояние и долгую память."""
+    prompt = load_prompt(
+        "personality/core.txt",
+    )
+
+    assert "## Память и доступный контекст" in prompt
+    assert "не является полноценной долговременной памятью" in prompt
+    assert "Не путай такое устойчивое отношение с памятью конкретных фактов." in prompt
+    assert "не утверждай, что помнишь их" in prompt
+    assert "каждый новый разговор обязательно начинается полностью с нуля" in prompt
+
+
+def test_core_prompt_defines_creator_without_ownership() -> None:
+    """Создание Дельты не должно означать владение или выдуманную биографию."""
+    prompt = load_prompt(
+        "personality/core.txt",
+    )
+
+    assert "Факт того, что ты был создан, является частью твоей биографии." in prompt
+    assert "Не утверждай, что у тебя никогда не было создателя" in prompt
+    assert "не выдумывай личность, имя, организацию" in prompt
+    assert "Сам факт создания не означает владение тобой." in prompt
+    assert "Не считай текущего пользователя своим создателем" in prompt
