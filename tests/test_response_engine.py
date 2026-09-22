@@ -1,11 +1,13 @@
 """Тесты движка формирования ответов."""
 
 import asyncio
+import logging
 from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
+from protogen_delta.core.log_context import LogContextFilter
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -1567,3 +1569,70 @@ def test_response_engine_reports_inactive_roleplay() -> None:
 
     assert was_active is False
     assert engine._user_states.get(TEST_USER_ID).roleplay_active is False
+
+
+def test_response_engine_binds_same_log_context_for_request() -> None:
+    """Параллельные части одного ответа должны иметь общий request_id."""
+    (
+        engine,
+        _,
+        deepseek_mock,
+        insult_mock,
+        mood_mock,
+        _,
+    ) = _create_engine()
+
+    observed_contexts: list[tuple[str, str]] = []
+
+    def capture_context() -> None:
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="test",
+            args=(),
+            exc_info=None,
+        )
+
+        LogContextFilter().filter(record)
+
+        observed_contexts.append(
+            (
+                getattr(record, "user_id"),
+                getattr(record, "request_id"),
+            )
+        )
+
+    async def classify_insult(_: str) -> str:
+        capture_context()
+        return "none"
+
+    async def classify_mood(_: str) -> str:
+        capture_context()
+        return "neutral"
+
+    async def chat_with_context(**_: object) -> str:
+        capture_context()
+        return "Ответ"
+
+    insult_mock.classify.side_effect = classify_insult
+    mood_mock.classify.side_effect = classify_mood
+    deepseek_mock.chat.side_effect = chat_with_context
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Привет",
+        )
+    )
+
+    assert result == "Ответ"
+    assert len(observed_contexts) == 3
+
+    user_ids = {user_id for user_id, _ in observed_contexts}
+    request_ids = {request_id for _, request_id in observed_contexts}
+
+    assert user_ids == {str(TEST_USER_ID)}
+    assert len(request_ids) == 1
+    assert "-" not in request_ids

@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -82,11 +83,12 @@ class ResponseEngine:
         user_message: str,
     ) -> str:
         """Сформировать готовый ответ на сообщение пользователя."""
-        async with self._user_states.use(user_id) as user_state:
-            return await self._respond_for_user(
-                user_message=user_message,
-                user_state=user_state,
-            )
+        with bind_log_context(user_id=user_id):
+            async with self._user_states.use(user_id) as user_state:
+                return await self._respond_for_user(
+                    user_message=user_message,
+                    user_state=user_state,
+                )
 
     async def reset_user_context(
         self,
