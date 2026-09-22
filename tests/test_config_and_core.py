@@ -199,6 +199,41 @@ def test_setup_logging_uses_requested_level(
     )
 
 
+def test_setup_logging_adds_context_filter_to_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Настройка логов должна добавлять корреляционный фильтр обработчикам."""
+    handler_mock = Mock()
+    root_logger_mock = Mock()
+    root_logger_mock.handlers = [handler_mock]
+
+    real_logging = logging_config_module.logging
+
+    logging_mock = Mock()
+    logging_mock.INFO = real_logging.INFO
+    logging_mock.basicConfig = Mock()
+    logging_mock.getLogger = Mock(
+        return_value=root_logger_mock,
+    )
+
+    monkeypatch.setattr(
+        logging_config_module,
+        "logging",
+        logging_mock,
+    )
+
+    setup_logging("info")
+
+    handler_mock.addFilter.assert_called_once()
+
+    context_filter = handler_mock.addFilter.call_args.args[0]
+
+    assert isinstance(
+        context_filter,
+        logging_config_module.LogContextFilter,
+    )
+
+
 def test_setup_logging_rejects_unknown_level() -> None:
     """Неизвестный уровень логирования должен приводить к ошибке."""
     with pytest.raises(

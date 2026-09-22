@@ -2,7 +2,13 @@
 
 import logging
 
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+from protogen_delta.core.log_context import LogContextFilter
+
+LOG_FORMAT = (
+    "%(asctime)s [%(levelname)s] "
+    "[user_id=%(user_id)s request_id=%(request_id)s] "
+    "%(name)s: %(message)s"
+)
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -16,3 +22,8 @@ def setup_logging(level: str = "INFO") -> None:
         level=numeric_level,
         format=LOG_FORMAT,
     )
+
+    context_filter = LogContextFilter()
+
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(context_filter)
