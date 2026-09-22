@@ -11,6 +11,10 @@ from aiogram.types import Message
 import protogen_delta.handlers.unknown_command as unknown_command_module
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.help import HELP_TEXT, create_help_router
+from protogen_delta.handlers.rp import (
+    RP_ALREADY_DISABLED_REPLY,
+    RP_DISABLED_REPLY,
+)
 from protogen_delta.handlers.text import RATE_LIMIT_REPLY, create_text_router
 from protogen_delta.handlers.unknown_command import (
     UNKNOWN_COMMAND_REPLIES,
@@ -341,4 +345,62 @@ def test_text_handler_rate_limit_is_per_user() -> None:
     )
     second_answer_mock.assert_awaited_once_with(
         "Ответ бота",
+    )
+
+
+def test_text_handler_stops_active_roleplay_naturally() -> None:
+    """Явная фраза выхода должна завершать RP без обращения к модели."""
+    engine_mock = AsyncMock(spec=ResponseEngine)
+    engine_mock.disable_roleplay.return_value = True
+
+    router = create_text_router(
+        cast(ResponseEngine, engine_mock),
+    )
+
+    message, answer_mock, _ = _create_message_mock(
+        "стоп рп",
+    )
+
+    asyncio.run(
+        _call_first_handler(
+            router,
+            message,
+        )
+    )
+
+    engine_mock.disable_roleplay.assert_awaited_once_with(
+        TEST_USER_ID,
+    )
+    engine_mock.respond.assert_not_awaited()
+    answer_mock.assert_awaited_once_with(
+        RP_DISABLED_REPLY,
+    )
+
+
+def test_text_handler_reports_inactive_roleplay_on_natural_stop() -> None:
+    """Фраза выхода должна сообщать, если RP уже неактивен."""
+    engine_mock = AsyncMock(spec=ResponseEngine)
+    engine_mock.disable_roleplay.return_value = False
+
+    router = create_text_router(
+        cast(ResponseEngine, engine_mock),
+    )
+
+    message, answer_mock, _ = _create_message_mock(
+        "  Стоп   RP  ",
+    )
+
+    asyncio.run(
+        _call_first_handler(
+            router,
+            message,
+        )
+    )
+
+    engine_mock.disable_roleplay.assert_awaited_once_with(
+        TEST_USER_ID,
+    )
+    engine_mock.respond.assert_not_awaited()
+    answer_mock.assert_awaited_once_with(
+        RP_ALREADY_DISABLED_REPLY,
     )

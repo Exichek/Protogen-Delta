@@ -1486,3 +1486,84 @@ def test_response_engine_reset_disables_roleplay() -> None:
     assert last_call is not None
     assert last_call.kwargs["system_prompt"] == "SYSTEM PROMPT"
     assert last_call.kwargs["history"] == ()
+
+
+def test_response_engine_disables_only_roleplay() -> None:
+    """Выход из RP не должен сбрасывать остальное состояние пользователя."""
+    (
+        engine,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    state = engine._user_states.get(TEST_USER_ID)
+
+    state.mood = "sweet"
+    state.reply_count = 3
+    state.roleplay_active = True
+
+    state.history.append(
+        ConversationTurn(
+            user_message="*подошёл ближе*",
+            assistant_message="RP ответ",
+        )
+    )
+
+    state.emotions.adjust(
+        warmth=0.4,
+        irritation=0.2,
+    )
+
+    state.relationship.adjust(
+        familiarity=0.5,
+        trust=0.4,
+        affection=0.3,
+        resentment=0.1,
+    )
+
+    was_active = asyncio.run(
+        engine.disable_roleplay(TEST_USER_ID),
+    )
+
+    assert was_active is True
+    assert state.roleplay_active is False
+
+    assert state.mood == "sweet"
+    assert state.reply_count == 3
+
+    assert list(state.history) == [
+        ConversationTurn(
+            user_message="*подошёл ближе*",
+            assistant_message="RP ответ",
+        )
+    ]
+
+    assert state.emotions.warmth == pytest.approx(0.4)
+    assert state.emotions.irritation == pytest.approx(0.2)
+
+    assert state.relationship.familiarity == pytest.approx(0.5)
+    assert state.relationship.trust == pytest.approx(0.4)
+    assert state.relationship.affection == pytest.approx(0.3)
+    assert state.relationship.resentment == pytest.approx(0.1)
+
+
+def test_response_engine_reports_inactive_roleplay() -> None:
+    """Повторное выключение RP должно сообщать, что режим уже неактивен."""
+    (
+        engine,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = _create_engine()
+
+    was_active = asyncio.run(
+        engine.disable_roleplay(TEST_USER_ID),
+    )
+
+    assert was_active is False
+    assert engine._user_states.get(TEST_USER_ID).roleplay_active is False

@@ -103,6 +103,17 @@ class ResponseEngine:
         """Полностью забыть состояние конкретного пользователя."""
         await self._user_states.reset_user(user_id)
 
+    async def disable_roleplay(
+        self,
+        user_id: int,
+    ) -> bool:
+        """Выключить RP-режим пользователя, сохранив остальное состояние."""
+        async with self._user_states.use(user_id) as user_state:
+            was_active = user_state.roleplay_active
+            user_state.roleplay_active = False
+
+            return was_active
+
     async def _respond_for_user(
         self,
         user_message: str,

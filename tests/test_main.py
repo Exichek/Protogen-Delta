@@ -165,6 +165,9 @@ def test_main_builds_application_and_starts_polling(
     reset_router = Mock(
         name="reset_router",
     )
+    rp_router = Mock(
+        name="rp_router",
+    )
     unknown_router = Mock(
         name="unknown_router",
     )
@@ -186,6 +189,9 @@ def test_main_builds_application_and_starts_polling(
     )
     create_reset_router_mock = Mock(
         return_value=reset_router,
+    )
+    create_rp_router_mock = Mock(
+        return_value=rp_router,
     )
     create_unknown_router_mock = Mock(
         return_value=unknown_router,
@@ -265,6 +271,11 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_reset_router",
         create_reset_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_rp_router",
+        create_rp_router_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -368,7 +379,11 @@ def test_main_builds_application_and_starts_polling(
         main_module.UsersRepository,
     )
 
-    assert dispatcher_mock.include_router.call_count == 7
+    create_rp_router_mock.assert_called_once_with(
+        reset_response_engine,
+    )
+
+    assert dispatcher_mock.include_router.call_count == 8
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -384,6 +399,9 @@ def test_main_builds_application_and_starts_polling(
     )
     dispatcher_mock.include_router.assert_any_call(
         reset_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        rp_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         unknown_router,

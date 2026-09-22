@@ -5,6 +5,11 @@ from aiogram.types import Message
 
 from protogen_delta.core.message_utils import split_message
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.handlers.rp import (
+    RP_ALREADY_DISABLED_REPLY,
+    RP_DISABLED_REPLY,
+    is_roleplay_stop_message,
+)
 from protogen_delta.services.response_engine import ResponseEngine
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
@@ -31,6 +36,18 @@ def create_text_router(
             return
 
         user_id = message.from_user.id
+
+        if is_roleplay_stop_message(message.text):
+            was_active = await response_engine.disable_roleplay(
+                user_id,
+            )
+
+            if was_active:
+                await message.answer(RP_DISABLED_REPLY)
+            else:
+                await message.answer(RP_ALREADY_DISABLED_REPLY)
+
+            return
 
         if not limiter.allow(user_id):
             await message.answer(RATE_LIMIT_REPLY)

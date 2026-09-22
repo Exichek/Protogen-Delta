@@ -229,6 +229,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.command for command in commands] == [
         "start",
         "randomart",
+        "rp",
         "reset",
         "help",
     ]
@@ -236,6 +237,36 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.description for command in commands] == [
         "🚀 Запустить бота",
         "🎨 Случайный арт",
-        "🧹 Очистить память диалога",
+        "🎭 Управление RP — /rp off",
+        "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]
+
+
+def test_body_prompt_keeps_user_anatomy_separate_from_delta() -> None:
+    """Анатомия Дельты не должна автоматически переноситься на пользователя."""
+    prompt = load_prompt(
+        "personality/body.txt",
+    )
+
+    assert (
+        "Все физические свойства, описанные в этом файле, "
+        "относятся исключительно к Дельте."
+    ) in prompt
+    assert (
+        "Никогда не переноси анатомию Дельты на пользователя автоматически." in prompt
+    )
+    assert ("Если тело пользователя не описано, оставляй его неопределённым") in prompt
+
+
+def test_rp_prompt_defines_user_anatomy_and_female_grammar_rules() -> None:
+    """RP-промпт должен разделять анатомию участников и фиксировать род Дельты."""
+    prompt = load_prompt(
+        "personality/rp.txt",
+    )
+
+    assert "Пользователь и Дельта — разные участники сцены" in prompt
+    assert "По умолчанию тело пользователя считается неопределённым." in prompt
+    assert "## Грамматический род Дельты" in prompt
+    assert "последовательно используй для Дельты женский грамматический род" in prompt
+    assert "Не меняй грамматический род Дельты из-за пола" in prompt
