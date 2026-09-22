@@ -20,6 +20,7 @@ from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.reset import create_reset_router
+from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
@@ -234,6 +235,10 @@ async def main() -> None:
             users_repository,
         )
 
+        rp_router = create_rp_router(
+            response_engine,
+        )
+
         unknown_command_router = create_unknown_command_router()
 
         text_router = create_text_router(
@@ -246,6 +251,7 @@ async def main() -> None:
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(reset_router)
+        dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
         dispatcher.include_router(text_router)
 
