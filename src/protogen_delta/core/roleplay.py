@@ -4,7 +4,7 @@ import re
 
 STOP_PATTERN = re.compile(
     r"^\s*(?:стоп|хватит|выйди из|закончим|закончи)\s+(?:rp|рп)"
-    r"(?=$|[\s,.!;:—–-])\s*[,!.;:—–-]*\s*",
+    r"(?=$|[\s,.!?…;:—–-])\s*[,!.?…;:—–-]*\s*",
     re.IGNORECASE,
 )
 CONFIG_PATTERN = re.compile(
@@ -15,6 +15,16 @@ CONFIG_PATTERN = re.compile(
 CHARACTER_PATTERN = re.compile(
     r"^\s*мой персонаж\s*:\s*([^\n]{1,500})\s*$", re.IGNORECASE
 )
+
+
+def has_roleplay_action(text: str) -> bool:
+    """Распознать текст в одиночных звёздочках вне кода и формул."""
+    without_code = re.sub(r"```.*?(?:```|$)|`[^`\n]*(?:`|$)", "", text, flags=re.DOTALL)
+    for match in re.finditer(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", without_code):
+        action = match[1].strip()
+        if re.search(r"[^\W\d_]{2,}", action) and not re.search(r"[=+^<>/\\|]", action):
+            return True
+    return False
 
 
 def split_roleplay_stop(text: str) -> str | None:

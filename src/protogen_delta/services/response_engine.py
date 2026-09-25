@@ -2,11 +2,11 @@
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass
 
 from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.roleplay import (
+    has_roleplay_action,
     scene_character,
     scene_configuration,
     split_roleplay_stop,
@@ -421,9 +421,4 @@ class ResponseEngine:
         user_message: str,
     ) -> bool:
         """Проверить наличие RP-действия в звёздочках."""
-        return bool(
-            re.search(
-                r"\*[^*]+\*",
-                user_message,
-            )
-        )
+        return has_roleplay_action(user_message)
