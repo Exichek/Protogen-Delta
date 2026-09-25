@@ -7,6 +7,35 @@ from protogen_delta.core.roleplay import (
     scene_configuration,
     split_roleplay_stop,
 )
+from protogen_delta.services.response_engine import ResponseEngine
+
+
+@pytest.mark.parametrize("text", ["стоп рп?", "стоп рп…", "Стоп RP?!", "хватит рп..."])
+def test_stop_accepts_final_punctuation(text: str) -> None:
+    assert split_roleplay_stop(text) == ""
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2 * 3 * 4",
+        "a * b * c",
+        "**важно**",
+        "`*пример*`",
+        "```python\n*пример*\n```",
+        "*.py",
+        "*2 + x*",
+    ],
+)
+def test_math_code_and_bold_do_not_start_a_scene(text: str) -> None:
+    assert ResponseEngine._is_rp(text) is False
+
+
+@pytest.mark.parametrize(
+    "text", ["*подхожу*", "Привет! *машу рукой*", "* улыбаюсь *", "*waves hello*"]
+)
+def test_text_actions_still_start_a_scene(text: str) -> None:
+    assert ResponseEngine._is_rp(text) is True
 
 
 @pytest.mark.parametrize("text", ["Стоп RP!", "  хватит   рп  ", "закончим RP"])
