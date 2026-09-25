@@ -45,6 +45,8 @@ class UserStateRepository:
         relationship: RelationshipState,
         emotions_updated_at: float,
         roleplay_active: bool,
+        roleplay_configuration: str = "male",
+        roleplay_character: str = "",
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -54,6 +56,8 @@ class UserStateRepository:
             relationship=relationship,
             emotions_updated_at=emotions_updated_at,
             roleplay_active=roleplay_active,
+            roleplay_configuration=roleplay_configuration,
+            roleplay_character=roleplay_character,
         )
 
     async def delete(
@@ -85,7 +89,9 @@ class UserStateRepository:
                         affection,
                         resentment,
                         emotions_updated_at,
-                        roleplay_active
+                        roleplay_active,
+                        roleplay_configuration,
+                        roleplay_character
                     FROM user_states
                     WHERE user_id = ?
                     """,
@@ -110,6 +116,8 @@ class UserStateRepository:
             resentment,
             emotions_updated_at,
             roleplay_active,
+            roleplay_configuration,
+            roleplay_character,
         ) = row
 
         return PersistentUserState(
@@ -127,6 +135,8 @@ class UserStateRepository:
             ),
             emotions_updated_at=emotions_updated_at,
             roleplay_active=bool(roleplay_active),
+            roleplay_configuration=roleplay_configuration,
+            roleplay_character=roleplay_character,
         )
 
     def _save_sync(
@@ -137,6 +147,8 @@ class UserStateRepository:
         relationship: RelationshipState,
         emotions_updated_at: float,
         roleplay_active: bool,
+        roleplay_configuration: str = "male",
+        roleplay_character: str = "",
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         try:
@@ -154,9 +166,11 @@ class UserStateRepository:
                         affection,
                         resentment,
                         emotions_updated_at,
-                        roleplay_active
+                        roleplay_active,
+                        roleplay_configuration,
+                        roleplay_character
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -167,7 +181,9 @@ class UserStateRepository:
                         affection = excluded.affection,
                         resentment = excluded.resentment,
                         emotions_updated_at = excluded.emotions_updated_at,
-                        roleplay_active = excluded.roleplay_active
+                        roleplay_active = excluded.roleplay_active,
+                        roleplay_configuration = excluded.roleplay_configuration,
+                        roleplay_character = excluded.roleplay_character
                     """,
                     (
                         user_id,
@@ -181,6 +197,8 @@ class UserStateRepository:
                         relationship.resentment,
                         emotions_updated_at,
                         int(roleplay_active),
+                        roleplay_configuration,
+                        roleplay_character,
                     ),
                 )
         except sqlite3.Error as error:
@@ -240,4 +258,16 @@ class UserStateRepository:
                 connection.execute("""
                     ALTER TABLE user_states
                     ADD COLUMN roleplay_active INTEGER NOT NULL DEFAULT 0
+                    """)
+
+            if "roleplay_configuration" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_configuration TEXT NOT NULL DEFAULT 'male'
+                    """)
+
+            if "roleplay_character" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_character TEXT NOT NULL DEFAULT ''
                     """)

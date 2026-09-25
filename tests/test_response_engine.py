@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -116,8 +116,12 @@ def test_response_engine_routes_greeting_through_chat() -> None:
         "Привет!",
     )
 
+    assert deepseek_mock.chat.await_args is not None
+    assert deepseek_mock.chat.await_args.kwargs["system_prompt"].startswith(
+        "SYSTEM PROMPT"
+    )
     deepseek_mock.chat.assert_awaited_once_with(
-        system_prompt="SYSTEM PROMPT",
+        system_prompt=ANY,
         user_message="Привет!",
         history=(),
     )
@@ -192,8 +196,12 @@ def test_response_engine_updates_mood_and_calls_chat() -> None:
     assert engine._user_states.get(TEST_USER_ID).mood == "neutral"
     assert state.reply_count == 1
 
+    assert deepseek_mock.chat.await_args is not None
+    assert deepseek_mock.chat.await_args.kwargs["system_prompt"].startswith(
+        "SYSTEM PROMPT"
+    )
     deepseek_mock.chat.assert_awaited_once_with(
-        system_prompt="SYSTEM PROMPT",
+        system_prompt=ANY,
         user_message="Как дела?",
         history=(),
     )
@@ -230,7 +238,8 @@ def test_response_engine_uses_rp_prompt() -> None:
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt == "RP PROMPT"
+    assert prompt.startswith("RP PROMPT")
+    assert "Текущая конфигурация Дельты" in prompt
     assert "Протогены не носят штанов" not in prompt
     assert "Никогда не используй слово" not in prompt
 
@@ -467,8 +476,12 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp() -> None:
 
     role_mock.classify.assert_not_awaited()
 
+    assert deepseek_mock.chat.await_args is not None
+    assert deepseek_mock.chat.await_args.kwargs["system_prompt"].startswith(
+        "SYSTEM PROMPT"
+    )
     deepseek_mock.chat.assert_awaited_once_with(
-        system_prompt="SYSTEM PROMPT",
+        system_prompt=ANY,
         user_message="Ты меня связал?",
         history=(),
     )
@@ -723,8 +736,12 @@ def test_response_engine_does_not_add_context_for_neutral_message() -> None:
 
     assert result == "Ответ"
 
+    assert deepseek_mock.chat.await_args is not None
+    assert deepseek_mock.chat.await_args.kwargs["system_prompt"].startswith(
+        "SYSTEM PROMPT"
+    )
     deepseek_mock.chat.assert_awaited_once_with(
-        system_prompt="SYSTEM PROMPT",
+        system_prompt=ANY,
         user_message="Как установить Docker?",
         history=(),
     )
@@ -845,8 +862,12 @@ def test_response_engine_passes_user_history_to_deepseek() -> None:
 
     assert result == "Конечно помню"
 
+    assert deepseek_mock.chat.await_args is not None
+    assert deepseek_mock.chat.await_args.kwargs["system_prompt"].startswith(
+        "SYSTEM PROMPT"
+    )
     deepseek_mock.chat.assert_awaited_once_with(
-        system_prompt="SYSTEM PROMPT",
+        system_prompt=ANY,
         user_message="Как меня зовут?",
         history=(previous_turn,),
     )
@@ -1430,7 +1451,7 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
 
     second_call = deepseek_mock.chat.await_args_list[1]
 
-    assert second_call.kwargs["system_prompt"] == "RP PROMPT"
+    assert second_call.kwargs["system_prompt"].startswith("RP PROMPT")
 
     assert second_call.kwargs["history"] == (
         ConversationTurn(
@@ -1486,7 +1507,8 @@ def test_response_engine_reset_disables_roleplay() -> None:
     last_call = deepseek_mock.chat.await_args
 
     assert last_call is not None
-    assert last_call.kwargs["system_prompt"] == "SYSTEM PROMPT"
+    assert last_call.kwargs["system_prompt"].startswith("SYSTEM PROMPT")
+    assert "RP выключен" in last_call.kwargs["system_prompt"]
     assert last_call.kwargs["history"] == ()
 
 
@@ -1636,3 +1658,60 @@ def test_response_engine_binds_same_log_context_for_request() -> None:
     assert user_ids == {str(TEST_USER_ID)}
     assert len(request_ids) == 1
     assert "-" not in request_ids
+
+
+def test_mixed_stop_answers_question_without_restarting_scene() -> None:
+    engine, _, deepseek, _, _, _ = _create_engine()
+    state = engine._user_states.get(TEST_USER_ID)
+    state.roleplay_active = True
+    state.roleplay_configuration = "female"
+    state.roleplay_character = "человек"
+    state.relationship.trust = 0.7
+    state.history.append(ConversationTurn("*подхожу*", "*подняла голову*"))
+    asyncio.run(engine.respond(TEST_USER_ID, "Стоп RP, объясни *TCP*"))
+    assert state.roleplay_active is False
+    assert state.roleplay_configuration == "male"
+    assert state.roleplay_character == ""
+    assert state.relationship.trust == pytest.approx(0.7)
+    call = deepseek.chat.await_args
+    assert call is not None
+    assert call.kwargs["user_message"] == "объясни *TCP*"
+    assert "RP выключен" in call.kwargs["system_prompt"]
+    assert "женская" not in call.kwargs["system_prompt"]
+    assert len(call.kwargs["history"]) == 1
+
+
+def test_scene_configuration_survives_history_window_and_is_isolated() -> None:
+    engine, _, deepseek, _, _, _ = _create_engine()
+
+    async def run() -> None:
+        await engine.respond(TEST_USER_ID, "Ты в женской конфигурации.")
+        await engine.respond(TEST_USER_ID, "Мой персонаж: человек в пальто")
+        for _ in range(10):
+            await engine.respond(TEST_USER_ID, "Продолжай")
+        call = deepseek.chat.await_args
+        assert call is not None
+        prompt = call.kwargs["system_prompt"]
+        assert "женская; говори о себе в женском роде" in prompt
+        assert "человек в пальто" in prompt
+        assert all(
+            "конфигурации" not in turn.user_message for turn in call.kwargs["history"]
+        )
+        await engine.respond(TEST_USER_ID + 1, "*приветствую*")
+        other = deepseek.chat.await_args
+        assert other is not None
+        assert "женская" not in other.kwargs["system_prompt"]
+        assert "человек в пальто" not in other.kwargs["system_prompt"]
+        await engine.disable_roleplay(TEST_USER_ID)
+        state = engine._user_states.get(TEST_USER_ID)
+        assert state.roleplay_configuration == "male"
+        assert state.roleplay_character == ""
+
+    asyncio.run(run())
+
+
+def test_direct_stop_does_not_call_model() -> None:
+    engine, _, deepseek, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).roleplay_active = True
+    assert asyncio.run(engine.respond(TEST_USER_ID, "стоп RP")) == "RP-режим завершён."
+    deepseek.chat.assert_not_awaited()

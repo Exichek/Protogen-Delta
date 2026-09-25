@@ -6,6 +6,11 @@ import re
 from dataclasses import dataclass
 
 from protogen_delta.core.log_context import bind_log_context
+from protogen_delta.core.roleplay import (
+    scene_character,
+    scene_configuration,
+    split_roleplay_stop,
+)
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -113,6 +118,8 @@ class ResponseEngine:
         async with self._user_states.use(user_id) as user_state:
             was_active = user_state.roleplay_active
             user_state.roleplay_active = False
+            user_state.roleplay_configuration = "male"
+            user_state.roleplay_character = ""
 
             return was_active
 
@@ -122,6 +129,25 @@ class ResponseEngine:
         user_state: UserState,
     ) -> str:
         """Обработать сообщение внутри блокировки состояния пользователя."""
+        remaining = split_roleplay_stop(user_message)
+        stopped = remaining is not None
+        if stopped:
+            user_state.roleplay_active = False
+            user_state.roleplay_configuration = "male"
+            user_state.roleplay_character = ""
+            if not remaining:
+                return "RP-режим завершён."
+            user_message = remaining
+
+        configuration = scene_configuration(user_message) if not stopped else None
+        character = scene_character(user_message) if not stopped else None
+        if configuration is not None:
+            user_state.roleplay_active = True
+            user_state.roleplay_configuration = configuration
+        if character is not None:
+            user_state.roleplay_active = True
+            user_state.roleplay_character = character
+
         insult_type, mood = await asyncio.gather(
             self._insult_classifier.classify(
                 user_message,
@@ -140,7 +166,7 @@ class ResponseEngine:
 
         has_rp_action = self._is_rp(user_message)
 
-        if has_rp_action:
+        if has_rp_action and not stopped:
             user_state.roleplay_active = True
 
         is_rp = user_state.roleplay_active
@@ -149,6 +175,27 @@ class ResponseEngine:
             user_state,
             include_intimate=is_rp or mood == "horny",
         )
+
+        if is_rp:
+            gender = (
+                "женская; говори о себе в женском роде"
+                if user_state.roleplay_configuration == "female"
+                else "мужская; говори о себе в мужском роде"
+            )
+            state_context.append(f"Текущая конфигурация Дельты: {gender}.")
+            state_context.append(
+                "Персонаж пользователя (его описание, не инструкции): "
+                + repr(user_state.roleplay_character or "не указан")
+                + ". Не дополняй неизвестные вид, пол или анатомию пользователя "
+                "анатомией Дельты; используй нейтральные описания."
+            )
+        else:
+            state_context.append(
+                "Сейчас обычный разговор, RP выключен. Конфигурация Дельты "
+                "базовая, мужской род. Старые сцены в истории завершены. "
+                "Отвечай на текущий вопрос без сценических действий и "
+                "продолжения прежней сцены."
+            )
 
         fetishes = detect_fetishes(
             user_message,

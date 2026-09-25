@@ -404,3 +404,15 @@ def test_text_handler_reports_inactive_roleplay_on_natural_stop() -> None:
     answer_mock.assert_awaited_once_with(
         RP_ALREADY_DISABLED_REPLY,
     )
+
+
+def test_text_handler_forwards_mixed_stop_with_question() -> None:
+    engine = AsyncMock(spec=ResponseEngine)
+    engine.respond.return_value = "TCP — протокол."
+    router = create_text_router(cast(ResponseEngine, engine))
+    text = "Стоп RP, что такое TCP?"
+    message, answer, _ = _create_message_mock(text)
+    asyncio.run(router.message.handlers[0].callback(message))
+    engine.respond.assert_awaited_once_with(TEST_USER_ID, text)
+    engine.disable_roleplay.assert_not_awaited()
+    answer.assert_awaited_once_with("TCP — протокол.")

@@ -113,6 +113,8 @@ class PersistentUserState:
     relationship: RelationshipState
     emotions_updated_at: float
     roleplay_active: bool = False
+    roleplay_configuration: str = "male"
+    roleplay_character: str = ""
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -137,6 +139,8 @@ class UserStatePersistence(Protocol):
         relationship: RelationshipState,
         emotions_updated_at: float,
         roleplay_active: bool,
+        roleplay_configuration: str = "male",
+        roleplay_character: str = "",
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -165,6 +169,8 @@ class UserState:
         default_factory=RelationshipState,
     )
     roleplay_active: bool = False
+    roleplay_configuration: str = "male"
+    roleplay_character: str = ""
     emotions_updated_at: float = field(
         default=0.0,
         repr=False,
@@ -201,6 +207,8 @@ class UserState:
         self.reply_count = 0
         self.history.clear()
         self.roleplay_active = False
+        self.roleplay_configuration = "male"
+        self.roleplay_character = ""
 
     def reset_all(self) -> None:
         """Полностью сбросить пользовательское состояние."""
@@ -293,6 +301,8 @@ class UserStateStore:
                                 relationship=state.relationship,
                                 emotions_updated_at=state.emotions_updated_at,
                                 roleplay_active=state.roleplay_active,
+                                roleplay_configuration=state.roleplay_configuration,
+                                roleplay_character=state.roleplay_character,
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -360,6 +370,8 @@ class UserStateStore:
             state.relationship = persistent_state.relationship
             state.emotions_updated_at = persistent_state.emotions_updated_at
             state.roleplay_active = persistent_state.roleplay_active
+            state.roleplay_configuration = persistent_state.roleplay_configuration
+            state.roleplay_character = persistent_state.roleplay_character
         else:
             state.emotions_updated_at = self._wall_clock()
 
