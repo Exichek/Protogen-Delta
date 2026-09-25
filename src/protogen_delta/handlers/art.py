@@ -71,8 +71,6 @@ def create_art_router(
 
         file_id = random.choice(images)
 
-        file_id = random.choice(images)
-
         try:
             await message.answer_photo(
                 file_id,

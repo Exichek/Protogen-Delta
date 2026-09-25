@@ -207,6 +207,7 @@ async def main() -> None:
 
         start_router = create_start_router(
             users_repository=users_repository,
+            user_states=user_states,
             start_messages=start_messages,
             deepseek=deepseek,
             first_start_prompt=first_start_prompt,

@@ -1,6 +1,7 @@
 """Тесты обработчиков /start и системы артов."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import ANY, AsyncMock, Mock
@@ -12,6 +13,7 @@ from aiogram.types import Message
 
 import protogen_delta.handlers.art as art_module
 import protogen_delta.handlers.start as start_module
+from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.start import (
     FIRST_START_FALLBACK_BODY,
@@ -91,7 +93,7 @@ def _assert_first_start_reply(
 def test_start_generates_greeting_for_new_user() -> None:
     """Новый пользователь должен получить сгенерированное приветствие."""
     users_mock = Mock(spec=UsersRepository)
-    users_mock.add.return_value = True
+    users_mock.get_all.return_value = []
 
     deepseek_mock = _create_deepseek_mock()
     deepseek_mock.chat.return_value = (
@@ -133,7 +135,7 @@ def test_start_generates_greeting_for_new_user() -> None:
 def test_start_uses_fallback_for_empty_generated_greeting() -> None:
     """Пустой ответ модели должен заменяться безопасным приветствием."""
     users_mock = Mock(spec=UsersRepository)
-    users_mock.add.return_value = True
+    users_mock.get_all.return_value = []
 
     deepseek_mock = _create_deepseek_mock()
     deepseek_mock.chat.return_value = "   "
@@ -166,7 +168,7 @@ def test_start_uses_fallback_for_empty_generated_greeting() -> None:
 def test_start_uses_fallback_when_generation_fails() -> None:
     """Ошибка DeepSeek не должна оставлять нового пользователя без приветствия."""
     users_mock = Mock(spec=UsersRepository)
-    users_mock.add.return_value = True
+    users_mock.get_all.return_value = []
 
     deepseek_mock = _create_deepseek_mock()
     deepseek_mock.chat.side_effect = DeepSeekError(
@@ -203,7 +205,7 @@ def test_start_returns_random_message_for_existing_user(
 ) -> None:
     """Повторный /start должен возвращать одно из обычных приветствий."""
     users_mock = Mock(spec=UsersRepository)
-    users_mock.add.return_value = False
+    users_mock.get_all.return_value = [123]
 
     deepseek_mock = _create_deepseek_mock()
 
@@ -237,7 +239,7 @@ def test_start_returns_random_message_for_existing_user(
         )
     )
 
-    users_mock.add.assert_called_once_with(123)
+    users_mock.add.assert_not_called()
     deepseek_mock.chat.assert_not_awaited()
     answer_mock.assert_awaited_once_with("Первое")
 
@@ -245,7 +247,7 @@ def test_start_returns_random_message_for_existing_user(
 def test_start_uses_fallback_without_start_messages() -> None:
     """Повторный /start без списка приветствий должен использовать fallback."""
     users_mock = Mock(spec=UsersRepository)
-    users_mock.add.return_value = False
+    users_mock.get_all.return_value = [123]
 
     deepseek_mock = _create_deepseek_mock()
 
@@ -583,3 +585,64 @@ def test_random_art_handles_telegram_error(
     )
 
     answer_mock.assert_awaited_once_with("Не смог отправить арт 😢 попробуй ещё раз.")
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_failed_start_does_not_register_and_can_retry(
+    tmp_path: Path, cancelled: bool
+) -> None:
+    users = UsersRepository(tmp_path)
+    deepseek = _create_deepseek_mock()
+    states = UserStateStore()
+    router = create_start_router(users, [], deepseek, "START", states)
+    message, raw, answer, _ = _create_message_mock()
+    raw.from_user = SimpleNamespace(id=123)
+    error = asyncio.CancelledError if cancelled else RuntimeError
+    answer.side_effect = error()
+    with pytest.raises(error):
+        asyncio.run(_call_handler(router, 0, message))
+    assert users.get_all() == []
+    assert not states.get(123).lock.locked()
+    answer.side_effect = None
+    asyncio.run(_call_handler(router, 0, message))
+    assert users.get_all() == [123]
+    assert deepseek.chat.await_count == 2
+
+
+def test_start_rejects_duplicate_and_reset_waits_for_send(tmp_path: Path) -> None:
+    users = UsersRepository(tmp_path)
+    deepseek = _create_deepseek_mock()
+    states = UserStateStore()
+    router = create_start_router(users, [], deepseek, "START", states)
+    first, raw_first, first_answer, _ = _create_message_mock()
+    second, raw_second, second_answer, _ = _create_message_mock()
+    raw_first.from_user = raw_second.from_user = SimpleNamespace(id=123)
+
+    async def scenario() -> None:
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def send(text: str) -> None:
+            entered.set()
+            await release.wait()
+
+        first_answer.side_effect = send
+        request = asyncio.create_task(_call_handler(router, 0, first))
+        await asyncio.wait_for(entered.wait(), 1)
+        await _call_handler(router, 0, second)
+        assert deepseek.chat.await_count == 1
+        second_answer.assert_awaited_once_with(
+            "Я уже готовлю приветствие. Подожди немного."
+        )
+
+        async def reset() -> None:
+            await states.reset_user(123)
+            users.remove(123)
+
+        reset_task = asyncio.create_task(reset())
+        await asyncio.sleep(0)
+        assert not reset_task.done()
+        release.set()
+        await asyncio.wait_for(asyncio.gather(request, reset_task), 1)
+        assert users.get_all() == []
+
+    asyncio.run(scenario())
