@@ -4,33 +4,17 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.roleplay import split_roleplay_stop
 from protogen_delta.services.response_engine import ResponseEngine
 
 RP_DISABLED_REPLY = "RP-режим завершён."
 RP_ALREADY_DISABLED_REPLY = "RP-режим уже выключен."
 RP_USAGE_REPLY = "Использование: /rp off"
 
-ROLEPLAY_STOP_MESSAGES = frozenset(
-    {
-        "стоп rp",
-        "стоп рп",
-        "хватит rp",
-        "хватит рп",
-        "выйди из rp",
-        "выйди из рп",
-        "закончим rp",
-        "закончим рп",
-        "закончи rp",
-        "закончи рп",
-    }
-)
-
 
 def is_roleplay_stop_message(text: str) -> bool:
     """Проверить, просит ли пользователь явно завершить RP."""
-    normalized = " ".join(text.lower().strip().split())
-
-    return normalized in ROLEPLAY_STOP_MESSAGES
+    return split_roleplay_stop(text) == ""
 
 
 def create_rp_router(

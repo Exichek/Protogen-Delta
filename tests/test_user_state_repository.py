@@ -440,6 +440,8 @@ def test_user_state_repository_migrates_legacy_database(
 
     assert state.emotions_updated_at == 0.0
     assert state.roleplay_active is False
+    assert state.roleplay_configuration == "male"
+    assert state.roleplay_character == ""
 
     with closing(sqlite3.connect(database_path)) as connection:
         columns = {
@@ -693,3 +695,28 @@ def test_user_state_repository_runs_delete_off_event_loop(
 
     assert len(sqlite_thread_ids) == 1
     assert sqlite_thread_ids[0] != event_loop_thread_id
+
+
+def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
+    async def run() -> None:
+        first = UserStateStore(persistence=UserStateRepository(tmp_path))
+        async with first.use(123) as state:
+            state.roleplay_active = True
+            state.roleplay_configuration = "female"
+            state.roleplay_character = "человек в пальто"
+            state.relationship.trust = 0.7
+        second = UserStateStore(persistence=UserStateRepository(tmp_path))
+        async with second.use(123) as restored:
+            assert restored.roleplay_active is True
+            assert restored.roleplay_configuration == "female"
+            assert restored.roleplay_character == "человек в пальто"
+            assert restored.relationship.trust == pytest.approx(0.7)
+            assert not restored.history
+        await second.reset_user(123)
+        third = UserStateStore(persistence=UserStateRepository(tmp_path))
+        async with third.use(123) as cleared:
+            assert cleared.roleplay_configuration == "male"
+            assert cleared.roleplay_character == ""
+            assert cleared.relationship.trust == 0.0
+
+    asyncio.run(run())
