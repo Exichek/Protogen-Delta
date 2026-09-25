@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from protogen_delta.core.message_utils import split_message
+from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import (
     DeepSeekError,
@@ -77,9 +78,12 @@ def create_start_router(
     start_messages: list[str],
     deepseek: DeepSeekService,
     first_start_prompt: str,
+    user_states: UserStateStore | None = None,
 ) -> Router:
     """Создать роутер команды /start."""
     router = Router(name=__name__)
+    states = user_states or UserStateStore()
+    pending: set[int] = set()
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
@@ -90,8 +94,20 @@ def create_start_router(
             logger.warning("Команда /start получена без данных пользователя")
             return
 
-        if users_repository.add(user.id):
-            logger.info("Зарегистрирован новый пользователь: %s", user.id)
+        if user.id in pending:
+            await message.answer("Я уже готовлю приветствие. Подожди немного.")
+            return
+
+        pending.add(user.id)
+        try:
+            async with states.use(user.id):
+                await greet(message, user.id)
+        finally:
+            pending.remove(user.id)
+
+    async def greet(message: Message, user_id: int) -> None:
+        """Отправить приветствие под общей блокировкой состояния."""
+        if user_id not in users_repository.get_all():
 
             reply = await _generate_first_start_message(
                 deepseek,
@@ -101,6 +117,8 @@ def create_start_router(
             for chunk in split_message(reply):
                 await message.answer(chunk)
 
+            users_repository.add(user_id)
+            logger.info("Зарегистрирован новый пользователь: %s", user_id)
             return
 
         if start_messages:

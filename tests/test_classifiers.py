@@ -52,8 +52,8 @@ def test_insult_classifier_returns_known_types(
     )
 
 
-def test_insult_classifier_converts_direct_question() -> None:
-    """Direct со знаком вопроса должен считаться question."""
+def test_insult_classifier_preserves_meaning_with_unrelated_question() -> None:
+    """Вопрос в другой части сообщения не меняет тип оскорбления."""
     deepseek, mock = _create_deepseek_mock()
     mock.classify.return_value = "direct"
 
@@ -63,10 +63,10 @@ def test_insult_classifier_converts_direct_question() -> None:
     )
 
     result = asyncio.run(
-        classifier.classify("Ты тупой?"),
+        classifier.classify("Ты идиот. Который час?"),
     )
 
-    assert result == "question"
+    assert result == "direct"
 
 
 def test_insult_classifier_returns_none_for_unknown_result() -> None:

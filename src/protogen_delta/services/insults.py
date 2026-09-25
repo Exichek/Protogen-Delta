@@ -38,12 +38,6 @@ class InsultClassifier:
 
         logger.info("Классификация оскорбления: %s", result)
 
-        # Модель иногда определяет вопрос как direct,
-        # поэтому знак вопроса используем как дополнительную подстраховку.
-        if result == "direct" and "?" in user_message:
-            logger.info("Тип оскорбления исправлен на question по знаку '?'")
-            return "question"
-
         if result == "general":
             return "general"
 

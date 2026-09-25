@@ -43,5 +43,7 @@ dist/
 
 # Runtime application data
 /data/
+/backups/
+/data-restored/
 
 coverage.xml
