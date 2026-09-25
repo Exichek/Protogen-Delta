@@ -8,6 +8,7 @@ from unittest.mock import ANY, AsyncMock
 import pytest
 
 from protogen_delta.core.log_context import LogContextFilter
+from protogen_delta.core.message_utils import split_message
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -26,6 +27,7 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.response_engine import (
+    ResponseBusyError,
     ResponseEngine,
     ResponseEngineConfig,
 )
@@ -53,7 +55,8 @@ def _create_engine() -> tuple[
     role_mock.classify.return_value = "unknown"
 
     state = BotState()
-    user_states = UserStateStore()
+    # Проверки реакций не должны зависеть от скорости выполнения и decay.
+    user_states = UserStateStore(wall_clock=lambda: 1000.0)
 
     config = ResponseEngineConfig(
         fetish_triggers={
@@ -1715,3 +1718,188 @@ def test_direct_stop_does_not_call_model() -> None:
     engine._user_states.get(TEST_USER_ID).roleplay_active = True
     assert asyncio.run(engine.respond(TEST_USER_ID, "стоп RP")) == "RP-режим завершён."
     deepseek.chat.assert_not_awaited()
+
+
+def test_delivery_commits_history_only_after_all_chunks() -> None:
+    engine, state, deepseek, *_ = _create_engine()
+    deepseek.chat.return_value = "a" * 5000
+    sent: list[str] = []
+
+    async def deliver(reply: str) -> None:
+        for chunk in split_message(reply):
+            assert not engine._user_states.get(TEST_USER_ID).history
+            assert state.reply_count == 0
+            sent.append(chunk)
+            await asyncio.sleep(0)
+
+    asyncio.run(engine.respond_and_deliver(TEST_USER_ID, "Привет", deliver))
+    assert len(sent) == 2
+    assert state.reply_count == 1
+    assert list(engine._user_states.get(TEST_USER_ID).history) == [
+        ConversationTurn("Привет", "a" * 5000)
+    ]
+
+
+@pytest.mark.parametrize("failed_chunk", [0, 1])
+def test_failed_delivery_does_not_commit_and_allows_retry(failed_chunk: int) -> None:
+    engine, state, deepseek, *_ = _create_engine()
+    deepseek.chat.return_value = "a" * 5000
+    sent: list[str] = []
+
+    async def deliver(reply: str) -> None:
+        for index, chunk in enumerate(split_message(reply)):
+            if index == failed_chunk:
+                raise RuntimeError("delivery failed")
+            sent.append(chunk)
+
+    async def scenario() -> None:
+        with pytest.raises(RuntimeError, match="delivery failed"):
+            await engine.respond_and_deliver(TEST_USER_ID, "Привет", deliver)
+        assert len(sent) == failed_chunk
+        assert not engine._user_states.get(TEST_USER_ID).history
+        assert engine._user_states.get(TEST_USER_ID).reply_count == 0
+        assert state.reply_count == 0
+        await engine.respond_and_deliver(TEST_USER_ID, "Ещё раз", AsyncMock())
+        assert state.reply_count == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("blocked_stage", ["generation", "delivery"])
+def test_busy_request_is_rejected_without_blocking_other_users(
+    blocked_stage: str,
+) -> None:
+    engine, _, deepseek, *_ = _create_engine()
+
+    async def scenario() -> None:
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def generate(**kwargs: object) -> str:
+            if blocked_stage == "generation" and kwargs["user_message"] == "Первый":
+                entered.set()
+                await release.wait()
+            return "Ответ"
+
+        async def deliver(reply: str) -> None:
+            if blocked_stage == "delivery":
+                entered.set()
+                await release.wait()
+
+        deepseek.chat.side_effect = generate
+        first = asyncio.create_task(
+            engine.respond_and_deliver(TEST_USER_ID, "Первый", deliver)
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            with pytest.raises(ResponseBusyError):
+                await engine.respond_and_deliver(TEST_USER_ID, "Повтор", AsyncMock())
+            await asyncio.wait_for(
+                engine.respond_and_deliver(999, "Другой пользователь", AsyncMock()),
+                timeout=1,
+            )
+            assert deepseek.chat.await_count == 2
+        finally:
+            release.set()
+            await first
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("reset_method", ["reset_user", "reset_user_context"])
+def test_reset_waits_until_delivery_finishes(reset_method: str) -> None:
+    engine, _, _, *_ = _create_engine()
+
+    async def scenario() -> None:
+        entered, release = asyncio.Event(), asyncio.Event()
+        events: list[str] = []
+
+        async def deliver(reply: str) -> None:
+            entered.set()
+            await release.wait()
+            events.append("sent")
+
+        first = asyncio.create_task(
+            engine.respond_and_deliver(TEST_USER_ID, "Привет", deliver)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+
+        async def reset() -> None:
+            await getattr(engine, reset_method)(TEST_USER_ID)
+            events.append("reset")
+
+        reset_task = asyncio.create_task(reset())
+        await asyncio.sleep(0)
+        assert not reset_task.done()
+        release.set()
+        await asyncio.wait_for(asyncio.gather(first, reset_task), timeout=1)
+        assert events == ["sent", "reset"]
+        assert not engine._user_states.get(TEST_USER_ID).history
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("blocked_stage", ["generation", "delivery"])
+def test_cancelled_request_releases_busy_guard_and_state(blocked_stage: str) -> None:
+    engine, state, deepseek, *_ = _create_engine()
+
+    async def scenario() -> None:
+        entered = asyncio.Event()
+
+        async def block(*args: object, **kwargs: object) -> None:
+            entered.set()
+            await asyncio.Event().wait()
+
+        if blocked_stage == "generation":
+            deepseek.chat.side_effect = block
+        task = asyncio.create_task(
+            engine.respond_and_deliver(TEST_USER_ID, "Привет", block)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        user_state = engine._user_states.get(TEST_USER_ID)
+        assert not user_state.history
+        assert not user_state.lock.locked()
+        assert user_state.active_operations == 0
+        assert state.reply_count == 0
+        deepseek.chat.side_effect = None
+        await engine.respond_and_deliver(TEST_USER_ID, "Повтор", AsyncMock())
+        assert state.reply_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_api_error_fallback_is_delivered_without_history_entry() -> None:
+    engine, state, deepseek, *_ = _create_engine()
+    deepseek.chat.side_effect = DeepSeekTimeoutError("timeout")
+    deliver = AsyncMock()
+    asyncio.run(engine.respond_and_deliver(TEST_USER_ID, "Привет", deliver))
+    deliver.assert_awaited_once()
+    assert deliver.await_args is not None
+    assert "долго думаю" in deliver.await_args.args[0]
+    assert not engine._user_states.get(TEST_USER_ID).history
+    assert state.reply_count == 0
+
+
+def test_delivery_keeps_generation_log_context() -> None:
+    engine, _, deepseek, *_ = _create_engine()
+    contexts: list[tuple[str, str]] = []
+
+    def capture() -> None:
+        record = logging.LogRecord("test", logging.INFO, "", 0, "", (), None)
+        LogContextFilter().filter(record)
+        contexts.append((getattr(record, "user_id"), getattr(record, "request_id")))
+
+    async def generate(**kwargs: object) -> str:
+        capture()
+        return "Ответ"
+
+    async def deliver(reply: str) -> None:
+        capture()
+
+    deepseek.chat.side_effect = generate
+    asyncio.run(engine.respond_and_deliver(TEST_USER_ID, "Привет", deliver))
+    assert contexts[0] == contexts[1]
+    assert contexts[0][0] == str(TEST_USER_ID)
+    assert contexts[0][1] != "-"

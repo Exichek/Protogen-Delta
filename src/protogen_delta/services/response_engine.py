@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from protogen_delta.core.log_context import bind_log_context
@@ -42,6 +43,19 @@ from protogen_delta.services.state_context import build_state_context
 logger = logging.getLogger(__name__)
 
 FetishNames = dict[str, str]
+ReplyDelivery = Callable[[str], Awaitable[None]]
+
+
+class ResponseBusyError(Exception):
+    """Предыдущий ответ пользователя ещё обрабатывается или отправляется."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedReply:
+    """Ответ и исходный текст для записи только после успешной доставки."""
+
+    text: str
+    user_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,19 +95,45 @@ class ResponseEngine:
         self._bot_state = bot_state
         self._user_states = user_states
         self._config = config
+        self._delivering_users: set[int] = set()
+
+    async def respond_and_deliver(
+        self,
+        user_id: int,
+        user_message: str,
+        deliver: ReplyDelivery,
+    ) -> None:
+        """Отклонить повторный запрос и удержать lock до конца доставки."""
+        if user_id in self._delivering_users:
+            raise ResponseBusyError
+        self._delivering_users.add(user_id)
+        try:
+            await self.respond(user_id, user_message, deliver=deliver)
+        finally:
+            self._delivering_users.remove(user_id)
 
     async def respond(
         self,
         user_id: int,
         user_message: str,
+        *,
+        deliver: ReplyDelivery | None = None,
     ) -> str:
-        """Сформировать готовый ответ на сообщение пользователя."""
+        """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
             async with self._user_states.use(user_id) as user_state:
-                return await self._respond_for_user(
+                prepared = await self._respond_for_user(
                     user_message=user_message,
                     user_state=user_state,
                 )
+                if deliver is not None:
+                    await deliver(prepared.text)
+                if prepared.user_message is not None:
+                    self._register_reply(user_state)
+                    self._remember_turn(
+                        user_state, prepared.user_message, prepared.text
+                    )
+                return prepared.text
 
     async def reset_user_context(
         self,
@@ -127,7 +167,7 @@ class ResponseEngine:
         self,
         user_message: str,
         user_state: UserState,
-    ) -> str:
+    ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
         stopped = remaining is not None
@@ -136,7 +176,7 @@ class ResponseEngine:
             user_state.roleplay_configuration = "male"
             user_state.roleplay_character = ""
             if not remaining:
-                return "RP-режим завершён."
+                return PreparedReply("RP-режим завершён.")
             user_message = remaining
 
         configuration = scene_configuration(user_message) if not stopped else None
@@ -231,52 +271,50 @@ class ResponseEngine:
             )
         except DeepSeekTimeoutError:
             logger.warning("DeepSeek не ответил за установленное время")
-            return "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
+            return PreparedReply(
+                "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
+            )
 
         except DeepSeekRateLimitError:
             logger.warning("DeepSeek отклонил запрос из-за ограничения частоты")
-            return (
+            return PreparedReply(
                 "Меня сейчас слишком сильно дёргают запросами... "
                 "дай мне немного времени ≧◡≦"
             )
 
         except DeepSeekConnectionError:
             logger.warning("Не удалось установить соединение с DeepSeek")
-            return "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
+            return PreparedReply(
+                "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
+            )
 
         except DeepSeekAuthError:
             logger.exception("Ошибка доступа к DeepSeek API")
-            return "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
+            return PreparedReply(
+                "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
+            )
 
         except DeepSeekAPIError as error:
             logger.exception(
                 "DeepSeek вернул ошибку API, HTTP-код: %s",
                 error.status_code,
             )
-            return "У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦"
+            return PreparedReply("У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦")
 
         except DeepSeekError:
             logger.exception("Неизвестная ошибка сервиса DeepSeek")
-            return "Бля, у тостера что-то сломалось... ≧◡≦"
+            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦")
 
         except Exception:
             logger.exception("Непредвиденная ошибка при получении ответа от DeepSeek")
-            return "Бля, у тостера что-то сломалось... ≧◡≦"
+            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦")
 
         if not reply:
             reply = "Пустой ответ от DeepSeek"
         elif not reply.strip():
             reply = "DeepSeek промолчал..."
 
-        self._register_reply(user_state)
-
-        self._remember_turn(
-            user_state=user_state,
-            user_message=user_message,
-            assistant_message=reply,
-        )
-
-        return reply
+        return PreparedReply(reply, user_message)
 
     def _register_reply(
         self,
