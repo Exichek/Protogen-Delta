@@ -66,6 +66,7 @@ def test_main_builds_application_and_starts_polling(
         log_level="INFO",
         data_dir=tmp_path,
         admin_ids=frozenset({123}),
+        brave_search_api_key="brave-key",
         conversation_history_limit=12,
         user_state_retention_seconds=3600.0,
     )

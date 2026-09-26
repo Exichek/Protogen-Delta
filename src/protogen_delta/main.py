@@ -184,7 +184,12 @@ async def main() -> None:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
-            tools=ToolExecutor(default_registry(proxy_url=settings.telegram_proxy_url)),
+            tools=ToolExecutor(
+                default_registry(
+                    proxy_url=settings.telegram_proxy_url,
+                    brave_search_api_key=settings.brave_search_api_key,
+                )
+            ),
         )
 
         insult_classifier = InsultClassifier(
