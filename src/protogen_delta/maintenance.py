@@ -38,6 +38,13 @@ def copy_snapshot(source: Path, destination: Path) -> None:
         payloads[filename] = payload
 
     database = source / "user_states.db"
+    art_sources = source / "art_sources.json"
+    if art_sources.exists():
+        payload = art_sources.read_bytes()
+        chats = json.loads(payload).get("CHATS")
+        if not isinstance(chats, list) or not all(type(x) is int for x in chats):
+            raise ValueError("Некорректный формат art_sources.json")
+        payloads[art_sources.name] = payload
     uri = database.as_uri() + "?mode=ro"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".delta-snapshot-", dir=destination.parent) as temp:

@@ -47,6 +47,7 @@ def _create_message_mock() -> tuple[
 ]:
     """Создать Telegram Message с нужными моками методов."""
     message_mock = Mock()
+    message_mock.from_user = SimpleNamespace(id=123)
 
     answer_mock = AsyncMock()
     answer_photo_mock = AsyncMock()
@@ -314,6 +315,7 @@ def test_art_handler_saves_photo_from_allowed_chat() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -344,6 +346,7 @@ def test_art_handler_ignores_photo_from_other_chat() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -371,6 +374,7 @@ def test_art_handler_ignores_empty_photo() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -397,6 +401,7 @@ def test_art_handler_saves_image_document() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -417,6 +422,7 @@ def test_art_handler_saves_image_document() -> None:
 
     images_mock.add.assert_called_once_with(
         "document-file-id",
+        kind="document",
     )
 
 
@@ -427,6 +433,7 @@ def test_art_handler_ignores_non_image_document() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -455,6 +462,7 @@ def test_art_handler_ignores_document_from_other_chat() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, raw_message, _, _ = _create_message_mock()
@@ -484,6 +492,7 @@ def test_random_art_reports_empty_database() -> None:
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, _, answer_mock, answer_photo_mock = _create_message_mock()
@@ -521,6 +530,7 @@ def test_random_art_sends_selected_image(
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, _, answer_mock, answer_photo_mock = _create_message_mock()
@@ -562,6 +572,7 @@ def test_random_art_handles_telegram_error(
             images_mock,
         ),
         art_chat_id=-100123,
+        admin_ids=frozenset({123}),
     )
 
     message, _, answer_mock, answer_photo_mock = _create_message_mock()

@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, call
+from unittest.mock import ANY, AsyncMock, Mock, call
 
 import pytest
 
@@ -342,6 +342,7 @@ def test_main_builds_application_and_starts_polling(
         api_key="deepseek-key",
         base_url="https://api.test.local",
         model="test-model",
+        tools=ANY,
     )
 
     create_start_router_mock.assert_called_once()
