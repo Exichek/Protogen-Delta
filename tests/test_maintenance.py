@@ -12,6 +12,7 @@ from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.maintenance import copy_snapshot, main
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 
@@ -20,8 +21,10 @@ def seed(path: Path) -> None:
     UsersRepository(path).add(123)
     ImagesRepository(path).add("test-image")
     states = UserStateStore(persistence=UserStateRepository(path))
+    memories = MemoriesRepository(path)
 
     async def save() -> None:
+        await memories.remember(123, "funny", "старый мем", 10.0)
         async with states.use(123) as state:
             state.relationship.trust = 0.7
             state.roleplay_active = True
@@ -42,6 +45,7 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     assert UsersRepository(restored).get_all() == [123]
     assert ImagesRepository(restored).get_all() == ["test-image"]
     assert ArtSourcesRepository(restored, -999).get_all() == [-100, -200]
+    assert asyncio.run(MemoriesRepository(restored).recent(123))[0].text == "старый мем"
 
     async def check() -> None:
         states = UserStateStore(persistence=UserStateRepository(restored))

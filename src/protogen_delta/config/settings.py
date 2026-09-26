@@ -21,10 +21,14 @@ class Settings:
     log_level: str = "INFO"
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
+    creator_id: int | None = None
     rate_limit_seconds: float = 2.0
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
     user_state_retention_seconds: float = 86400.0
+    proactive_check_seconds: float = 300.0
+    proactive_idle_seconds: float = 86400.0
+    proactive_cooldown_seconds: float = 172800.0
 
 
 def _parse_admin_ids(value: str) -> frozenset[int]:
@@ -159,6 +163,22 @@ def load_settings() -> Settings:
         "USER_STATE_RETENTION_SECONDS",
     )
 
+    creator_id_raw = os.getenv("CREATOR_ID", "").strip()
+    creator_id = (
+        _parse_positive_int(creator_id_raw, "CREATOR_ID") if creator_id_raw else None
+    )
+
+    proactive_check_seconds = _parse_positive_float(
+        os.getenv("PROACTIVE_CHECK_SECONDS", "300.0"), "PROACTIVE_CHECK_SECONDS"
+    )
+    proactive_idle_seconds = _parse_positive_float(
+        os.getenv("PROACTIVE_IDLE_SECONDS", "86400.0"), "PROACTIVE_IDLE_SECONDS"
+    )
+    proactive_cooldown_seconds = _parse_positive_float(
+        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "172800.0"),
+        "PROACTIVE_COOLDOWN_SECONDS",
+    )
+
     return Settings(
         telegram_token=telegram_token,
         deepseek_api_key=deepseek_api_key,
@@ -185,8 +205,12 @@ def load_settings() -> Settings:
                 "",
             )
         ),
+        creator_id=creator_id,
         rate_limit_seconds=rate_limit_seconds,
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
         user_state_retention_seconds=user_state_retention_seconds,
+        proactive_check_seconds=proactive_check_seconds,
+        proactive_idle_seconds=proactive_idle_seconds,
+        proactive_cooldown_seconds=proactive_cooldown_seconds,
     )

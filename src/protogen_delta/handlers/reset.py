@@ -12,6 +12,7 @@ from aiogram.types import (
 )
 
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.response_engine import ResponseEngine
 
 _RESET_CONFIRMATION_TTL_SECONDS = 300.0
@@ -133,6 +134,7 @@ async def _edit_callback_message(
 def create_reset_router(
     response_engine: ResponseEngine,
     users_repository: UsersRepository,
+    memory: MemoryService | None = None,
 ) -> Router:
     """Создать роутер безопасного полного сброса."""
     router = Router(name=__name__)
@@ -196,6 +198,9 @@ def create_reset_router(
         await response_engine.reset_user(
             expected_user_id,
         )
+
+        if memory is not None:
+            await memory.delete_user(expected_user_id)
 
         users_repository.remove(
             expected_user_id,

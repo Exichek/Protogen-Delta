@@ -37,7 +37,10 @@ def copy_snapshot(source: Path, destination: Path) -> None:
             raise ValueError(f"Некорректный формат {filename}")
         payloads[filename] = payload
 
-    database = source / "user_states.db"
+    databases = [(source / "user_states.db", "user_states")]
+    memories_database = source / "memories.db"
+    if memories_database.exists():
+        databases.append((memories_database, "memories"))
     art_sources = source / "art_sources.json"
     if art_sources.exists():
         payload = art_sources.read_bytes()
@@ -45,19 +48,20 @@ def copy_snapshot(source: Path, destination: Path) -> None:
         if not isinstance(chats, list) or not all(type(x) is int for x in chats):
             raise ValueError("Некорректный формат art_sources.json")
         payloads[art_sources.name] = payload
-    uri = database.as_uri() + "?mode=ro"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".delta-snapshot-", dir=destination.parent) as temp:
         staging = Path(temp) / "data"
         staging.mkdir()
-        with (
-            closing(sqlite3.connect(uri, uri=True)) as src,
-            closing(sqlite3.connect(staging / database.name)) as dst,
-        ):
-            src.backup(dst)
-            if dst.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
-                raise ValueError("Проверка целостности SQLite не прошла")
-            dst.execute("SELECT user_id FROM user_states LIMIT 0")
+        for database, required_table in databases:
+            uri = database.as_uri() + "?mode=ro"
+            with (
+                closing(sqlite3.connect(uri, uri=True)) as src,
+                closing(sqlite3.connect(staging / database.name)) as dst,
+            ):
+                src.backup(dst)
+                if dst.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise ValueError("Проверка целостности SQLite не прошла")
+                dst.execute(f"SELECT 1 FROM {required_table} LIMIT 0")
         for filename, payload in payloads.items():
             (staging / filename).write_bytes(payload)
         # Не подменяем существующие рабочие данные, даже пустой каталог.

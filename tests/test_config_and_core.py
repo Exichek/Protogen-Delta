@@ -266,6 +266,7 @@ def test_set_commands_configures_telegram_menu() -> None:
         "randomart",
         "rp",
         "reset",
+        "proactive",
         "help",
     ]
 
@@ -274,6 +275,7 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🎨 Случайный арт",
         "🎭 Управление RP — /rp off",
         "🧹 Полностью очистить память",
+        "💬 Проактивные сообщения",
         "ℹ️ Помощь",
     ]
 

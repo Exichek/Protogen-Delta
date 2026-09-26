@@ -25,6 +25,7 @@ from protogen_delta.services.deepseek import (
 )
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
+from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.response_engine import (
     ResponseBusyError,
@@ -135,6 +136,45 @@ def test_response_engine_routes_greeting_through_chat() -> None:
             assistant_message="Привет в ответ",
         )
     ]
+
+
+def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
+    """Создатель и прошлые эпизоды должны попадать в динамический контекст."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    memory = AsyncMock(spec=MemoryService)
+    memory.context.return_value = ["Долговременный смешной момент"]
+    engine._memory = cast(MemoryService, memory)
+    engine._creator_id = TEST_USER_ID
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Помнишь тот мем?"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "создатель Дельты" in prompt
+    assert "Долговременный смешной момент" in prompt
+    memory.context.assert_awaited_once_with(TEST_USER_ID)
+    memory.note_message.assert_awaited_once_with(
+        TEST_USER_ID,
+        "Помнишь тот мем?",
+        insult_type="none",
+        mood="neutral",
+    )
+
+
+def test_response_engine_keeps_replying_when_memory_storage_fails() -> None:
+    """Сбой дополнительной памяти не должен ломать основной ответ."""
+    engine, _, _, _, _, _ = _create_engine()
+    memory = AsyncMock(spec=MemoryService)
+    memory.context.side_effect = OSError("read failed")
+    memory.note_message.side_effect = OSError("write failed")
+    engine._memory = cast(MemoryService, memory)
+
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
+
+    assert result == "Ответ"
+    memory.context.assert_awaited_once_with(TEST_USER_ID)
+    memory.note_message.assert_awaited_once()
 
 
 def test_response_engine_passes_direct_insult_to_chat() -> None:

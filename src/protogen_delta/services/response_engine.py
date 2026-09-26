@@ -37,6 +37,7 @@ from protogen_delta.services.insults import InsultClassifier, InsultType
 from protogen_delta.services.interaction_state import (
     apply_interaction_effects,
 )
+from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier, MoodType
 from protogen_delta.services.state_context import build_state_context
 
@@ -80,6 +81,8 @@ class ResponseEngine:
         bot_state: BotState,
         user_states: UserStateStore,
         config: ResponseEngineConfig,
+        memory: MemoryService | None = None,
+        creator_id: int | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -95,6 +98,8 @@ class ResponseEngine:
         self._bot_state = bot_state
         self._user_states = user_states
         self._config = config
+        self._memory = memory
+        self._creator_id = creator_id
         self._delivering_users: set[int] = set()
 
     async def respond_and_deliver(
@@ -123,6 +128,7 @@ class ResponseEngine:
         with bind_log_context(user_id=user_id):
             async with self._user_states.use(user_id) as user_state:
                 prepared = await self._respond_for_user(
+                    user_id=user_id,
                     user_message=user_message,
                     user_state=user_state,
                 )
@@ -165,6 +171,7 @@ class ResponseEngine:
 
     async def _respond_for_user(
         self,
+        user_id: int,
         user_message: str,
         user_state: UserState,
     ) -> PreparedReply:
@@ -215,6 +222,21 @@ class ResponseEngine:
             user_state,
             include_intimate=is_rp or mood == "horny",
         )
+
+        if self._creator_id is not None and user_id == self._creator_id:
+            state_context.append(
+                "Пользователь — создатель Дельты. Ты узнаёшь его как создателя, "
+                "но сохраняешь собственный характер и не выдумываешь полномочия."
+            )
+
+        if self._memory is not None:
+            try:
+                state_context.extend(await self._memory.context(user_id))
+            except Exception:
+                logger.exception(
+                    "Не удалось загрузить эпизодическую память пользователя %s",
+                    user_id,
+                )
 
         if is_rp:
             gender = (
@@ -313,6 +335,20 @@ class ResponseEngine:
             reply = "Пустой ответ от DeepSeek"
         elif not reply.strip():
             reply = "DeepSeek промолчал..."
+
+        if self._memory is not None:
+            try:
+                await self._memory.note_message(
+                    user_id,
+                    user_message,
+                    insult_type=insult_type,
+                    mood=mood,
+                )
+            except Exception:
+                logger.exception(
+                    "Не удалось сохранить эпизодическую память пользователя %s",
+                    user_id,
+                )
 
         return PreparedReply(reply, user_message)
 

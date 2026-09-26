@@ -366,7 +366,7 @@ def test_main_builds_application_and_starts_polling(
     reset_router_call = create_reset_router_mock.call_args
 
     assert reset_router_call is not None
-    assert len(reset_router_call.args) == 2
+    assert len(reset_router_call.args) == 3
 
     reset_response_engine = reset_router_call.args[0]
     reset_users_repository = reset_router_call.args[1]
@@ -384,7 +384,7 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    assert dispatcher_mock.include_router.call_count == 8
+    assert dispatcher_mock.include_router.call_count == 10
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
