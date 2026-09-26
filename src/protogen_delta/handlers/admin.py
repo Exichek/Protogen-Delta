@@ -121,7 +121,12 @@ def create_admin_router(
 
         for index, file_id in enumerate(last_images):
             try:
-                await message.answer_photo(
+                send = (
+                    message.answer_document
+                    if images_repository.get_kind(file_id) == "document"
+                    else message.answer_photo
+                )
+                await send(
                     file_id,
                     caption=f"<code>{escape(file_id)}</code>",
                     parse_mode="HTML",
@@ -219,6 +224,8 @@ def create_admin_router(
 
         help_text = (
             "📖 Админские команды:\n\n"
+            "/addimage — добавить фото ответом или по file_id\n"
+            "/artchat list|add|remove — группы-источники артов\n"
             "/listimages <N> — показать последние N артов\n"
             "/removeimage <id1,id2,...> — удалить арты по ID\n"
             "/artcount — показать количество артов\n"

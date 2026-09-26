@@ -1,7 +1,7 @@
 """Репозиторий изображений бота."""
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from protogen_delta.repositories.json_file import JsonFileRepository
 
@@ -34,7 +34,9 @@ class ImagesRepository:
         """Вернуть file_id всех сохранённых изображений."""
         return _get_images(self._storage.load())
 
-    def add(self, file_id: str) -> bool:
+    def add(
+        self, file_id: str, *, kind: Literal["photo", "document"] = "photo"
+    ) -> bool:
         """Добавить изображение и вернуть True, если его ещё не было."""
 
         def add_image(data: dict[str, Any]) -> bool:
@@ -45,9 +47,15 @@ class ImagesRepository:
                 return False
 
             images.append(file_id)
+            if kind == "document":
+                data.setdefault("KINDS", {})[file_id] = kind
             return True
 
         return self._storage.update(add_image)
+
+    def get_kind(self, file_id: str) -> Literal["photo", "document"]:
+        kinds = self._storage.load().get("KINDS", {})
+        return "document" if kinds.get(file_id) == "document" else "photo"
 
     def remove(self, file_id: str) -> bool:
         """Удалить изображение и вернуть True, если оно существовало."""
@@ -60,6 +68,7 @@ class ImagesRepository:
                 return False
 
             images.remove(file_id)
+            data.get("KINDS", {}).pop(file_id, None)
             return True
 
         return self._storage.update(remove_image)

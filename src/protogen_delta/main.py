@@ -24,6 +24,7 @@ from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
+from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
@@ -32,6 +33,7 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.tools import ToolExecutor, default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +175,7 @@ async def main() -> None:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
+            tools=ToolExecutor(default_registry(proxy_url=settings.telegram_proxy_url)),
         )
 
         insult_classifier = InsultClassifier(
@@ -217,6 +220,8 @@ async def main() -> None:
         art_router = create_art_router(
             images_repository=images_repository,
             art_chat_id=settings.art_chat_id,
+            admin_ids=settings.admin_ids,
+            sources=ArtSourcesRepository(settings.data_dir, settings.art_chat_id),
         )
 
         admin_router = create_admin_router(

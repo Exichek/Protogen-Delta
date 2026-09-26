@@ -10,6 +10,7 @@ import pytest
 
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.maintenance import copy_snapshot, main
+from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
@@ -33,12 +34,14 @@ def seed(path: Path) -> None:
 def test_backup_restore_and_restart(tmp_path: Path) -> None:
     source, backup, restored = (tmp_path / name for name in ("data", "backup", "new"))
     seed(source)
+    ArtSourcesRepository(source, -100).change(-200, add=True)
     copy_snapshot(source, backup)
     UsersRepository(source).remove(123)
     asyncio.run(UserStateRepository(source).delete(123))
     copy_snapshot(backup, restored)
     assert UsersRepository(restored).get_all() == [123]
     assert ImagesRepository(restored).get_all() == ["test-image"]
+    assert ArtSourcesRepository(restored, -999).get_all() == [-100, -200]
 
     async def check() -> None:
         states = UserStateStore(persistence=UserStateRepository(restored))
