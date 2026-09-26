@@ -33,6 +33,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("ADMIN_IDS", raising=False)
     monkeypatch.delenv("CREATOR_ID", raising=False)
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.delenv("PROACTIVE_CHECK_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_IDLE_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_COOLDOWN_SECONDS", raising=False)
@@ -66,6 +67,7 @@ def test_load_settings_with_defaults(
     assert settings.data_dir == Path("data")
     assert settings.admin_ids == frozenset()
     assert settings.creator_id is None
+    assert settings.brave_search_api_key is None
     assert settings.proactive_check_seconds == 300.0
     assert settings.proactive_idle_seconds == 86400.0
     assert settings.proactive_cooldown_seconds == 172800.0
@@ -100,6 +102,7 @@ def test_load_settings_with_custom_values(
         "123, 456,789",
     )
     monkeypatch.setenv("CREATOR_ID", "123")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-secret")
     monkeypatch.setenv("PROACTIVE_CHECK_SECONDS", "60")
     monkeypatch.setenv("PROACTIVE_IDLE_SECONDS", "120")
     monkeypatch.setenv("PROACTIVE_COOLDOWN_SECONDS", "240")
@@ -137,6 +140,7 @@ def test_load_settings_with_custom_values(
     assert settings.data_dir == Path("custom-data")
     assert settings.admin_ids == frozenset({123, 456, 789})
     assert settings.creator_id == 123
+    assert settings.brave_search_api_key == "brave-secret"
     assert settings.proactive_check_seconds == 60.0
     assert settings.proactive_idle_seconds == 120.0
     assert settings.proactive_cooldown_seconds == 240.0

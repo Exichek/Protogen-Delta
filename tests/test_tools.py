@@ -7,21 +7,28 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-import protogen_delta.services.tools as module
+import protogen_delta.services.tools.http as http_module
+import protogen_delta.services.tools.live_data as live_data_module
+import protogen_delta.services.tools.web as web_module
 from protogen_delta.services.tools import (
     Tool,
     ToolExecutor,
     ToolRegistry,
     default_registry,
+    fetch_web_page,
     get_current_time,
     get_exchange_rate,
     get_weather,
+    web_search,
 )
 
 
 def test_registry_and_time() -> None:
     registry = default_registry()
-    assert len(registry.schemas()) == 3
+    assert len(registry.schemas()) == 4
+    search_registry = default_registry(brave_search_api_key="secret")
+    assert len(search_registry.schemas()) == 5
+    assert "web_search" in search_registry.tools
     assert all(
         x["function"]["parameters"]["additionalProperties"] is False
         for x in registry.schemas()
@@ -89,7 +96,7 @@ def test_exchange_rate_uses_nominal_date_and_cross_rate(
         b"<Value>50,00</Value></Valute></ValCurs>"
     )
     fetch = AsyncMock(return_value=xml)
-    monkeypatch.setattr(module, "_fetch", fetch)
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
     result = asyncio.run(get_exchange_rate({"base": "USD", "quote": "JPY"}))
     assert result["rate"] == "160.000000"
     assert result["effective_date"] == "25.09.2026"
@@ -108,7 +115,7 @@ def test_weather_handles_unknown_ambiguous_and_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fetch = AsyncMock(return_value=b"{}")
-    monkeypatch.setattr(module, "_fetch", fetch)
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
     assert asyncio.run(get_weather({"city": "Nowhere"}))["status"] == "not_found"
     place = {
         "name": "Moscow",
@@ -138,24 +145,8 @@ def test_weather_handles_unknown_ambiguous_and_units(
             asyncio.run(get_weather(args))
 
 
-def test_http_read_limit_and_no_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
-    response = Mock()
-    response.__enter__ = Mock(return_value=response)
-    response.__exit__ = Mock(return_value=False)
-    response.read.return_value = b"{}"
-    opener = Mock()
-    opener.open.return_value = response
-    monkeypatch.setattr(module, "build_opener", Mock(return_value=opener))
-    assert asyncio.run(module._fetch("https://example.org", {"q": "a b"})) == b"{}"
-    assert opener.open.call_args.args[0].full_url.endswith("q=a+b")
-    response.read.return_value = b"x" * 1_048_577
-    with pytest.raises(ValueError):
-        asyncio.run(module._fetch("https://example.org", {}))
-    module.NoRedirect().redirect_request()
-
-
 @pytest.mark.parametrize("failure", ["", "http", "size"])
-def test_proxy_fetch_checks_status_size_and_closes_session(
+def test_provider_fetch_checks_status_size_and_closes_session(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     response = Mock()
@@ -172,9 +163,8 @@ def test_proxy_fetch_checks_status_size_and_closes_session(
     session.get.return_value = request
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr(module, "ClientSession", Mock(return_value=session))
-    monkeypatch.setattr(module.ProxyConnector, "from_url", Mock())
-    run = module._fetch("https://example.org", {}, proxy_url="socks5://localhost:1080")
+    monkeypatch.setattr(http_module, "_session", Mock(return_value=session))
+    run = http_module.fetch_provider("https://example.org", {"q": "test"})
     if failure:
         with pytest.raises(ValueError):
             asyncio.run(run)
@@ -182,3 +172,225 @@ def test_proxy_fetch_checks_status_size_and_closes_session(
         assert asyncio.run(run) == b"{}"
     session.__aexit__.assert_awaited_once()
     assert session.get.call_args.kwargs["allow_redirects"] is False
+
+
+def test_http_session_uses_optional_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTP-сессия должна подключать proxy только при наличии настройки."""
+    client_session = Mock()
+    connector = Mock()
+    from_url = Mock(return_value=connector)
+    monkeypatch.setattr(http_module, "ClientSession", client_session)
+    monkeypatch.setattr(http_module.ProxyConnector, "from_url", from_url)
+
+    http_module._session(None)
+    assert client_session.call_args.kwargs["connector"] is None
+    from_url.assert_not_called()
+
+    http_module._session("socks5://proxy.example:1080")
+    from_url.assert_called_once_with("socks5://proxy.example:1080")
+    assert client_session.call_args.kwargs["connector"] is connector
+
+
+def test_public_page_follows_validated_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Каждый redirect должен пройти проверку до чтения страницы."""
+    redirect = Mock(status=302, headers={"Location": "/final"})
+    success = Mock(status=200, headers={"Content-Type": "text/html; charset=utf-8"})
+
+    async def chunks(size: int) -> AsyncIterator[bytes]:
+        yield b"<p>ok</p>"
+
+    success.content.iter_chunked = chunks
+    redirect_request = Mock()
+    redirect_request.__aenter__ = AsyncMock(return_value=redirect)
+    redirect_request.__aexit__ = AsyncMock(return_value=False)
+    success_request = Mock()
+    success_request.__aenter__ = AsyncMock(return_value=success)
+    success_request.__aexit__ = AsyncMock(return_value=False)
+    session = Mock()
+    session.get.side_effect = [redirect_request, success_request]
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    validate = AsyncMock()
+    monkeypatch.setattr(http_module, "_session", Mock(return_value=session))
+    monkeypatch.setattr(http_module, "_validate_public_url", validate)
+
+    result = asyncio.run(http_module.fetch_public_page(" https://example.org/start "))
+
+    assert result == (b"<p>ok</p>", "https://example.org/final", "text/html")
+    assert [call.args[0] for call in validate.await_args_list] == [
+        "https://example.org/start",
+        "https://example.org/final",
+    ]
+
+
+@pytest.mark.parametrize(
+    "status,headers,max_redirects",
+    [
+        (302, {}, 3),
+        (302, {"Location": "/again"}, 0),
+        (503, {}, 3),
+        (200, {"Content-Type": "application/json"}, 3),
+    ],
+)
+def test_public_page_rejects_invalid_response(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    headers: dict[str, str],
+    max_redirects: int,
+) -> None:
+    """Читалка должна отклонять опасный или неподдерживаемый ответ."""
+    response = Mock(status=status, headers=headers)
+    request = Mock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    request.__aexit__ = AsyncMock(return_value=False)
+    session = Mock()
+    session.get.return_value = request
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(http_module, "_session", Mock(return_value=session))
+    monkeypatch.setattr(http_module, "_validate_public_url", AsyncMock())
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            http_module.fetch_public_page(
+                "https://example.org",
+                max_redirects=max_redirects,
+            )
+        )
+
+
+def test_web_search_validates_and_normalizes_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Поиск должен вернуть ограниченные результаты со ссылками."""
+    payload = {
+        "web": {
+            "results": [
+                {
+                    "title": "Новость",
+                    "url": "https://example.org/news",
+                    "description": "Описание",
+                    "page_age": "2026-09-26",
+                },
+                {"title": 123, "url": None},
+            ]
+        }
+    }
+    fetch = AsyncMock(return_value=json.dumps(payload).encode())
+    monkeypatch.setattr(web_module, "fetch_provider", fetch)
+    result = asyncio.run(
+        web_search(
+            {
+                "query": "новости DeepSeek",
+                "count": "3",
+                "language": "ru",
+                "freshness": "week",
+            },
+            api_key="secret",
+        )
+    )
+    assert result["results"] == [
+        {
+            "title": "Новость",
+            "url": "https://example.org/news",
+            "description": "Описание",
+            "published": "2026-09-26",
+        }
+    ]
+    call = fetch.await_args
+    assert call is not None
+    assert call.args[1]["freshness"] == "pw"
+    assert call.kwargs["headers"]["X-Subscription-Token"] == "secret"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"query": ""},
+        {"query": "test", "count": "zero"},
+        {"query": "test", "count": "11"},
+        {"query": "test", "language": "de"},
+        {"query": "test", "freshness": "century"},
+    ],
+)
+def test_web_search_rejects_invalid_arguments(args: dict[str, str]) -> None:
+    """Некорректные параметры поиска не должны уходить провайдеру."""
+    with pytest.raises(ValueError):
+        asyncio.run(web_search(args, api_key="secret"))
+
+
+def test_fetch_web_page_extracts_visible_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Читалка должна убрать script и вернуть канонический URL."""
+    html = (
+        b"<html><head><title>Test page</title><style>hidden</style></head>"
+        b"<body><h1>Hello</h1><script>steal()</script><p>Useful text</p></body></html>"
+    )
+    fetch = AsyncMock(return_value=(html, "https://example.org/final", "text/html"))
+    monkeypatch.setattr(web_module, "fetch_public_page", fetch)
+    result = asyncio.run(fetch_web_page({"url": "https://example.org"}))
+    assert result["title"] == "Test page"
+    assert "Hello" in result["text"]
+    assert "Useful text" in result["text"]
+    assert "steal" not in result["text"]
+    assert result["url"] == "https://example.org/final"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (b"plain   text\nnext", "plain text next"),
+        (b"<meta charset=unknown-charset>broken", "broken"),
+    ],
+)
+def test_fetch_web_page_handles_plain_text_and_unknown_charset(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: bytes,
+    expected: str,
+) -> None:
+    """Читалка должна нормализовать текст и переживать неизвестную кодировку."""
+    content_type = "text/plain" if raw.startswith(b"plain") else "text/html"
+    fetch = AsyncMock(return_value=(raw, "https://example.org", content_type))
+    monkeypatch.setattr(web_module, "fetch_public_page", fetch)
+
+    result = asyncio.run(fetch_web_page({"url": "https://example.org"}))
+
+    assert result["text"] == expected
+    assert result["title"] == ""
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://localhost/admin",
+        "http://user:password@example.org/",
+        "http://example.org:bad/",
+    ],
+)
+def test_public_page_rejects_unsafe_url(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    """Читалка не должна обращаться к локальным и некорректным адресам."""
+    monkeypatch.setattr(
+        http_module.socket,
+        "getaddrinfo",
+        Mock(return_value=[(2, 1, 6, "", ("127.0.0.1", 80))]),
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(http_module._validate_public_url(url))
+
+
+def test_public_page_allows_only_global_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DNS-ответ должен содержать только глобальные IP-адреса."""
+    resolver = Mock(return_value=[(2, 1, 6, "", ("93.184.216.34", 443))])
+    monkeypatch.setattr(http_module.socket, "getaddrinfo", resolver)
+    asyncio.run(http_module._validate_public_url("https://example.org/page"))
+    resolver.return_value = [(2, 1, 6, "", ("10.0.0.1", 443))]
+    with pytest.raises(ValueError):
+        asyncio.run(http_module._validate_public_url("https://example.org/page"))

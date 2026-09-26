@@ -9,7 +9,11 @@ import pytest
 from openai.types.chat import ChatCompletionMessage
 
 import protogen_delta.services.deepseek as module
-from protogen_delta.services.deepseek import DeepSeekAPIError, DeepSeekService
+from protogen_delta.services.deepseek import (
+    DeepSeekAPIError,
+    DeepSeekService,
+    _forced_web_tool,
+)
 from protogen_delta.services.tools import Tool, ToolExecutor, ToolRegistry
 
 
@@ -82,3 +86,51 @@ def test_loop_caps_execution_and_stops_ignoring_model_requests(
     client.chat.completions.create.return_value = response(7)
     with pytest.raises(DeepSeekAPIError):
         asyncio.run(service.chat("system", "question"))
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Найди в интернете новости про Python", "web_search"),
+        ("В интернете найди новости про Python", "web_search"),
+        ("Посмотри в сети свежую цену", "web_search"),
+        ("Открой https://example.org/article", "fetch_web_page"),
+        ("Не ищи в интернете, просто предположи", None),
+        ("Что такое TCP?", None),
+    ],
+)
+def test_explicit_web_requests_choose_required_tool(
+    message: str, expected: str | None
+) -> None:
+    """Явная просьба должна детерминированно выбрать web-инструмент."""
+    assert _forced_web_tool(message, {"web_search", "fetch_web_page"}) == expected
+
+
+def test_loop_forces_web_search_for_explicit_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Первый запрос модели должен принудительно использовать web_search."""
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock(return_value={})
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "web_search", "search", {"query": "query"}, ("query",), handler
+                    ),
+                    Tool("fetch_web_page", "fetch", {"url": "url"}, ("url",), handler),
+                ]
+            )
+        ),
+    )
+    asyncio.run(service.chat("system", "Найди в интернете последние новости"))
+    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "web_search"},
+    }

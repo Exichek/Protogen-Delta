@@ -22,6 +22,7 @@ class Settings:
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
     creator_id: int | None = None
+    brave_search_api_key: str | None = None
     rate_limit_seconds: float = 2.0
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
@@ -111,6 +112,8 @@ def load_settings() -> Settings:
         "TELEGRAM_PROXY_URL",
         "",
     ).strip()
+
+    brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
 
     if not telegram_token:
         raise RuntimeError("TELEGRAM_TOKEN не найден в окружении")
@@ -206,6 +209,7 @@ def load_settings() -> Settings:
             )
         ),
         creator_id=creator_id,
+        brave_search_api_key=brave_search_api_key or None,
         rate_limit_seconds=rate_limit_seconds,
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
