@@ -17,8 +17,10 @@ from protogen_delta.core.telegram_commands import set_commands
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.art import create_art_router
+from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
+from protogen_delta.handlers.proactive import create_proactive_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
@@ -26,12 +28,15 @@ from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
+from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
+from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
@@ -99,6 +104,8 @@ async def main() -> None:
 
     bot = _create_bot(settings)
     deepseek: DeepSeekService | None = None
+    proactive_messenger: ProactiveMessenger | None = None
+    proactive_task: asyncio.Task[None] | None = None
 
     try:
         dispatcher = Dispatcher()
@@ -107,6 +114,8 @@ async def main() -> None:
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
+        memories_repository = MemoriesRepository(settings.data_dir)
+        memory = MemoryService(memories_repository)
 
         bot_state = BotState()
         user_states = UserStateStore(
@@ -206,6 +215,8 @@ async def main() -> None:
             bot_state=bot_state,
             user_states=user_states,
             config=response_engine_config,
+            memory=memory,
+            creator_id=settings.creator_id,
         )
 
         start_router = create_start_router(
@@ -228,8 +239,23 @@ async def main() -> None:
             images_repository=images_repository,
             users_repository=users_repository,
             bot_state=bot_state,
-            admin_ids=settings.admin_ids,
+            admin_ids=(
+                settings.admin_ids
+                | (
+                    frozenset({settings.creator_id})
+                    if settings.creator_id is not None
+                    else frozenset()
+                )
+            ),
         )
+
+        creator_router = create_creator_router(
+            bot=bot,
+            users_repository=users_repository,
+            creator_id=settings.creator_id,
+        )
+
+        proactive_router = create_proactive_router(memories_repository)
 
         rate_limiter = UserRateLimiter(
             cooldown_seconds=settings.rate_limit_seconds,
@@ -239,6 +265,7 @@ async def main() -> None:
         reset_router = create_reset_router(
             response_engine,
             users_repository,
+            memory,
         )
 
         rp_router = create_rp_router(
@@ -256,6 +283,8 @@ async def main() -> None:
         dispatcher.include_router(help_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
+        dispatcher.include_router(creator_router)
+        dispatcher.include_router(proactive_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
@@ -268,8 +297,28 @@ async def main() -> None:
 
         logger.info("Бот запущен")
 
+        proactive_messenger = ProactiveMessenger(
+            bot=bot,
+            deepseek=deepseek,
+            repository=memories_repository,
+            system_prompt=system_prompt,
+            config=ProactiveConfig(
+                check_interval_seconds=settings.proactive_check_seconds,
+                idle_seconds=settings.proactive_idle_seconds,
+                cooldown_seconds=settings.proactive_cooldown_seconds,
+            ),
+        )
+        proactive_task = asyncio.create_task(proactive_messenger.run_forever())
+
         await dispatcher.start_polling(bot)
     finally:
+        if proactive_messenger is not None:
+            proactive_messenger.stop()
+        if proactive_task is not None:
+            try:
+                await proactive_task
+            except Exception:
+                logger.exception("Фоновая задача завершилась с ошибкой")
         try:
             if deepseek is not None:
                 await deepseek.close()

@@ -18,6 +18,7 @@ from protogen_delta.handlers.reset import (
     create_reset_router,
 )
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.response_engine import ResponseEngine
 
 TEST_USER_ID = 123456
@@ -112,6 +113,28 @@ def _create_router() -> tuple[
         engine_mock,
         users_repository_mock,
     )
+
+
+def test_confirmed_reset_deletes_episodic_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Полный сброс должен удалять и новую долговременную память."""
+    monkeypatch.setattr(reset_module, "time", lambda: float(TEST_TIMESTAMP))
+    engine = AsyncMock(spec=ResponseEngine)
+    users = Mock(spec=UsersRepository)
+    memory = AsyncMock(spec=MemoryService)
+    router = create_reset_router(
+        cast(ResponseEngine, engine),
+        cast(UsersRepository, users),
+        cast(MemoryService, memory),
+    )
+    callback, _, _ = _create_callback_mock(
+        f"reset:confirm:{TEST_USER_ID}:{TEST_TIMESTAMP}"
+    )
+
+    asyncio.run(_call_callback_handler(router, callback))
+
+    memory.delete_user.assert_awaited_once_with(TEST_USER_ID)
 
 
 def test_reset_command_only_requests_confirmation(
