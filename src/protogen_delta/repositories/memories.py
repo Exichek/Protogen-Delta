@@ -104,12 +104,12 @@ class MemoriesRepository:
             connection.execute(
                 """
                 DELETE FROM memories
-                WHERE user_id = ? AND id NOT IN (
-                    SELECT id FROM memories WHERE user_id = ?
+                WHERE user_id = ? AND kind = ? AND id NOT IN (
+                    SELECT id FROM memories WHERE user_id = ? AND kind = ?
                     ORDER BY created_at DESC, id DESC LIMIT ?
                 )
                 """,
-                (user_id, user_id, self._max_memories),
+                (user_id, kind, user_id, kind, self._max_memories),
             )
 
     def _recent_sync(self, user_id: int, limit: int) -> list[Memory]:

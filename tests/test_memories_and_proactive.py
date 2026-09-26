@@ -23,10 +23,16 @@ def test_repository_keeps_kinds_limit_and_engagement(tmp_path: Path) -> None:
         await repository.remember(1, "topic", "  первая   тема ", 1.0)
         await repository.remember(1, "funny", "шутка", 2.0)
         await repository.remember(1, "grievance", "обида", 3.0)
-        assert [item.text for item in await repository.recent(1)] == [
+        await repository.remember(1, "topic", "вторая тема", 4.0)
+        await repository.remember(1, "topic", "третья тема", 5.0)
+        memories = await repository.recent(1)
+        assert [item.text for item in memories] == [
+            "третья тема",
+            "вторая тема",
             "обида",
             "шутка",
         ]
+        assert "первая тема" not in {item.text for item in memories}
 
         await repository.note_user_activity(1, 10.0)
         assert await repository.proactive_enabled(1) is True
