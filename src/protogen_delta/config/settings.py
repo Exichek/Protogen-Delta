@@ -28,8 +28,8 @@ class Settings:
     conversation_history_limit: int = 8
     user_state_retention_seconds: float = 86400.0
     proactive_check_seconds: float = 300.0
-    proactive_idle_seconds: float = 86400.0
-    proactive_cooldown_seconds: float = 172800.0
+    proactive_idle_seconds: float = 14400.0
+    proactive_cooldown_seconds: float = 86400.0
 
 
 def _parse_admin_ids(value: str) -> frozenset[int]:
@@ -175,10 +175,10 @@ def load_settings() -> Settings:
         os.getenv("PROACTIVE_CHECK_SECONDS", "300.0"), "PROACTIVE_CHECK_SECONDS"
     )
     proactive_idle_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_IDLE_SECONDS", "86400.0"), "PROACTIVE_IDLE_SECONDS"
+        os.getenv("PROACTIVE_IDLE_SECONDS", "14400.0"), "PROACTIVE_IDLE_SECONDS"
     )
     proactive_cooldown_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "172800.0"),
+        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "86400.0"),
         "PROACTIVE_COOLDOWN_SECONDS",
     )
 

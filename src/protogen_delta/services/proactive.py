@@ -21,8 +21,8 @@ class ProactiveConfig:
     """Ограничения фоновой отправки."""
 
     check_interval_seconds: float = 300.0
-    idle_seconds: float = 86400.0
-    cooldown_seconds: float = 172800.0
+    idle_seconds: float = 14400.0
+    cooldown_seconds: float = 86400.0
     quiet_start_hour: int = 23
     quiet_end_hour: int = 9
     batch_size: int = 10

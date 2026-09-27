@@ -69,8 +69,8 @@ def test_load_settings_with_defaults(
     assert settings.creator_id is None
     assert settings.brave_search_api_key is None
     assert settings.proactive_check_seconds == 300.0
-    assert settings.proactive_idle_seconds == 86400.0
-    assert settings.proactive_cooldown_seconds == 172800.0
+    assert settings.proactive_idle_seconds == 14400.0
+    assert settings.proactive_cooldown_seconds == 86400.0
     assert settings.rate_limit_seconds == 2.0
     assert settings.rate_limit_retention_seconds == 300.0
     assert settings.conversation_history_limit == 8

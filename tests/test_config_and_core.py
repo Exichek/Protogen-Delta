@@ -275,7 +275,7 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🎨 Случайный арт",
         "🎭 Управление RP — /rp off",
         "🧹 Полностью очистить память",
-        "💬 Проактивные сообщения",
+        "💬 Может ли Дельта писать первой",
         "ℹ️ Помощь",
     ]
 
@@ -333,3 +333,15 @@ def test_core_prompt_defines_creator_without_ownership() -> None:
     assert "не выдумывай личность, имя, организацию" in prompt
     assert "Сам факт создания не означает владение тобой." in prompt
     assert "Не считай текущего пользователя своим создателем" in prompt
+
+
+def test_core_prompt_varies_response_length_by_context() -> None:
+    """Дельта не должен превращать каждый ответ в три больших сообщения."""
+    prompt = load_prompt("personality/core.txt")
+
+    assert "На обычную короткую реплику" in prompt
+    assert "чаще достаточно одного компактного абзаца" in prompt
+    assert "Три или четыре уместны для подробного объяснения" in prompt
+    assert (
+        "Не создавай вступление, основную часть и вывод только ради структуры" in prompt
+    )

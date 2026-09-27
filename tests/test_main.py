@@ -348,6 +348,12 @@ def test_main_builds_application_and_starts_polling(
 
     create_start_router_mock.assert_called_once()
 
+    create_text_router_mock.assert_called_once_with(
+        ANY,
+        rate_limiter=ANY,
+        bot=bot_mock,
+    )
+
     start_router_call = create_start_router_mock.call_args
 
     assert start_router_call is not None

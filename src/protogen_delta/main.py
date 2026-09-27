@@ -282,6 +282,7 @@ async def main() -> None:
         text_router = create_text_router(
             response_engine,
             rate_limiter=rate_limiter,
+            bot=bot,
         )
 
         dispatcher.include_router(start_router)

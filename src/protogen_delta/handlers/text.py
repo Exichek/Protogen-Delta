@@ -4,10 +4,12 @@ import asyncio
 import logging
 from time import perf_counter
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
+from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
-from protogen_delta.core.message_utils import split_message
+from protogen_delta.core.message_utils import reply_delay_seconds, split_reply
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.rp import (
     RP_ALREADY_DISABLED_REPLY,
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 def create_text_router(
     response_engine: ResponseEngine,
     rate_limiter: UserRateLimiter | None = None,
+    bot: Bot | None = None,
 ) -> Router:
     """Создать роутер обычных текстовых сообщений."""
     router = Router(name=__name__)
@@ -60,12 +63,24 @@ def create_text_router(
             return
 
         async def deliver(reply: str) -> None:
-            chunks = split_message(reply)
+            chunks = split_reply(reply)
             started = perf_counter()
             sent = 0
             outcome = "failed"
             try:
-                for chunk in chunks:
+                for index, chunk in enumerate(chunks):
+                    if index and bot is not None:
+                        try:
+                            await bot.send_chat_action(
+                                chat_id=message.chat.id,
+                                action=ChatAction.TYPING,
+                            )
+                        except TelegramAPIError:
+                            logger.debug(
+                                "Не удалось показать статус набора сообщения",
+                                exc_info=True,
+                            )
+                        await asyncio.sleep(reply_delay_seconds(chunk))
                     await message.answer(chunk)
                     sent += 1
                 outcome = "sent"
