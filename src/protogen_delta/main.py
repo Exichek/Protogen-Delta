@@ -20,6 +20,7 @@ from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
+from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.proactive import create_proactive_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
@@ -273,6 +274,11 @@ async def main() -> None:
             rate_limiter=rate_limiter,
             bot=bot,
         )
+        media_router = create_media_router(
+            response_engine,
+            bot,
+            rate_limiter=rate_limiter,
+        )
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(help_router)
@@ -283,6 +289,7 @@ async def main() -> None:
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
+        dispatcher.include_router(media_router)
         dispatcher.include_router(text_router)
 
         await bot.delete_webhook(

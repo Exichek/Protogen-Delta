@@ -199,7 +199,7 @@ def test_text_handler_sends_paragraphs_with_typing_delay(
     engine.respond_and_deliver.return_value = f"{first}\n\n{second}"
     bot = AsyncMock(spec=Bot)
     sleep = AsyncMock()
-    monkeypatch.setattr("protogen_delta.handlers.text.asyncio.sleep", sleep)
+    monkeypatch.setattr("protogen_delta.handlers.delivery.asyncio.sleep", sleep)
     router = create_text_router(cast(ResponseEngine, engine), bot=cast(Bot, bot))
     message, answer, _ = _create_message_mock("Расскажи подробнее")
     message.chat = Mock(id=321)

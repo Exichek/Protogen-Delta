@@ -184,6 +184,12 @@ def test_main_builds_application_and_starts_polling(
     create_text_router_mock = Mock(
         return_value=text_router,
     )
+    media_router = Mock(
+        name="media_router",
+    )
+    create_media_router_mock = Mock(
+        return_value=media_router,
+    )
 
     set_commands_mock = AsyncMock()
 
@@ -271,6 +277,11 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_text_router",
         create_text_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_media_router",
+        create_media_router_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -377,7 +388,7 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    assert dispatcher_mock.include_router.call_count == 10
+    assert dispatcher_mock.include_router.call_count == 11
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -402,6 +413,15 @@ def test_main_builds_application_and_starts_polling(
     )
     dispatcher_mock.include_router.assert_any_call(
         text_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        media_router,
+    )
+
+    create_media_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(

@@ -1,9 +1,11 @@
 """Сервис для работы с DeepSeek API."""
 
 import asyncio
+import base64
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, cast
 
@@ -71,6 +73,20 @@ class DeepSeekAPIError(DeepSeekError):
         """Сохранить сообщение и HTTP-код ошибки."""
         super().__init__(message)
         self.status_code = status_code
+
+
+@dataclass(frozen=True, slots=True)
+class ImageInput:
+    """Изображение, передаваемое модели вместе с текстовым сообщением."""
+
+    data: bytes
+    mime_type: str
+    label: str = "изображение"
+
+    def data_url(self) -> str:
+        """Преобразовать байты изображения в data URL для DeepSeek API."""
+        encoded = base64.b64encode(self.data).decode("ascii")
+        return f"data:{self.mime_type};base64,{encoded}"
 
 
 def _forced_web_tool(user_message: str, available: set[str]) -> str | None:
@@ -236,8 +252,9 @@ class DeepSeekService:
         system_prompt: str,
         user_message: str,
         history: Sequence[ConversationTurn] = (),
+        images: Sequence[ImageInput] = (),
     ) -> str:
-        """Получить обычный текстовый ответ модели с учётом истории диалога."""
+        """Получить ответ модели с учётом истории и приложенных изображений."""
         messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
@@ -259,12 +276,38 @@ class DeepSeekService:
                 }
             )
 
-        messages.append(
-            {
-                "role": "user",
-                "content": user_message,
-            }
-        )
+        if images:
+            content: list[dict[str, Any]] = [
+                {
+                    "type": "text",
+                    "text": user_message,
+                }
+            ]
+            content.extend(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image.data_url(),
+                    },
+                }
+                for image in images
+            )
+            messages.append(
+                cast(
+                    ChatCompletionMessageParam,
+                    {
+                        "role": "user",
+                        "content": content,
+                    },
+                )
+            )
+        else:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_message,
+                }
+            )
 
         started_at = perf_counter()
 

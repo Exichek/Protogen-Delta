@@ -22,6 +22,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekRateLimitError,
     DeepSeekService,
     DeepSeekTimeoutError,
+    ImageInput,
 )
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
@@ -137,6 +138,30 @@ def test_response_engine_routes_greeting_through_chat() -> None:
             assistant_message="Привет в ответ",
         )
     ]
+
+
+def test_response_engine_passes_image_and_visual_behavior_context() -> None:
+    """Vision-ввод должен сохранять общий характер и текстовую историю."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    image = ImageInput(b"image", "image/png", "фотографию")
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Пользователь отправил фотографию без подписи]",
+            images=(image,),
+        )
+    )
+
+    assert result == "Ответ"
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert call.kwargs["images"] == (image,)
+    assert "действительно получил" in call.kwargs["system_prompt"]
+    assert "коротко и живо" in call.kwargs["system_prompt"]
+    assert list(engine._user_states.get(TEST_USER_ID).history)[0].user_message == (
+        "[Пользователь отправил фотографию без подписи]"
+    )
 
 
 def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from protogen_delta.core.log_context import bind_log_context
@@ -27,6 +27,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekRateLimitError,
     DeepSeekService,
     DeepSeekTimeoutError,
+    ImageInput,
 )
 from protogen_delta.services.fetishes import (
     FetishRole,
@@ -113,13 +114,20 @@ class ResponseEngine:
         user_id: int,
         user_message: str,
         deliver: ReplyDelivery,
+        *,
+        images: Sequence[ImageInput] = (),
     ) -> None:
         """Отклонить повторный запрос и удержать lock до конца доставки."""
         if user_id in self._delivering_users:
             raise ResponseBusyError
         self._delivering_users.add(user_id)
         try:
-            await self.respond(user_id, user_message, deliver=deliver)
+            await self.respond(
+                user_id,
+                user_message,
+                deliver=deliver,
+                images=images,
+            )
         finally:
             self._delivering_users.remove(user_id)
 
@@ -129,6 +137,7 @@ class ResponseEngine:
         user_message: str,
         *,
         deliver: ReplyDelivery | None = None,
+        images: Sequence[ImageInput] = (),
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
@@ -137,6 +146,7 @@ class ResponseEngine:
                     user_id=user_id,
                     user_message=user_message,
                     user_state=user_state,
+                    images=images,
                 )
                 if deliver is not None:
                     await deliver(prepared.text)
@@ -182,6 +192,7 @@ class ResponseEngine:
         user_id: int,
         user_message: str,
         user_state: UserState,
+        images: Sequence[ImageInput] = (),
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
@@ -304,6 +315,17 @@ class ResponseEngine:
                 "продолжения прежней сцены."
             )
 
+        if images:
+            labels = ", ".join(dict.fromkeys(image.label for image in images))
+            state_context.append(
+                f"К текущему сообщению приложены визуальные данные: {labels}. "
+                "Ты действительно получил их и можешь описывать только то, что "
+                "видно на них. Не утверждай, что не умеешь смотреть изображения. "
+                "Если пользователь не задал вопрос, отреагируй коротко и живо, "
+                "как собеседник, без формального отчёта. Стикер воспринимай как "
+                "эмоциональный жест с учётом разговора."
+            )
+
         current_fetishes = detect_fetishes(
             user_message,
             self._config.fetish_triggers,
@@ -337,11 +359,19 @@ class ResponseEngine:
         )
 
         try:
-            reply = await self._deepseek.chat(
-                system_prompt=prompt,
-                user_message=user_message,
-                history=tuple(user_state.history),
-            )
+            if images:
+                reply = await self._deepseek.chat(
+                    system_prompt=prompt,
+                    user_message=user_message,
+                    history=tuple(user_state.history),
+                    images=images,
+                )
+            else:
+                reply = await self._deepseek.chat(
+                    system_prompt=prompt,
+                    user_message=user_message,
+                    history=tuple(user_state.history),
+                )
         except DeepSeekTimeoutError:
             logger.warning("DeepSeek не ответил за установленное время")
             return PreparedReply(
