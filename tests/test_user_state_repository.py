@@ -67,6 +67,8 @@ def test_user_state_repository_saves_and_loads_state(
             ),
             emotions_updated_at=INITIAL_TIMESTAMP,
             roleplay_active=True,
+            delta_appearance="синий дракон с крыльями",
+            content_mode="adult",
         )
 
         state = await repository.load(123)
@@ -87,6 +89,8 @@ def test_user_state_repository_saves_and_loads_state(
             INITIAL_TIMESTAMP,
         )
         assert state.roleplay_active is True
+        assert state.delta_appearance == "синий дракон с крыльями"
+        assert state.content_mode == "adult"
 
     asyncio.run(run_test())
 
@@ -270,6 +274,8 @@ def test_user_state_store_restores_state_after_restart(
                 resentment=0.15,
             )
             state.roleplay_active = True
+            state.delta_appearance = "синий дракон с крыльями"
+            state.content_mode = "adult"
 
     asyncio.run(save_state())
 
@@ -297,6 +303,8 @@ def test_user_state_store_restores_state_after_restart(
         INITIAL_TIMESTAMP,
     )
     assert restored.roleplay_active is True
+    assert restored.delta_appearance == "синий дракон с крыльями"
+    assert restored.content_mode == "adult"
 
     assert restored.mood == "neutral"
     assert restored.reply_count == 0
@@ -442,6 +450,9 @@ def test_user_state_repository_migrates_legacy_database(
     assert state.roleplay_active is False
     assert state.roleplay_configuration == "male"
     assert state.roleplay_character == ""
+    assert state.roleplay_fetishes == ()
+    assert state.delta_appearance == ""
+    assert state.content_mode == "unselected"
 
     with closing(sqlite3.connect(database_path)) as connection:
         columns = {
@@ -450,6 +461,9 @@ def test_user_state_repository_migrates_legacy_database(
 
     assert "emotions_updated_at" in columns
     assert "roleplay_active" in columns
+    assert "roleplay_fetishes" in columns
+    assert "delta_appearance" in columns
+    assert "content_mode" in columns
 
 
 def test_user_state_repository_closes_connections(
@@ -704,12 +718,18 @@ def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
             state.roleplay_active = True
             state.roleplay_configuration = "female"
             state.roleplay_character = "человек в пальто"
+            state.roleplay_fetishes = ("bondage", "dirtytalk")
+            state.delta_appearance = "серый волк"
+            state.content_mode = "adult"
             state.relationship.trust = 0.7
         second = UserStateStore(persistence=UserStateRepository(tmp_path))
         async with second.use(123) as restored:
             assert restored.roleplay_active is True
             assert restored.roleplay_configuration == "female"
             assert restored.roleplay_character == "человек в пальто"
+            assert restored.roleplay_fetishes == ("bondage", "dirtytalk")
+            assert restored.delta_appearance == "серый волк"
+            assert restored.content_mode == "adult"
             assert restored.relationship.trust == pytest.approx(0.7)
             assert not restored.history
         await second.reset_user(123)
@@ -717,6 +737,9 @@ def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
         async with third.use(123) as cleared:
             assert cleared.roleplay_configuration == "male"
             assert cleared.roleplay_character == ""
+            assert cleared.roleplay_fetishes == ()
+            assert cleared.delta_appearance == ""
+            assert cleared.content_mode == "unselected"
             assert cleared.relationship.trust == 0.0
 
     asyncio.run(run())

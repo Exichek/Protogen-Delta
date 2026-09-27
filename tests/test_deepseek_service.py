@@ -16,6 +16,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekRateLimitError,
     DeepSeekService,
     DeepSeekTimeoutError,
+    ImageInput,
 )
 
 
@@ -246,6 +247,37 @@ def test_deepseek_chat_sends_history_in_order(
                 "type": "disabled",
             }
         },
+    )
+
+
+def test_deepseek_chat_sends_inline_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Изображение должно передаваться мультимодальным блоком data URL."""
+    service, _, create_mock, _ = _create_service(monkeypatch)
+    create_mock.return_value = _create_response("Вижу PNG")
+
+    result = asyncio.run(
+        service.chat(
+            system_prompt="SYSTEM",
+            user_message="Что здесь?",
+            images=(
+                ImageInput(
+                    data=b"\x89PNG\r\n\x1a\n",
+                    mime_type="image/png",
+                ),
+            ),
+        )
+    )
+
+    assert result == "Вижу PNG"
+    call = create_mock.await_args
+    assert call is not None
+    content = call.kwargs["messages"][-1]["content"]
+    assert content[0] == {"type": "text", "text": "Что здесь?"}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith(
+        "data:image/png;base64,iVBORw0KGgo="
     )
 
 

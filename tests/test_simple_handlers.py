@@ -6,7 +6,8 @@ from typing import cast
 from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
-from aiogram import Router
+from aiogram import Bot, Router
+from aiogram.enums import ChatAction
 from aiogram.types import Message
 
 import protogen_delta.handlers.unknown_command as unknown_command_module
@@ -186,6 +187,37 @@ def test_text_handler_splits_long_response() -> None:
     )
 
     assert answer_mock.await_count == 2
+
+
+def test_text_handler_sends_paragraphs_with_typing_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Многоабзацный ответ должен выглядеть как последовательность живых реплик."""
+    engine = _create_engine_mock()
+    first = "Первый содержательный абзац. " * 10
+    second = "Второй абзац немного подлиннее. " * 10
+    engine.respond_and_deliver.return_value = f"{first}\n\n{second}"
+    bot = AsyncMock(spec=Bot)
+    sleep = AsyncMock()
+    monkeypatch.setattr("protogen_delta.handlers.delivery.sleep", sleep)
+    router = create_text_router(cast(ResponseEngine, engine), bot=cast(Bot, bot))
+    message, answer, _ = _create_message_mock("Расскажи подробнее")
+    message.chat = Mock(id=321)
+
+    asyncio.run(_call_first_handler(router, message))
+
+    assert [call.args[0] for call in answer.await_args_list] == [
+        first.strip(),
+        second.strip(),
+    ]
+    bot.send_chat_action.assert_awaited_once_with(
+        chat_id=321,
+        action=ChatAction.TYPING,
+    )
+    sleep.assert_awaited_once()
+    sleep_call = sleep.await_args
+    assert sleep_call is not None
+    assert 1.5 <= sleep_call.args[0] <= 2.5
 
 
 def test_text_handler_ignores_commands() -> None:

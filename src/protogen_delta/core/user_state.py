@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
 from time import monotonic, time
-from typing import Protocol
+from typing import Literal, Protocol
 
 logger = logging.getLogger(__name__)
+
+ContentMode = Literal["unselected", "soft", "adult"]
 
 _SECONDS_PER_HOUR = 3600.0
 _WARMTH_DECAY_PER_HOUR = 0.01
@@ -115,6 +117,9 @@ class PersistentUserState:
     roleplay_active: bool = False
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
+    roleplay_fetishes: tuple[str, ...] = ()
+    delta_appearance: str = ""
+    content_mode: ContentMode = "unselected"
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -141,6 +146,9 @@ class UserStatePersistence(Protocol):
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
+        delta_appearance: str = "",
+        content_mode: ContentMode = "unselected",
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -171,6 +179,9 @@ class UserState:
     roleplay_active: bool = False
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
+    roleplay_fetishes: tuple[str, ...] = ()
+    delta_appearance: str = ""
+    content_mode: ContentMode = "unselected"
     emotions_updated_at: float = field(
         default=0.0,
         repr=False,
@@ -206,15 +217,19 @@ class UserState:
         self.mood = "neutral"
         self.reply_count = 0
         self.history.clear()
+        self.emotions.arousal = 0.0
         self.roleplay_active = False
         self.roleplay_configuration = "male"
         self.roleplay_character = ""
+        self.roleplay_fetishes = ()
 
     def reset_all(self) -> None:
         """Полностью сбросить пользовательское состояние."""
         self.reset_context()
         self.emotions = EmotionalState()
         self.relationship = RelationshipState()
+        self.delta_appearance = ""
+        self.content_mode = "unselected"
 
 
 class UserStateStore:
@@ -303,6 +318,9 @@ class UserStateStore:
                                 roleplay_active=state.roleplay_active,
                                 roleplay_configuration=state.roleplay_configuration,
                                 roleplay_character=state.roleplay_character,
+                                roleplay_fetishes=state.roleplay_fetishes,
+                                delta_appearance=state.delta_appearance,
+                                content_mode=state.content_mode,
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -372,6 +390,9 @@ class UserStateStore:
             state.roleplay_active = persistent_state.roleplay_active
             state.roleplay_configuration = persistent_state.roleplay_configuration
             state.roleplay_character = persistent_state.roleplay_character
+            state.roleplay_fetishes = persistent_state.roleplay_fetishes
+            state.delta_appearance = persistent_state.delta_appearance
+            state.content_mode = persistent_state.content_mode
         else:
             state.emotions_updated_at = self._wall_clock()
 

@@ -265,8 +265,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "start",
         "randomart",
         "rp",
+        "adult",
         "reset",
-        "proactive",
         "help",
     ]
 
@@ -274,8 +274,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🚀 Запустить бота",
         "🎨 Случайный арт",
         "🎭 Управление RP — /rp off",
+        "🔞 Выбрать возрастной режим",
         "🧹 Полностью очистить память",
-        "💬 Проактивные сообщения",
         "ℹ️ Помощь",
     ]
 
@@ -333,3 +333,57 @@ def test_core_prompt_defines_creator_without_ownership() -> None:
     assert "не выдумывай личность, имя, организацию" in prompt
     assert "Сам факт создания не означает владение тобой." in prompt
     assert "Не считай текущего пользователя своим создателем" in prompt
+
+
+def test_core_prompt_varies_response_length_by_context() -> None:
+    """Дельта не должен превращать каждый ответ в три больших сообщения."""
+    prompt = load_prompt("personality/core.txt")
+
+    assert "На обычную короткую реплику" in prompt
+    assert "чаще достаточно одного компактного абзаца" in prompt
+    assert "Три или четыре уместны для подробного объяснения" in prompt
+    assert (
+        "Не создавай вступление, основную часть и вывод только ради структуры" in prompt
+    )
+
+
+def test_roleplay_prompt_does_not_renegotiate_established_scene() -> None:
+    """RP не должен превращаться в повторяющееся обсуждение правил сцены."""
+    prompt = load_prompt("personality/rp.txt")
+
+    assert "считай сам факт ролевой игры согласованным" in prompt
+    assert "не требуют новой лекции о самостоятельности" in prompt
+    assert "задай максимум один необходимый вопрос" in prompt
+    assert "Делай это молча" in prompt
+    assert "Большинство коротких RP-ходов" in prompt
+    assert "не заканчивай постоянно фразами" in prompt
+    assert "Не копируй собственный шаблон из истории сцены" in prompt
+    assert "Внимательно различай принадлежность частей тела" in prompt
+    assert "Название вида само по себе не задаёт все особенности тела" in prompt
+    assert "не приписывай ему узел" in prompt
+    assert "Обращение внутри роли" in prompt
+    assert "Убирай внутренние противоречия" in prompt
+    assert "язык работаю глубже" in prompt
+    assert "горячо дышу в затылок" in prompt
+    assert "Нарастающее возбуждение" in prompt
+    assert "одного насыщенного сообщения" in prompt
+    assert "Интенсивность и доминирование — разные вещи" in prompt
+    assert "не должно заставлять его каждый раз перехватывать управление" in prompt
+
+
+def test_protogen_lore_answers_robot_question_unambiguously() -> None:
+    """Ответ о природе Дельты не должен одновременно подтверждать и отрицать одно."""
+    prompt = load_prompt("personality/protogen_lore.txt")
+
+    assert "отвечай однозначно: нет" in prompt
+    assert "двусмысленного «точно»" in prompt
+
+
+def test_fetish_role_prompt_handles_imperative_direction() -> None:
+    """Классификатор должен отличать приказ Дельте от действия пользователя."""
+    prompt = load_prompt("fetish_role_classification.txt")
+
+    assert '"соси мою жопу" → active' in prompt
+    assert '"я сосу тебе" → passive' in prompt
+    assert '"дай мне свою попку" → passive' in prompt
+    assert "Повелительное наклонение" in prompt

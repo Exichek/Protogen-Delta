@@ -10,18 +10,6 @@ import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
 
 
-def test_require_string_list_rejects_invalid_value() -> None:
-    """Список должен содержать только строки."""
-    with pytest.raises(
-        TypeError,
-        match="TEST должен содержать список строк",
-    ):
-        main_module._require_string_list(
-            ["ok", 123],
-            "TEST",
-        )
-
-
 def test_require_string_lists_rejects_invalid_value() -> None:
     """Словарь должен содержать списки строк."""
     with pytest.raises(
@@ -110,11 +98,6 @@ def test_main_builds_application_and_starts_polling(
     )
 
     json_data: dict[str, object] = {
-        "start_messages.json": {
-            "START_MESSAGES": [
-                "Я уже работаю",
-            ]
-        },
         "fetishes_triggers.json": {
             "bondage": [
                 "связал",
@@ -131,6 +114,7 @@ def test_main_builds_application_and_starts_polling(
 
     prompts = {
         "start_greeting.txt": "START GREETING PROMPT",
+        "repeat_start_greeting.txt": "REPEAT START GREETING PROMPT",
         "insult_classification.txt": "INSULT PROMPT",
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
@@ -175,6 +159,9 @@ def test_main_builds_application_and_starts_polling(
     text_router = Mock(
         name="text_router",
     )
+    adult_router = Mock(
+        name="adult_router",
+    )
 
     create_start_router_mock = Mock(
         return_value=start_router,
@@ -200,6 +187,29 @@ def test_main_builds_application_and_starts_polling(
     create_text_router_mock = Mock(
         return_value=text_router,
     )
+    create_adult_router_mock = Mock(
+        return_value=adult_router,
+    )
+    media_router = Mock(
+        name="media_router",
+    )
+    create_media_router_mock = Mock(
+        return_value=media_router,
+    )
+    document_router = Mock(
+        name="document_router",
+    )
+    create_document_router_mock = Mock(
+        return_value=document_router,
+    )
+    voice_router = Mock(
+        name="voice_router",
+    )
+    create_voice_router_mock = Mock(
+        return_value=voice_router,
+    )
+    speech_transcriber = Mock(name="speech_transcriber")
+    speech_transcriber_constructor_mock = Mock(return_value=speech_transcriber)
 
     set_commands_mock = AsyncMock()
 
@@ -290,6 +300,31 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "create_adult_router",
+        create_adult_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_media_router",
+        create_media_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_document_router",
+        create_document_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_voice_router",
+        create_voice_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "SpeechTranscriber",
+        speech_transcriber_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "set_commands",
         set_commands_mock,
     )
@@ -311,6 +346,7 @@ def test_main_builds_application_and_starts_polling(
         call("mood_classification.txt"),
         call("fetish_role_classification.txt"),
         call("start_greeting.txt"),
+        call("repeat_start_greeting.txt"),
         call("personality/core.txt"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
@@ -348,6 +384,12 @@ def test_main_builds_application_and_starts_polling(
 
     create_start_router_mock.assert_called_once()
 
+    create_text_router_mock.assert_called_once_with(
+        ANY,
+        rate_limiter=ANY,
+        bot=bot_mock,
+    )
+
     start_router_call = create_start_router_mock.call_args
 
     assert start_router_call is not None
@@ -356,11 +398,12 @@ def test_main_builds_application_and_starts_polling(
         start_router_call.kwargs["users_repository"],
         main_module.UsersRepository,
     )
-    assert start_router_call.kwargs["start_messages"] == [
-        "Я уже работаю",
-    ]
     assert start_router_call.kwargs["deepseek"] is deepseek_mock
     assert start_router_call.kwargs["first_start_prompt"] == "START GREETING PROMPT"
+    assert (
+        start_router_call.kwargs["repeat_start_prompt"]
+        == "REPEAT START GREETING PROMPT"
+    )
 
     create_reset_router_mock.assert_called_once()
 
@@ -385,7 +428,9 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    assert dispatcher_mock.include_router.call_count == 10
+    create_adult_router_mock.assert_called_once_with(user_states)
+
+    assert dispatcher_mock.include_router.call_count == 13
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -410,6 +455,40 @@ def test_main_builds_application_and_starts_polling(
     )
     dispatcher_mock.include_router.assert_any_call(
         text_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        adult_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        media_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        document_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        voice_router,
+    )
+
+    create_media_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
+    )
+    create_document_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
+    )
+    speech_transcriber_constructor_mock.assert_called_once_with(
+        model_size="small",
+        device="cpu",
+        compute_type="int8",
+    )
+    create_voice_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        speech_transcriber,
+        rate_limiter=ANY,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(

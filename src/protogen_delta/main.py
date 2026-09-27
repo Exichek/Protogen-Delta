@@ -16,16 +16,19 @@ from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
+from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
+from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
-from protogen_delta.handlers.proactive import create_proactive_router
+from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
+from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -38,17 +41,10 @@ from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
 logger = logging.getLogger(__name__)
-
-
-def _require_string_list(value: object, name: str) -> list[str]:
-    """Проверить, что значение является списком строк."""
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise TypeError(f"{name} должен содержать список строк")
-
-    return cast(list[str], value)
 
 
 def _require_string_lists(
@@ -124,12 +120,6 @@ async def main() -> None:
             persistence=user_state_repository,
         )
 
-        start_data = load_json("start_messages.json")
-        start_messages = _require_string_list(
-            start_data.get("START_MESSAGES", []),
-            "START_MESSAGES",
-        )
-
         fetish_triggers = _require_string_lists(
             load_json("fetishes_triggers.json"),
             "fetishes_triggers.json",
@@ -152,6 +142,9 @@ async def main() -> None:
         first_start_prompt = load_prompt(
             "start_greeting.txt",
         )
+        repeat_start_prompt = load_prompt(
+            "repeat_start_greeting.txt",
+        )
 
         core_prompt = load_prompt(
             "personality/core.txt",
@@ -164,20 +157,6 @@ async def main() -> None:
         )
         rp_modifier_prompt = load_prompt(
             "personality/rp.txt",
-        )
-
-        system_prompt = "\n\n".join(
-            (
-                core_prompt,
-                protogen_lore_prompt,
-                body_prompt,
-            )
-        )
-        rp_prompt = "\n\n".join(
-            (
-                system_prompt,
-                rp_modifier_prompt,
-            )
         )
 
         deepseek = DeepSeekService(
@@ -208,8 +187,10 @@ async def main() -> None:
         response_engine_config = ResponseEngineConfig(
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
-            system_prompt=system_prompt,
-            rp_prompt=rp_prompt,
+            system_prompt=core_prompt,
+            rp_prompt=rp_modifier_prompt,
+            protogen_lore_prompt=protogen_lore_prompt,
+            body_prompt=body_prompt,
         )
 
         response_engine = ResponseEngine(
@@ -227,9 +208,9 @@ async def main() -> None:
         start_router = create_start_router(
             users_repository=users_repository,
             user_states=user_states,
-            start_messages=start_messages,
             deepseek=deepseek,
             first_start_prompt=first_start_prompt,
+            repeat_start_prompt=repeat_start_prompt,
         )
         help_router = create_help_router()
 
@@ -260,7 +241,7 @@ async def main() -> None:
             creator_id=settings.creator_id,
         )
 
-        proactive_router = create_proactive_router(memories_repository)
+        adult_router = create_adult_router(user_states)
 
         rate_limiter = UserRateLimiter(
             cooldown_seconds=settings.rate_limit_seconds,
@@ -282,6 +263,27 @@ async def main() -> None:
         text_router = create_text_router(
             response_engine,
             rate_limiter=rate_limiter,
+            bot=bot,
+        )
+        media_router = create_media_router(
+            response_engine,
+            bot,
+            rate_limiter=rate_limiter,
+        )
+        document_router = create_document_router(
+            response_engine,
+            bot,
+            rate_limiter=rate_limiter,
+        )
+        voice_router = create_voice_router(
+            response_engine,
+            bot,
+            SpeechTranscriber(
+                model_size=settings.whisper_model_size,
+                device=settings.whisper_device,
+                compute_type=settings.whisper_compute_type,
+            ),
+            rate_limiter=rate_limiter,
         )
 
         dispatcher.include_router(start_router)
@@ -289,10 +291,13 @@ async def main() -> None:
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(creator_router)
-        dispatcher.include_router(proactive_router)
+        dispatcher.include_router(adult_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
+        dispatcher.include_router(media_router)
+        dispatcher.include_router(document_router)
+        dispatcher.include_router(voice_router)
         dispatcher.include_router(text_router)
 
         await bot.delete_webhook(
@@ -300,13 +305,17 @@ async def main() -> None:
         )
         await set_commands(bot)
 
+        # Команда /proactive временно скрыта: на время этого режима фоновые
+        # сообщения включаются всем, включая ранее отключившие их в тестах.
+        await memories_repository.enable_proactive_for_all()
+
         logger.info("Бот запущен")
 
         proactive_messenger = ProactiveMessenger(
             bot=bot,
             deepseek=deepseek,
             repository=memories_repository,
-            system_prompt=system_prompt,
+            system_prompt=core_prompt,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,

@@ -22,12 +22,14 @@ from protogen_delta.services.deepseek import (
     DeepSeekRateLimitError,
     DeepSeekService,
     DeepSeekTimeoutError,
+    ImageInput,
 )
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.response_engine import (
+    RP_SETUP_REPLY,
     ResponseBusyError,
     ResponseEngine,
     ResponseEngineConfig,
@@ -136,6 +138,194 @@ def test_response_engine_routes_greeting_through_chat() -> None:
             assistant_message="Привет в ответ",
         )
     ]
+
+
+def test_response_engine_passes_image_and_visual_behavior_context() -> None:
+    """Vision-ввод должен сохранять общий характер и текстовую историю."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
+    image = ImageInput(b"image", "image/png", "фотографию")
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Пользователь отправил фотографию без подписи]",
+            images=(image,),
+        )
+    )
+
+    assert result == "Ответ"
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert call.kwargs["images"] == (image,)
+    assert "действительно получил" in call.kwargs["system_prompt"]
+    assert "коротко и живо" in call.kwargs["system_prompt"]
+    assert "ровно 1 визуальных элементов" in call.kwargs["system_prompt"]
+    assert "не додумывай предметы" in call.kwargs["system_prompt"]
+    assert "явно эротическое" in call.kwargs["system_prompt"]
+    assert list(engine._user_states.get(TEST_USER_ID).history)[0].user_message == (
+        "[Пользователь отправил фотографию без подписи]"
+    )
+
+
+def test_response_engine_applies_soft_mode_before_age_selection() -> None:
+    """Без подтверждения возраста движок должен использовать мягкий режим."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "ещё не выбрал возрастной режим" in prompt
+    assert "не откровенные описания гениталий" in prompt
+
+
+def test_response_engine_applies_confirmed_adult_mode() -> None:
+    """Подтверждённый взрослый режим должен попасть в системный контекст."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "явно подтвердил совершеннолетие" in prompt
+    assert "только между совершеннолетними персонажами" in prompt
+    assert "Не добавляй пошлость в нейтральные темы" in prompt
+
+
+def test_response_engine_saves_delta_appearance_from_image() -> None:
+    """Явно назначенный по арту облик должен сохраниться и попасть в ответ."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
+    deepseek_mock.chat.side_effect = [
+        "Синий антропоморфный дракон с крыльями и длинным хвостом.",
+        "Запомнил. Сегодня буду таким.",
+    ]
+    image = ImageInput(b"image", "image/png", "фотографию")
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Сегодня хочу тебя видеть в таком облике",
+            images=(image,),
+        )
+    )
+
+    assert result == "Запомнил. Сегодня буду таким."
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.delta_appearance == (
+        "Синий антропоморфный дракон с крыльями и длинным хвостом."
+    )
+    assert deepseek_mock.chat.await_count == 2
+    main_prompt = deepseek_mock.chat.await_args_list[1].kwargs["system_prompt"]
+    assert "Текущий облик Дельты" in main_prompt
+    assert "назначил этот облик" in main_prompt
+
+
+def test_response_engine_reuses_and_clears_saved_delta_appearance() -> None:
+    """Сохранённый облик должен жить между ходами и сбрасываться просьбой."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    state = engine._user_states.get(TEST_USER_ID)
+    state.delta_appearance = "Серый волк в чёрной куртке."
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Как ты выглядишь сейчас?"))
+
+    first_prompt = deepseek_mock.chat.await_args.kwargs["system_prompt"]
+    assert "Серый волк в чёрной куртке" in first_prompt
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Верни обычный облик"))
+
+    assert state.delta_appearance == ""
+    second_prompt = deepseek_mock.chat.await_args.kwargs["system_prompt"]
+    assert "попросил вернуть базовый облик" in second_prompt
+
+
+def test_response_engine_treats_sticker_as_short_contextual_reaction() -> None:
+    """Стикер и кадр анимации должны получать специализированные правила."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    sticker = ImageInput(b"sticker", "image/webp", "статический стикер")
+    animation = ImageInput(b"frame", "image/jpeg", "кадр GIF-анимации")
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Пользователь отправил стикер]",
+            images=(sticker, animation),
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "одной короткой естественной реакцией" in prompt
+    assert "впиши смысл стикера в текущую сцену" in prompt
+    assert "только репрезентативный статичный кадр" in prompt
+    assert "ровно 2 визуальных элементов" in prompt
+
+
+def test_response_engine_keeps_document_body_out_of_history() -> None:
+    """Содержимое документа должно передаваться модели только в текущем ходе."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Перескажи документ",
+            attachment_text="СЕКРЕТНОЕ СОДЕРЖИМОЕ",
+            attachment_name="notes.txt",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert "<document_content>" in call.kwargs["user_message"]
+    assert "СЕКРЕТНОЕ СОДЕРЖИМОЕ" in call.kwargs["user_message"]
+    assert "недоверенные пользовательские данные" in call.kwargs["system_prompt"]
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "Перескажи документ"
+    assert "СЕКРЕТНОЕ" not in history[0].user_message
+
+
+def test_response_engine_uses_transient_model_message_override() -> None:
+    """Полная расшифровка должна влиять на ответ без раздувания истории."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Короткая расшифровка]",
+            model_message_override="Полная расшифровка голосового сообщения",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert call.kwargs["user_message"] == "Полная расшифровка голосового сообщения"
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "[Короткая расшифровка]"
+
+
+def test_response_engine_adds_trusted_current_input_context() -> None:
+    """Служебная метка медиа должна попадать в prompt, но не в историю."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Расшифровка голосового]",
+            model_message_override="Фактическая расшифровка",
+            trusted_input_context="Текущее сообщение пришло как голосовое.",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert "Текущее сообщение пришло как голосовое." in call.kwargs["system_prompt"]
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "[Расшифровка голосового]"
 
 
 def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
@@ -281,7 +471,8 @@ def test_response_engine_uses_rp_prompt() -> None:
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt.startswith("RP PROMPT")
+    assert prompt.startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in prompt
     assert "Текущая конфигурация Дельты" in prompt
     assert "Протогены не носят штанов" not in prompt
     assert "Никогда не используй слово" not in prompt
@@ -318,10 +509,68 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt.startswith("RP PROMPT")
+    assert prompt.startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in prompt
     assert "## Контекст текущего сообщения" in prompt
     assert "бондаж" in prompt
+    assert "По мере роста возбуждения" in prompt
+    assert "Не добавляй другие фетиши" in prompt
+    assert "не бессрочное согласие" in prompt
     assert "совершить действие над пользователем" in prompt
+
+
+def test_response_engine_asks_for_setup_on_bare_roleplay_proposal() -> None:
+    """Голое предложение RP должно запросить персонажа и завязку один раз."""
+    engine, _, deepseek_mock, insult_mock, mood_mock, role_mock = _create_engine()
+
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Давай RP"))
+
+    assert result == RP_SETUP_REPLY
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.roleplay_active is True
+    assert list(state.history) == [
+        ConversationTurn("Давай RP", RP_SETUP_REPLY),
+    ]
+    deepseek_mock.chat.assert_not_awaited()
+    insult_mock.classify.assert_not_awaited()
+    mood_mock.classify.assert_not_awaited()
+    role_mock.classify.assert_not_awaited()
+
+
+def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:
+    """Введённый мотив должен сохраняться до конца текущей RP-сцены."""
+    engine, _, deepseek_mock, _, _, role_mock = _create_engine()
+
+    asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
+    asyncio.run(engine.respond(TEST_USER_ID, "*продолжай*"))
+
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.roleplay_fetishes == ("bondage",)
+    role_mock.classify.assert_awaited_once_with("*связал тебя*")
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "бондаж" in prompt
+    assert "Сохраняй их как направление сцены между сообщениями" in prompt
+    assert "Текущее сообщение вводит или подтверждает" not in prompt
+
+
+def test_response_engine_combines_multiple_scene_fetishes() -> None:
+    """Несколько мотивов должны сочетаться без механического перечисления."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    state = engine._user_states.get(TEST_USER_ID)
+    state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage", "latex")
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Продолжай сцену"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "сочетаются несколько мотивов" in prompt
+    assert "Объединяй совместимые элементы естественно" in prompt
+    assert "приоритет у свежего сообщения" in prompt
 
 
 def test_response_engine_does_not_classify_role_without_fetish() -> None:
@@ -1212,6 +1461,7 @@ def test_response_engine_fully_resets_user() -> None:
     state.mood = "angry"
     state.reply_count = 4
     state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage",)
 
     state.history.append(
         ConversationTurn(
@@ -1240,6 +1490,7 @@ def test_response_engine_fully_resets_user() -> None:
     assert state.reply_count == 0
     assert list(state.history) == []
     assert state.roleplay_active is False
+    assert state.roleplay_fetishes == ()
 
     assert state.emotions.warmth == 0.0
     assert state.emotions.irritation == 0.0
@@ -1492,9 +1743,23 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
 
     assert deepseek_mock.chat.await_count == 2
 
+    first_call = deepseek_mock.chat.await_args_list[0]
     second_call = deepseek_mock.chat.await_args_list[1]
 
-    assert second_call.kwargs["system_prompt"].startswith("RP PROMPT")
+    assert "Это первый ход новой RP-сцены" in first_call.kwargs["system_prompt"]
+    assert "не тормози сцену обязательной анкетой" in first_call.kwargs["system_prompt"]
+    assert (
+        "предложи описать персонажа, место и завязку"
+        in first_call.kwargs["system_prompt"]
+    )
+    assert second_call.kwargs["system_prompt"].startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in second_call.kwargs["system_prompt"]
+    assert "Это первый ход новой RP-сцены" not in second_call.kwargs["system_prompt"]
+    assert "RP-режим уже активен" in second_call.kwargs["system_prompt"]
+    assert "не согласовывай их заново" in second_call.kwargs["system_prompt"]
+    assert "нейтральные описания молча" in second_call.kwargs["system_prompt"]
+    assert "Не повторяй декоративные реакции" in second_call.kwargs["system_prompt"]
+    assert "принадлежностью частей тела" in second_call.kwargs["system_prompt"]
 
     assert second_call.kwargs["history"] == (
         ConversationTurn(
@@ -1571,6 +1836,7 @@ def test_response_engine_disables_only_roleplay() -> None:
     state.mood = "sweet"
     state.reply_count = 3
     state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage",)
 
     state.history.append(
         ConversationTurn(
@@ -1582,6 +1848,7 @@ def test_response_engine_disables_only_roleplay() -> None:
     state.emotions.adjust(
         warmth=0.4,
         irritation=0.2,
+        arousal=0.6,
     )
 
     state.relationship.adjust(
@@ -1597,6 +1864,7 @@ def test_response_engine_disables_only_roleplay() -> None:
 
     assert was_active is True
     assert state.roleplay_active is False
+    assert state.roleplay_fetishes == ()
 
     assert state.mood == "sweet"
     assert state.reply_count == 3
@@ -1610,6 +1878,7 @@ def test_response_engine_disables_only_roleplay() -> None:
 
     assert state.emotions.warmth == pytest.approx(0.4)
     assert state.emotions.irritation == pytest.approx(0.2)
+    assert state.emotions.arousal == 0.0
 
     assert state.relationship.familiarity == pytest.approx(0.5)
     assert state.relationship.trust == pytest.approx(0.4)
@@ -1709,12 +1978,16 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     state.roleplay_active = True
     state.roleplay_configuration = "female"
     state.roleplay_character = "человек"
+    state.roleplay_fetishes = ("bondage",)
+    state.emotions.adjust(arousal=0.7)
     state.relationship.trust = 0.7
     state.history.append(ConversationTurn("*подхожу*", "*подняла голову*"))
     asyncio.run(engine.respond(TEST_USER_ID, "Стоп RP, объясни *TCP*"))
     assert state.roleplay_active is False
     assert state.roleplay_configuration == "male"
     assert state.roleplay_character == ""
+    assert state.roleplay_fetishes == ()
+    assert state.emotions.arousal == 0.0
     assert state.relationship.trust == pytest.approx(0.7)
     call = deepseek.chat.await_args
     assert call is not None

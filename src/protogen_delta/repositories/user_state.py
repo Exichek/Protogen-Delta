@@ -1,11 +1,14 @@
 """SQLite-хранилище долгоживущего состояния пользователей."""
 
 import asyncio
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import cast
 
 from protogen_delta.core.user_state import (
+    ContentMode,
     EmotionalState,
     PersistentUserState,
     RelationshipState,
@@ -47,6 +50,9 @@ class UserStateRepository:
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
+        delta_appearance: str = "",
+        content_mode: ContentMode = "unselected",
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -58,6 +64,9 @@ class UserStateRepository:
             roleplay_active=roleplay_active,
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
+            roleplay_fetishes=roleplay_fetishes,
+            delta_appearance=delta_appearance,
+            content_mode=content_mode,
         )
 
     async def delete(
@@ -91,7 +100,10 @@ class UserStateRepository:
                         emotions_updated_at,
                         roleplay_active,
                         roleplay_configuration,
-                        roleplay_character
+                        roleplay_character,
+                        roleplay_fetishes,
+                        delta_appearance,
+                        content_mode
                     FROM user_states
                     WHERE user_id = ?
                     """,
@@ -118,6 +130,9 @@ class UserStateRepository:
             roleplay_active,
             roleplay_configuration,
             roleplay_character,
+            roleplay_fetishes,
+            delta_appearance,
+            content_mode,
         ) = row
 
         return PersistentUserState(
@@ -137,6 +152,9 @@ class UserStateRepository:
             roleplay_active=bool(roleplay_active),
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
+            roleplay_fetishes=self._decode_fetishes(roleplay_fetishes),
+            delta_appearance=delta_appearance,
+            content_mode=self._decode_content_mode(content_mode),
         )
 
     def _save_sync(
@@ -149,6 +167,9 @@ class UserStateRepository:
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
+        delta_appearance: str = "",
+        content_mode: ContentMode = "unselected",
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         try:
@@ -168,9 +189,12 @@ class UserStateRepository:
                         emotions_updated_at,
                         roleplay_active,
                         roleplay_configuration,
-                        roleplay_character
+                        roleplay_character,
+                        roleplay_fetishes,
+                        delta_appearance,
+                        content_mode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -183,7 +207,10 @@ class UserStateRepository:
                         emotions_updated_at = excluded.emotions_updated_at,
                         roleplay_active = excluded.roleplay_active,
                         roleplay_configuration = excluded.roleplay_configuration,
-                        roleplay_character = excluded.roleplay_character
+                        roleplay_character = excluded.roleplay_character,
+                        roleplay_fetishes = excluded.roleplay_fetishes,
+                        delta_appearance = excluded.delta_appearance,
+                        content_mode = excluded.content_mode
                     """,
                     (
                         user_id,
@@ -199,6 +226,9 @@ class UserStateRepository:
                         int(roleplay_active),
                         roleplay_configuration,
                         roleplay_character,
+                        json.dumps(roleplay_fetishes, ensure_ascii=False),
+                        delta_appearance,
+                        content_mode,
                     ),
                 )
         except sqlite3.Error as error:
@@ -240,7 +270,12 @@ class UserStateRepository:
                     affection REAL NOT NULL,
                     resentment REAL NOT NULL,
                     emotions_updated_at REAL NOT NULL,
-                    roleplay_active INTEGER NOT NULL DEFAULT 0
+                    roleplay_active INTEGER NOT NULL DEFAULT 0,
+                    roleplay_configuration TEXT NOT NULL DEFAULT 'male',
+                    roleplay_character TEXT NOT NULL DEFAULT '',
+                    roleplay_fetishes TEXT NOT NULL DEFAULT '[]',
+                    delta_appearance TEXT NOT NULL DEFAULT '',
+                    content_mode TEXT NOT NULL DEFAULT 'unselected'
                 )
                 """)
 
@@ -271,3 +306,43 @@ class UserStateRepository:
                     ALTER TABLE user_states
                     ADD COLUMN roleplay_character TEXT NOT NULL DEFAULT ''
                     """)
+
+            if "roleplay_fetishes" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_fetishes TEXT NOT NULL DEFAULT '[]'
+                    """)
+
+            if "content_mode" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'unselected'
+                    """)
+
+            if "delta_appearance" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN delta_appearance TEXT NOT NULL DEFAULT ''
+                    """)
+
+    @staticmethod
+    def _decode_fetishes(value: str) -> tuple[str, ...]:
+        """Безопасно прочитать мотивы текущей RP-сцены из JSON."""
+        try:
+            decoded = json.loads(value)
+        except TypeError, json.JSONDecodeError:
+            return ()
+
+        if not isinstance(decoded, list) or not all(
+            isinstance(item, str) for item in decoded
+        ):
+            return ()
+
+        return tuple(dict.fromkeys(decoded))
+
+    @staticmethod
+    def _decode_content_mode(value: str) -> ContentMode:
+        """Безопасно прочитать выбранный режим содержимого."""
+        if value in {"unselected", "soft", "adult"}:
+            return cast(ContentMode, value)
+        return "unselected"

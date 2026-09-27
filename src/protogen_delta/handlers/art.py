@@ -31,7 +31,7 @@ def create_art_router(
         chats = sources.get_all() if sources is not None else [art_chat_id]
         return message.chat.id in chats and is_admin(message)
 
-    @router.message(F.photo)
+    @router.message(F.photo, allowed)
     async def save_photo(message: Message) -> None:
         """Сохранить арт, присланный в разрешённую группу."""
         if not allowed(message):
@@ -45,7 +45,7 @@ def create_art_router(
         if images_repository.add(file_id):
             logger.info("Сохранён новый арт: %s", file_id)
 
-    @router.message(F.document.mime_type.startswith("image/"))
+    @router.message(F.document.mime_type.startswith("image/"), allowed)
     async def save_document(message: Message) -> None:
         """Сохранить изображение из разрешённой группы."""
         if not allowed(message):
