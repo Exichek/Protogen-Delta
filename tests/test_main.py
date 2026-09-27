@@ -430,7 +430,7 @@ def test_main_builds_application_and_starts_polling(
 
     create_adult_router_mock.assert_called_once_with(user_states)
 
-    assert dispatcher_mock.include_router.call_count == 13
+    assert dispatcher_mock.include_router.call_count == 14
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,

@@ -9,6 +9,7 @@ async def set_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="🚀 Запустить бота"),
         BotCommand(command="randomart", description="🎨 Случайный арт"),
+        BotCommand(command="e6", description="🔎 Поиск артов e621 по тегам"),
         BotCommand(command="rp", description="🎭 Управление RP — /rp off"),
         BotCommand(command="adult", description="🔞 Выбрать возрастной режим"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),

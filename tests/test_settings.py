@@ -34,6 +34,8 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("ADMIN_IDS", raising=False)
     monkeypatch.delenv("CREATOR_ID", raising=False)
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("E621_USER_AGENT", raising=False)
+    monkeypatch.delenv("E621_REQUEST_INTERVAL_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_CHECK_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_IDLE_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_COOLDOWN_SECONDS", raising=False)
@@ -71,6 +73,8 @@ def test_load_settings_with_defaults(
     assert settings.admin_ids == frozenset()
     assert settings.creator_id is None
     assert settings.brave_search_api_key is None
+    assert settings.e621_user_agent.startswith("ProtogenDelta/0.1")
+    assert settings.e621_request_interval_seconds == 1.0
     assert settings.proactive_check_seconds == 300.0
     assert settings.proactive_idle_seconds == 14400.0
     assert settings.proactive_cooldown_seconds == 86400.0
@@ -109,6 +113,8 @@ def test_load_settings_with_custom_values(
     )
     monkeypatch.setenv("CREATOR_ID", "123")
     monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-secret")
+    monkeypatch.setenv("E621_USER_AGENT", "MyBot/2.0 (by tester)")
+    monkeypatch.setenv("E621_REQUEST_INTERVAL_SECONDS", "1.5")
     monkeypatch.setenv("PROACTIVE_CHECK_SECONDS", "60")
     monkeypatch.setenv("PROACTIVE_IDLE_SECONDS", "120")
     monkeypatch.setenv("PROACTIVE_COOLDOWN_SECONDS", "240")
@@ -150,6 +156,8 @@ def test_load_settings_with_custom_values(
     assert settings.admin_ids == frozenset({123, 456, 789})
     assert settings.creator_id == 123
     assert settings.brave_search_api_key == "brave-secret"
+    assert settings.e621_user_agent == "MyBot/2.0 (by tester)"
+    assert settings.e621_request_interval_seconds == 1.5
     assert settings.proactive_check_seconds == 60.0
     assert settings.proactive_idle_seconds == 120.0
     assert settings.proactive_cooldown_seconds == 240.0
@@ -286,6 +294,8 @@ def test_load_settings_with_invalid_admin_ids(
         ("USER_STATE_RETENTION_SECONDS", "nan"),
         ("USER_STATE_RETENTION_SECONDS", "inf"),
         ("USER_STATE_RETENTION_SECONDS", "abc"),
+        ("E621_REQUEST_INTERVAL_SECONDS", "-1"),
+        ("E621_REQUEST_INTERVAL_SECONDS", "nan"),
     ],
 )
 def test_load_settings_rejects_invalid_float_values(
