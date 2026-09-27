@@ -321,7 +321,29 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
     assert prompt.startswith("RP PROMPT")
     assert "## Контекст текущего сообщения" in prompt
     assert "бондаж" in prompt
+    assert "По мере роста возбуждения" in prompt
+    assert "Не добавляй другие фетиши" in prompt
+    assert "не бессрочное согласие" in prompt
     assert "совершить действие над пользователем" in prompt
+
+
+def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:
+    """Введённый мотив должен сохраняться до конца текущей RP-сцены."""
+    engine, _, deepseek_mock, _, _, role_mock = _create_engine()
+
+    asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
+    asyncio.run(engine.respond(TEST_USER_ID, "*продолжай*"))
+
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.roleplay_fetishes == ("bondage",)
+    role_mock.classify.assert_awaited_once_with("*связал тебя*")
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "бондаж" in prompt
+    assert "Сохраняй их как направление сцены между сообщениями" in prompt
+    assert "Текущее сообщение вводит или подтверждает" not in prompt
 
 
 def test_response_engine_does_not_classify_role_without_fetish() -> None:
@@ -1212,6 +1234,7 @@ def test_response_engine_fully_resets_user() -> None:
     state.mood = "angry"
     state.reply_count = 4
     state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage",)
 
     state.history.append(
         ConversationTurn(
@@ -1240,6 +1263,7 @@ def test_response_engine_fully_resets_user() -> None:
     assert state.reply_count == 0
     assert list(state.history) == []
     assert state.roleplay_active is False
+    assert state.roleplay_fetishes == ()
 
     assert state.emotions.warmth == 0.0
     assert state.emotions.irritation == 0.0
@@ -1576,6 +1600,7 @@ def test_response_engine_disables_only_roleplay() -> None:
     state.mood = "sweet"
     state.reply_count = 3
     state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage",)
 
     state.history.append(
         ConversationTurn(
@@ -1603,6 +1628,7 @@ def test_response_engine_disables_only_roleplay() -> None:
 
     assert was_active is True
     assert state.roleplay_active is False
+    assert state.roleplay_fetishes == ()
 
     assert state.mood == "sweet"
     assert state.reply_count == 3
@@ -1716,6 +1742,7 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     state.roleplay_active = True
     state.roleplay_configuration = "female"
     state.roleplay_character = "человек"
+    state.roleplay_fetishes = ("bondage",)
     state.emotions.adjust(arousal=0.7)
     state.relationship.trust = 0.7
     state.history.append(ConversationTurn("*подхожу*", "*подняла голову*"))
@@ -1723,6 +1750,7 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     assert state.roleplay_active is False
     assert state.roleplay_configuration == "male"
     assert state.roleplay_character == ""
+    assert state.roleplay_fetishes == ()
     assert state.emotions.arousal == 0.0
     assert state.relationship.trust == pytest.approx(0.7)
     call = deepseek.chat.await_args

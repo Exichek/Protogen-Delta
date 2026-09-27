@@ -1,6 +1,7 @@
 """SQLite-хранилище долгоживущего состояния пользователей."""
 
 import asyncio
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -47,6 +48,7 @@ class UserStateRepository:
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -58,6 +60,7 @@ class UserStateRepository:
             roleplay_active=roleplay_active,
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
+            roleplay_fetishes=roleplay_fetishes,
         )
 
     async def delete(
@@ -91,7 +94,8 @@ class UserStateRepository:
                         emotions_updated_at,
                         roleplay_active,
                         roleplay_configuration,
-                        roleplay_character
+                        roleplay_character,
+                        roleplay_fetishes
                     FROM user_states
                     WHERE user_id = ?
                     """,
@@ -118,6 +122,7 @@ class UserStateRepository:
             roleplay_active,
             roleplay_configuration,
             roleplay_character,
+            roleplay_fetishes,
         ) = row
 
         return PersistentUserState(
@@ -137,6 +142,7 @@ class UserStateRepository:
             roleplay_active=bool(roleplay_active),
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
+            roleplay_fetishes=self._decode_fetishes(roleplay_fetishes),
         )
 
     def _save_sync(
@@ -149,6 +155,7 @@ class UserStateRepository:
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         try:
@@ -168,9 +175,10 @@ class UserStateRepository:
                         emotions_updated_at,
                         roleplay_active,
                         roleplay_configuration,
-                        roleplay_character
+                        roleplay_character,
+                        roleplay_fetishes
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -183,7 +191,8 @@ class UserStateRepository:
                         emotions_updated_at = excluded.emotions_updated_at,
                         roleplay_active = excluded.roleplay_active,
                         roleplay_configuration = excluded.roleplay_configuration,
-                        roleplay_character = excluded.roleplay_character
+                        roleplay_character = excluded.roleplay_character,
+                        roleplay_fetishes = excluded.roleplay_fetishes
                     """,
                     (
                         user_id,
@@ -199,6 +208,7 @@ class UserStateRepository:
                         int(roleplay_active),
                         roleplay_configuration,
                         roleplay_character,
+                        json.dumps(roleplay_fetishes, ensure_ascii=False),
                     ),
                 )
         except sqlite3.Error as error:
@@ -240,7 +250,10 @@ class UserStateRepository:
                     affection REAL NOT NULL,
                     resentment REAL NOT NULL,
                     emotions_updated_at REAL NOT NULL,
-                    roleplay_active INTEGER NOT NULL DEFAULT 0
+                    roleplay_active INTEGER NOT NULL DEFAULT 0,
+                    roleplay_configuration TEXT NOT NULL DEFAULT 'male',
+                    roleplay_character TEXT NOT NULL DEFAULT '',
+                    roleplay_fetishes TEXT NOT NULL DEFAULT '[]'
                 )
                 """)
 
@@ -271,3 +284,24 @@ class UserStateRepository:
                     ALTER TABLE user_states
                     ADD COLUMN roleplay_character TEXT NOT NULL DEFAULT ''
                     """)
+
+            if "roleplay_fetishes" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_fetishes TEXT NOT NULL DEFAULT '[]'
+                    """)
+
+    @staticmethod
+    def _decode_fetishes(value: str) -> tuple[str, ...]:
+        """Безопасно прочитать мотивы текущей RP-сцены из JSON."""
+        try:
+            decoded = json.loads(value)
+        except TypeError, json.JSONDecodeError:
+            return ()
+
+        if not isinstance(decoded, list) or not all(
+            isinstance(item, str) for item in decoded
+        ):
+            return ()
+
+        return tuple(dict.fromkeys(decoded))

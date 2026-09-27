@@ -607,6 +607,7 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
         roleplay_active=False,
         roleplay_configuration="male",
         roleplay_character="",
+        roleplay_fetishes=(),
     )
 
 
@@ -903,6 +904,7 @@ def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
         roleplay_active=False,
         roleplay_configuration="male",
         roleplay_character="",
+        roleplay_fetishes=(),
     )
 
 

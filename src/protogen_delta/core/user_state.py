@@ -115,6 +115,7 @@ class PersistentUserState:
     roleplay_active: bool = False
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
+    roleplay_fetishes: tuple[str, ...] = ()
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -141,6 +142,7 @@ class UserStatePersistence(Protocol):
         roleplay_active: bool,
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
+        roleplay_fetishes: tuple[str, ...] = (),
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -171,6 +173,7 @@ class UserState:
     roleplay_active: bool = False
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
+    roleplay_fetishes: tuple[str, ...] = ()
     emotions_updated_at: float = field(
         default=0.0,
         repr=False,
@@ -210,6 +213,7 @@ class UserState:
         self.roleplay_active = False
         self.roleplay_configuration = "male"
         self.roleplay_character = ""
+        self.roleplay_fetishes = ()
 
     def reset_all(self) -> None:
         """Полностью сбросить пользовательское состояние."""
@@ -304,6 +308,7 @@ class UserStateStore:
                                 roleplay_active=state.roleplay_active,
                                 roleplay_configuration=state.roleplay_configuration,
                                 roleplay_character=state.roleplay_character,
+                                roleplay_fetishes=state.roleplay_fetishes,
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -373,6 +378,7 @@ class UserStateStore:
             state.roleplay_active = persistent_state.roleplay_active
             state.roleplay_configuration = persistent_state.roleplay_configuration
             state.roleplay_character = persistent_state.roleplay_character
+            state.roleplay_fetishes = persistent_state.roleplay_fetishes
         else:
             state.emotions_updated_at = self._wall_clock()
 

@@ -166,6 +166,7 @@ class ResponseEngine:
             user_state.roleplay_active = False
             user_state.roleplay_configuration = "male"
             user_state.roleplay_character = ""
+            user_state.roleplay_fetishes = ()
             user_state.emotions.arousal = 0.0
 
             return was_active
@@ -183,6 +184,7 @@ class ResponseEngine:
             user_state.roleplay_active = False
             user_state.roleplay_configuration = "male"
             user_state.roleplay_character = ""
+            user_state.roleplay_fetishes = ()
             user_state.emotions.arousal = 0.0
             if not remaining:
                 return PreparedReply("RP-режим завершён.")
@@ -273,26 +275,32 @@ class ResponseEngine:
                 "продолжения прежней сцены."
             )
 
-        fetishes = detect_fetishes(
+        current_fetishes = detect_fetishes(
             user_message,
             self._config.fetish_triggers,
         )
 
+        if is_rp and current_fetishes:
+            user_state.roleplay_fetishes = tuple(
+                dict.fromkeys((*user_state.roleplay_fetishes, *current_fetishes))
+            )
+
         role: FetishRole = "unknown"
 
         # Определять роль есть смысл только при обнаруженном fetish-контексте.
-        if is_rp and fetishes:
+        if is_rp and current_fetishes:
             role = await self._fetish_role_classifier.classify(user_message)
 
             logger.info(
                 "Обнаружены фетиши: %s | роль бота: %s",
-                ", ".join(fetishes),
+                ", ".join(current_fetishes),
                 role,
             )
 
         prompt = self._build_prompt(
             is_rp=is_rp,
-            fetishes=fetishes,
+            fetishes=list(user_state.roleplay_fetishes),
+            current_fetishes=current_fetishes,
             role=role,
             mood=user_state.mood,
             insult_type=insult_type,
@@ -414,6 +422,7 @@ class ResponseEngine:
         self,
         is_rp: bool,
         fetishes: list[str],
+        current_fetishes: list[str],
         role: FetishRole,
         mood: str,
         insult_type: InsultType,
@@ -482,8 +491,20 @@ class ResponseEngine:
             ]
 
             context_lines.append(
-                "В текущем RP-сообщении обнаружен тематический контекст: "
-                f"{', '.join(names)}."
+                "В текущей RP-сцене пользователь уже явно ввёл следующие "
+                f"интимные мотивы: {', '.join(names)}. Сохраняй их как направление "
+                "сцены между сообщениями. По мере роста возбуждения делай именно "
+                "эти мотивы заметнее и интенсивнее, но не пытайся использовать их "
+                "все в каждом ходе. Не добавляй другие фетиши из справочника, пока "
+                "пользователь сам явно их не введёт. Этот список означает только "
+                "ранее введённые мотивы, а не бессрочное согласие: свежая просьба "
+                "остановить, ослабить или изменить конкретный элемент всегда важнее."
+            )
+
+        if is_rp and current_fetishes:
+            context_lines.append(
+                "Текущее сообщение вводит или подтверждает часть этих мотивов; "
+                "реагируй прежде всего на него, сохраняя согласованную роль и границы."
             )
 
         if is_rp and role == "active":
