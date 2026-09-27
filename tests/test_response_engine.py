@@ -28,6 +28,7 @@ from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.response_engine import (
+    RP_SETUP_REPLY,
     ResponseBusyError,
     ResponseEngine,
     ResponseEngineConfig,
@@ -325,6 +326,24 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
     assert "Не добавляй другие фетиши" in prompt
     assert "не бессрочное согласие" in prompt
     assert "совершить действие над пользователем" in prompt
+
+
+def test_response_engine_asks_for_setup_on_bare_roleplay_proposal() -> None:
+    """Голое предложение RP должно запросить персонажа и завязку один раз."""
+    engine, _, deepseek_mock, insult_mock, mood_mock, role_mock = _create_engine()
+
+    result = asyncio.run(engine.respond(TEST_USER_ID, "Давай RP"))
+
+    assert result == RP_SETUP_REPLY
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.roleplay_active is True
+    assert list(state.history) == [
+        ConversationTurn("Давай RP", RP_SETUP_REPLY),
+    ]
+    deepseek_mock.chat.assert_not_awaited()
+    insult_mock.classify.assert_not_awaited()
+    mood_mock.classify.assert_not_awaited()
+    role_mock.classify.assert_not_awaited()
 
 
 def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:

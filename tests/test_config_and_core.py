@@ -359,12 +359,16 @@ def test_roleplay_prompt_does_not_renegotiate_established_scene() -> None:
     assert "не заканчивай постоянно фразами" in prompt
     assert "Не копируй собственный шаблон из истории сцены" in prompt
     assert "Внимательно различай принадлежность частей тела" in prompt
+    assert "Название вида само по себе не задаёт все особенности тела" in prompt
+    assert "не приписывай ему узел" in prompt
     assert "Обращение внутри роли" in prompt
     assert "Убирай внутренние противоречия" in prompt
     assert "язык работаю глубже" in prompt
     assert "горячо дышу в затылок" in prompt
     assert "Нарастающее возбуждение" in prompt
     assert "одного насыщенного сообщения" in prompt
+    assert "Интенсивность и доминирование — разные вещи" in prompt
+    assert "не должно заставлять его каждый раз перехватывать управление" in prompt
 
 
 def test_protogen_lore_answers_robot_question_unambiguously() -> None:
@@ -381,4 +385,5 @@ def test_fetish_role_prompt_handles_imperative_direction() -> None:
 
     assert '"соси мою жопу" → active' in prompt
     assert '"я сосу тебе" → passive' in prompt
+    assert '"дай мне свою попку" → passive' in prompt
     assert "Повелительное наклонение" in prompt

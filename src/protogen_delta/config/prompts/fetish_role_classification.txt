@@ -28,6 +28,7 @@ active
 "соси мою жопу" → active
 "вылижи мне зад" → active
 "трахни меня" → active
+"дай мне свою попку" → passive
 
 passive
 
@@ -41,6 +42,7 @@ passive
 "я погладил тебя по голове" → passive
 "я сосу тебе" → passive
 "я трахаю тебя" → passive
+"я покатаю тебя на себе" → passive
 
 unknown
 

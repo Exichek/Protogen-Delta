@@ -98,3 +98,30 @@ def test_real_fetish_triggers_do_not_use_generic_clothing_or_motion() -> None:
     )
 
     assert result == []
+
+
+def test_real_fetish_triggers_handle_new_live_scene_examples() -> None:
+    """Сильные формулировки из нового прогона должны давать точные мотивы."""
+    triggers = load_json("fetishes_triggers.json")
+
+    outfit = detect_fetishes(
+        "Перед тобой антродракон в клетчатой юбочке и чулках",
+        triggers,
+    )
+    request = detect_fetishes(
+        "Лапай меня как грязную шлюху",
+        triggers,
+    )
+    combined = detect_fetishes(
+        "Хочу наши два члена подрочить своей рукой",
+        triggers,
+    )
+    receiving = detect_fetishes(
+        "Дашь мне свою попку? Я твою протопопку покатаю от души",
+        triggers,
+    )
+
+    assert outfit == ["crossdressing"]
+    assert request == ["humiliation"]
+    assert combined == ["mutual_masturbation", "handjob"]
+    assert receiving == ["anal"]

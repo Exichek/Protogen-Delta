@@ -46,6 +46,11 @@ logger = logging.getLogger(__name__)
 
 FetishNames = dict[str, str]
 ReplyDelivery = Callable[[str], Awaitable[None]]
+RP_SETUP_REPLY = (
+    "Давай. Только сначала набросай одним сообщением своего персонажа и завязку: "
+    "кто ты, где мы находимся и с чего начинаем. Можно указать только важные "
+    "детали — остальное подхватим по ходу."
+)
 
 
 class ResponseBusyError(Exception):
@@ -201,6 +206,24 @@ class ResponseEngine:
             user_state.roleplay_active = True
             user_state.roleplay_character = character
 
+        contains_rp_action = has_roleplay_action(user_message)
+        contains_rp_intent = has_roleplay_intent(user_message)
+
+        if (contains_rp_action or contains_rp_intent) and not stopped:
+            user_state.roleplay_active = True
+
+        is_rp = user_state.roleplay_active
+        is_new_rp = is_rp and not was_roleplay_active and not stopped
+
+        if (
+            is_new_rp
+            and contains_rp_intent
+            and not contains_rp_action
+            and configuration is None
+            and character is None
+        ):
+            return PreparedReply(RP_SETUP_REPLY, user_message)
+
         insult_type, mood = await asyncio.gather(
             self._insult_classifier.classify(
                 user_message,
@@ -216,14 +239,6 @@ class ResponseEngine:
             mood=mood,
             insult_type=insult_type,
         )
-
-        has_rp_action = self._is_rp(user_message)
-
-        if has_rp_action and not stopped:
-            user_state.roleplay_active = True
-
-        is_rp = user_state.roleplay_active
-        is_new_rp = is_rp and not was_roleplay_active and not stopped
 
         state_context = build_state_context(
             user_state,
