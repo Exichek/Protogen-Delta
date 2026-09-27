@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.roleplay import (
     has_roleplay_action,
+    has_roleplay_intent,
     scene_character,
     scene_configuration,
     split_roleplay_stop,
@@ -180,6 +181,7 @@ class ResponseEngine:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
         stopped = remaining is not None
+        was_roleplay_active = user_state.roleplay_active
         if stopped:
             user_state.roleplay_active = False
             user_state.roleplay_configuration = "male"
@@ -221,6 +223,7 @@ class ResponseEngine:
             user_state.roleplay_active = True
 
         is_rp = user_state.roleplay_active
+        is_new_rp = is_rp and not was_roleplay_active and not stopped
 
         state_context = build_state_context(
             user_state,
@@ -267,6 +270,17 @@ class ResponseEngine:
                 "используй максимум одну такую деталь или ни одной. Следи за "
                 "принадлежностью частей тела и согласованностью местоимений."
             )
+            if is_new_rp:
+                state_context.append(
+                    "Это первый ход новой RP-сцены. Если пользователь уже описал "
+                    "своего персонажа, исходную ситуацию или сразу начал конкретное "
+                    "действие, не тормози сцену обязательной анкетой: используй "
+                    "данные из его сообщения и отвечай по существу. Если он только "
+                    "предложил RP или начало слишком неопределённое, сначала одним "
+                    "коротким вопросом предложи описать персонажа, место и завязку; "
+                    "разреши указать только те детали, которые ему важны. Не задавай "
+                    "несколько вопросов подряд и не повторяй это уточнение позже."
+                )
         else:
             state_context.append(
                 "Сейчас обычный разговор, RP выключен. Конфигурация Дельты "
@@ -500,6 +514,14 @@ class ResponseEngine:
                 "ранее введённые мотивы, а не бессрочное согласие: свежая просьба "
                 "остановить, ослабить или изменить конкретный элемент всегда важнее."
             )
+            if len(fetishes) > 1:
+                context_lines.append(
+                    "В сцене сочетаются несколько мотивов. Объединяй совместимые "
+                    "элементы естественно внутри одного действия, а не отыгрывай "
+                    "каждую категорию отдельным пунктом. Если мотивы или прежнее "
+                    "направление конфликтуют, приоритет у свежего сообщения "
+                    "пользователя и уже согласованной динамики."
+                )
 
         if is_rp and current_fetishes:
             context_lines.append(
@@ -530,4 +552,4 @@ class ResponseEngine:
         user_message: str,
     ) -> bool:
         """Проверить наличие RP-действия в звёздочках."""
-        return has_roleplay_action(user_message)
+        return has_roleplay_action(user_message) or has_roleplay_intent(user_message)

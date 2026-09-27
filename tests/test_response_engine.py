@@ -346,6 +346,23 @@ def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:
     assert "Текущее сообщение вводит или подтверждает" not in prompt
 
 
+def test_response_engine_combines_multiple_scene_fetishes() -> None:
+    """Несколько мотивов должны сочетаться без механического перечисления."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    state = engine._user_states.get(TEST_USER_ID)
+    state.roleplay_active = True
+    state.roleplay_fetishes = ("bondage", "latex")
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Продолжай сцену"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "сочетаются несколько мотивов" in prompt
+    assert "Объединяй совместимые элементы естественно" in prompt
+    assert "приоритет у свежего сообщения" in prompt
+
+
 def test_response_engine_does_not_classify_role_without_fetish() -> None:
     """Без найденного фетиша отдельная классификация роли не нужна."""
     (
@@ -1516,9 +1533,17 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
 
     assert deepseek_mock.chat.await_count == 2
 
+    first_call = deepseek_mock.chat.await_args_list[0]
     second_call = deepseek_mock.chat.await_args_list[1]
 
+    assert "Это первый ход новой RP-сцены" in first_call.kwargs["system_prompt"]
+    assert "не тормози сцену обязательной анкетой" in first_call.kwargs["system_prompt"]
+    assert (
+        "предложи описать персонажа, место и завязку"
+        in first_call.kwargs["system_prompt"]
+    )
     assert second_call.kwargs["system_prompt"].startswith("RP PROMPT")
+    assert "Это первый ход новой RP-сцены" not in second_call.kwargs["system_prompt"]
     assert "RP-режим уже активен" in second_call.kwargs["system_prompt"]
     assert "не согласовывай их заново" in second_call.kwargs["system_prompt"]
     assert "нейтральные описания молча" in second_call.kwargs["system_prompt"]

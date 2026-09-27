@@ -15,6 +15,11 @@ CONFIG_PATTERN = re.compile(
 CHARACTER_PATTERN = re.compile(
     r"^\s*мой персонаж\s*:\s*([^\n]{1,500})\s*$", re.IGNORECASE
 )
+INTENT_PATTERN = re.compile(
+    r"(?:\b(?:давай|хочу|начн[её]м|начать)\b.{0,40}\b(?:rp|рп|рол(?:ку|евую))\b|"
+    r"\b(?:сыграем|поиграем|отыграем)\b.{0,40}\b(?:сцену|сюжет|роли?)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def has_roleplay_action(text: str) -> bool:
@@ -25,6 +30,11 @@ def has_roleplay_action(text: str) -> bool:
         if re.search(r"[^\W\d_]{2,}", action) and not re.search(r"[=+^<>/\\|]", action):
             return True
     return False
+
+
+def has_roleplay_intent(text: str) -> bool:
+    """Распознать явное предложение начать RP без действия в звёздочках."""
+    return INTENT_PATTERN.search(text) is not None
 
 
 def split_roleplay_stop(text: str) -> str | None:

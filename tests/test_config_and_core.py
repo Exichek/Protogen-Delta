@@ -361,6 +361,8 @@ def test_roleplay_prompt_does_not_renegotiate_established_scene() -> None:
     assert "Внимательно различай принадлежность частей тела" in prompt
     assert "Обращение внутри роли" in prompt
     assert "Убирай внутренние противоречия" in prompt
+    assert "язык работаю глубже" in prompt
+    assert "горячо дышу в затылок" in prompt
     assert "Нарастающее возбуждение" in prompt
     assert "одного насыщенного сообщения" in prompt
 
@@ -371,3 +373,12 @@ def test_protogen_lore_answers_robot_question_unambiguously() -> None:
 
     assert "отвечай однозначно: нет" in prompt
     assert "двусмысленного «точно»" in prompt
+
+
+def test_fetish_role_prompt_handles_imperative_direction() -> None:
+    """Классификатор должен отличать приказ Дельте от действия пользователя."""
+    prompt = load_prompt("fetish_role_classification.txt")
+
+    assert '"соси мою жопу" → active' in prompt
+    assert '"я сосу тебе" → passive' in prompt
+    assert "Повелительное наклонение" in prompt

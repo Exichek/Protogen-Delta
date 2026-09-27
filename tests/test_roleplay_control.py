@@ -3,6 +3,7 @@
 import pytest
 
 from protogen_delta.core.roleplay import (
+    has_roleplay_intent,
     scene_character,
     scene_configuration,
     split_roleplay_stop,
@@ -36,6 +37,31 @@ def test_math_code_and_bold_do_not_start_a_scene(text: str) -> None:
 )
 def test_text_actions_still_start_a_scene(text: str) -> None:
     assert ResponseEngine._is_rp(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Давай RP",
+        "Хочу начать рп",
+        "Давай ролку про космос",
+        "Сыграем сцену знакомства?",
+        "Отыграем роли охотника и беглеца",
+    ],
+)
+def test_explicit_roleplay_proposal_starts_a_scene(text: str) -> None:
+    """Явное предложение RP должно работать без звёздочек."""
+    assert has_roleplay_intent(text) is True
+    assert ResponseEngine._is_rp(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Что такое RP?", "Мне нравится этот сюжет", "Расскажи о ролевых играх"],
+)
+def test_roleplay_discussion_does_not_start_a_scene(text: str) -> None:
+    """Обсуждение RP не должно случайно включать сцену."""
+    assert has_roleplay_intent(text) is False
 
 
 @pytest.mark.parametrize("text", ["Стоп RP!", "  хватит   рп  ", "закончим RP"])
