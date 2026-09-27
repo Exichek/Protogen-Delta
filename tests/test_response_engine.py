@@ -143,6 +143,7 @@ def test_response_engine_routes_greeting_through_chat() -> None:
 def test_response_engine_passes_image_and_visual_behavior_context() -> None:
     """Vision-ввод должен сохранять общий характер и текстовую историю."""
     engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
     image = ImageInput(b"image", "image/png", "фотографию")
 
     result = asyncio.run(
@@ -159,9 +160,110 @@ def test_response_engine_passes_image_and_visual_behavior_context() -> None:
     assert call.kwargs["images"] == (image,)
     assert "действительно получил" in call.kwargs["system_prompt"]
     assert "коротко и живо" in call.kwargs["system_prompt"]
+    assert "ровно 1 визуальных элементов" in call.kwargs["system_prompt"]
+    assert "не додумывай предметы" in call.kwargs["system_prompt"]
+    assert "явно эротическое" in call.kwargs["system_prompt"]
     assert list(engine._user_states.get(TEST_USER_ID).history)[0].user_message == (
         "[Пользователь отправил фотографию без подписи]"
     )
+
+
+def test_response_engine_applies_soft_mode_before_age_selection() -> None:
+    """Без подтверждения возраста движок должен использовать мягкий режим."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "ещё не выбрал возрастной режим" in prompt
+    assert "не откровенные описания гениталий" in prompt
+
+
+def test_response_engine_applies_confirmed_adult_mode() -> None:
+    """Подтверждённый взрослый режим должен попасть в системный контекст."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "явно подтвердил совершеннолетие" in prompt
+    assert "только между совершеннолетними персонажами" in prompt
+    assert "Не добавляй пошлость в нейтральные темы" in prompt
+
+
+def test_response_engine_saves_delta_appearance_from_image() -> None:
+    """Явно назначенный по арту облик должен сохраниться и попасть в ответ."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
+    deepseek_mock.chat.side_effect = [
+        "Синий антропоморфный дракон с крыльями и длинным хвостом.",
+        "Запомнил. Сегодня буду таким.",
+    ]
+    image = ImageInput(b"image", "image/png", "фотографию")
+
+    result = asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Сегодня хочу тебя видеть в таком облике",
+            images=(image,),
+        )
+    )
+
+    assert result == "Запомнил. Сегодня буду таким."
+    state = engine._user_states.get(TEST_USER_ID)
+    assert state.delta_appearance == (
+        "Синий антропоморфный дракон с крыльями и длинным хвостом."
+    )
+    assert deepseek_mock.chat.await_count == 2
+    main_prompt = deepseek_mock.chat.await_args_list[1].kwargs["system_prompt"]
+    assert "Текущий облик Дельты" in main_prompt
+    assert "назначил этот облик" in main_prompt
+
+
+def test_response_engine_reuses_and_clears_saved_delta_appearance() -> None:
+    """Сохранённый облик должен жить между ходами и сбрасываться просьбой."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    state = engine._user_states.get(TEST_USER_ID)
+    state.delta_appearance = "Серый волк в чёрной куртке."
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Как ты выглядишь сейчас?"))
+
+    first_prompt = deepseek_mock.chat.await_args.kwargs["system_prompt"]
+    assert "Серый волк в чёрной куртке" in first_prompt
+
+    asyncio.run(engine.respond(TEST_USER_ID, "Верни обычный облик"))
+
+    assert state.delta_appearance == ""
+    second_prompt = deepseek_mock.chat.await_args.kwargs["system_prompt"]
+    assert "попросил вернуть базовый облик" in second_prompt
+
+
+def test_response_engine_treats_sticker_as_short_contextual_reaction() -> None:
+    """Стикер и кадр анимации должны получать специализированные правила."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    sticker = ImageInput(b"sticker", "image/webp", "статический стикер")
+    animation = ImageInput(b"frame", "image/jpeg", "кадр GIF-анимации")
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Пользователь отправил стикер]",
+            images=(sticker, animation),
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert "одной короткой естественной реакцией" in prompt
+    assert "впиши смысл стикера в текущую сцену" in prompt
+    assert "только репрезентативный статичный кадр" in prompt
+    assert "ровно 2 визуальных элементов" in prompt
 
 
 def test_response_engine_keeps_document_body_out_of_history() -> None:
@@ -204,6 +306,26 @@ def test_response_engine_uses_transient_model_message_override() -> None:
     assert call.kwargs["user_message"] == "Полная расшифровка голосового сообщения"
     history = list(engine._user_states.get(TEST_USER_ID).history)
     assert history[0].user_message == "[Короткая расшифровка]"
+
+
+def test_response_engine_adds_trusted_current_input_context() -> None:
+    """Служебная метка медиа должна попадать в prompt, но не в историю."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Расшифровка голосового]",
+            model_message_override="Фактическая расшифровка",
+            trusted_input_context="Текущее сообщение пришло как голосовое.",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert "Текущее сообщение пришло как голосовое." in call.kwargs["system_prompt"]
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "[Расшифровка голосового]"
 
 
 def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
@@ -349,7 +471,8 @@ def test_response_engine_uses_rp_prompt() -> None:
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt.startswith("RP PROMPT")
+    assert prompt.startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in prompt
     assert "Текущая конфигурация Дельты" in prompt
     assert "Протогены не носят штанов" not in prompt
     assert "Никогда не используй слово" not in prompt
@@ -386,7 +509,8 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
 
     prompt = call.kwargs["system_prompt"]
 
-    assert prompt.startswith("RP PROMPT")
+    assert prompt.startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in prompt
     assert "## Контекст текущего сообщения" in prompt
     assert "бондаж" in prompt
     assert "По мере роста возбуждения" in prompt
@@ -1628,7 +1752,8 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
         "предложи описать персонажа, место и завязку"
         in first_call.kwargs["system_prompt"]
     )
-    assert second_call.kwargs["system_prompt"].startswith("RP PROMPT")
+    assert second_call.kwargs["system_prompt"].startswith("SYSTEM PROMPT")
+    assert "RP PROMPT" in second_call.kwargs["system_prompt"]
     assert "Это первый ход новой RP-сцены" not in second_call.kwargs["system_prompt"]
     assert "RP-режим уже активен" in second_call.kwargs["system_prompt"]
     assert "не согласовывай их заново" in second_call.kwargs["system_prompt"]

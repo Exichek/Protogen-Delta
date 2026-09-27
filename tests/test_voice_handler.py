@@ -90,6 +90,10 @@ def test_voice_is_transcribed_and_sent_as_user_message() -> None:
     assert call is not None
     assert "Привет, как дела?" in call.args[1]
     assert call.kwargs["model_message_override"] == "Привет, как дела?"
+    assert "действительно пришло как голосовое" in call.kwargs["trusted_input_context"]
+    assert (
+        "Не утверждай, что голосового не было" in call.kwargs["trusted_input_context"]
+    )
     answer.assert_awaited_once_with("Нормально.")
 
 

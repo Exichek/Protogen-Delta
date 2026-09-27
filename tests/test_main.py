@@ -159,6 +159,9 @@ def test_main_builds_application_and_starts_polling(
     text_router = Mock(
         name="text_router",
     )
+    adult_router = Mock(
+        name="adult_router",
+    )
 
     create_start_router_mock = Mock(
         return_value=start_router,
@@ -183,6 +186,9 @@ def test_main_builds_application_and_starts_polling(
     )
     create_text_router_mock = Mock(
         return_value=text_router,
+    )
+    create_adult_router_mock = Mock(
+        return_value=adult_router,
     )
     media_router = Mock(
         name="media_router",
@@ -291,6 +297,11 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_text_router",
         create_text_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_adult_router",
+        create_adult_router_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -417,6 +428,8 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
+    create_adult_router_mock.assert_called_once_with(user_states)
+
     assert dispatcher_mock.include_router.call_count == 13
 
     dispatcher_mock.include_router.assert_any_call(
@@ -442,6 +455,9 @@ def test_main_builds_application_and_starts_polling(
     )
     dispatcher_mock.include_router.assert_any_call(
         text_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        adult_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         media_router,

@@ -265,8 +265,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "start",
         "randomart",
         "rp",
+        "adult",
         "reset",
-        "proactive",
         "help",
     ]
 
@@ -274,8 +274,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🚀 Запустить бота",
         "🎨 Случайный арт",
         "🎭 Управление RP — /rp off",
+        "🔞 Выбрать возрастной режим",
         "🧹 Полностью очистить память",
-        "💬 Может ли Дельта писать первой",
         "ℹ️ Помощь",
     ]
 

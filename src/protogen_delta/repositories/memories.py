@@ -60,6 +60,10 @@ class MemoriesRepository:
         """Вернуть текущую настройку; для нового пользователя она включена."""
         return await asyncio.to_thread(self._proactive_enabled_sync, user_id)
 
+    async def enable_proactive_for_all(self) -> None:
+        """Включить фоновые сообщения всем известным пользователям."""
+        await asyncio.to_thread(self._enable_proactive_for_all_sync)
+
     async def due_candidates(
         self, *, now: float, idle_seconds: float, cooldown_seconds: float, limit: int
     ) -> list[ProactiveCandidate]:
@@ -156,6 +160,10 @@ class MemoriesRepository:
                 (user_id,),
             ).fetchone()
         return True if row is None else bool(row[0])
+
+    def _enable_proactive_for_all_sync(self) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute("UPDATE engagement SET proactive_enabled = 1")
 
     def _due_candidates_sync(
         self, now: float, idle_seconds: float, cooldown_seconds: float, limit: int

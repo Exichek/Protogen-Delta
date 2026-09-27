@@ -20,6 +20,20 @@ INTENT_PATTERN = re.compile(
     r"\b(?:сыграем|поиграем|отыграем)\b.{0,40}\b(?:сцену|сюжет|роли?)\b)",
     re.IGNORECASE | re.DOTALL,
 )
+APPEARANCE_REFERENCE_PATTERN = re.compile(
+    r"(?:\b(?:хочу\s+тебя\s+видеть|будь|будешь|выгляди|отыгрывай)\b"
+    r".{0,80}\b(?:так(?:им|ой)|в\s+таком\s+(?:виде|облике)|персонаж(?:ем|а)?|"
+    r"образе?|как\s+на\s+(?:арте|картинке|фото))\b|"
+    r"\b(?:это|вот)\b.{0,40}\b(?:твой|для\s+тебя)\b.{0,40}"
+    r"\b(?:образ|облик|персонаж|внешность)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+APPEARANCE_RESET_PATTERN = re.compile(
+    r"\b(?:сбрось|забудь|убери|отмени|верни)\b.{0,40}"
+    r"\b(?:облик|образ|внешность|обычный\s+вид)\b|"
+    r"\b(?:будь|стань)\s+(?:снова\s+)?собой\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def has_roleplay_action(text: str) -> bool:
@@ -35,6 +49,16 @@ def has_roleplay_action(text: str) -> bool:
 def has_roleplay_intent(text: str) -> bool:
     """Распознать явное предложение начать RP без действия в звёздочках."""
     return INTENT_PATTERN.search(text) is not None
+
+
+def has_delta_appearance_intent(text: str) -> bool:
+    """Распознать назначение Дельте облика по приложенному изображению."""
+    return APPEARANCE_REFERENCE_PATTERN.search(text) is not None
+
+
+def has_delta_appearance_reset(text: str) -> bool:
+    """Распознать просьбу вернуть базовый облик Дельты."""
+    return APPEARANCE_RESET_PATTERN.search(text) is not None
 
 
 def split_roleplay_stop(text: str) -> str | None:

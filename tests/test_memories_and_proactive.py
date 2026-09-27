@@ -46,6 +46,8 @@ def test_repository_keeps_kinds_limit_and_engagement(tmp_path: Path) -> None:
         )
         await repository.set_proactive(1, False, 40.0)
         assert await repository.proactive_enabled(1) is False
+        await repository.enable_proactive_for_all()
+        assert await repository.proactive_enabled(1) is True
         await repository.delete_user(1)
         assert await repository.recent(1) == []
 

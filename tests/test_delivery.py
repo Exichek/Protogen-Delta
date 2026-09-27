@@ -32,6 +32,21 @@ def test_show_typing_without_bot_is_noop() -> None:
     asyncio.run(scenario())
 
 
+def test_show_typing_rejects_negative_initial_delay() -> None:
+    """Отрицательная пауза перед статусом набора должна отклоняться."""
+
+    async def scenario() -> None:
+        with pytest.raises(ValueError, match="не может быть отрицательной"):
+            async with show_typing(
+                _message(),
+                None,
+                initial_delay_seconds=-0.1,
+            ):
+                pass
+
+    asyncio.run(scenario())
+
+
 def test_show_typing_sends_and_stops_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

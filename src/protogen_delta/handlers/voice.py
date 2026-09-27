@@ -61,7 +61,7 @@ def create_voice_router(
             await message.answer(AUDIO_DOWNLOAD_ERROR_REPLY)
             return
 
-        async with show_typing(message, bot):
+        async with show_typing(message, bot, initial_delay_seconds=1.2):
             try:
                 transcript = await transcriber.transcribe(destination.getvalue())
             except SpeechRecognitionError:
@@ -88,6 +88,13 @@ def create_voice_router(
                     history_text,
                     create_reply_delivery(message, bot),
                     model_message_override=model_message,
+                    trusted_input_context=(
+                        f"Текущее сообщение действительно пришло как {media_kind}. "
+                        "Приложение уже распознало речь и передало тебе точную "
+                        "расшифровку. Отвечай на её смысл как на сообщение "
+                        "пользователя. Не утверждай, что голосового не было, что "
+                        "аудио тебе недоступно или что пользователь прислал текст."
+                    ),
                 )
             except ResponseBusyError:
                 await message.answer(BUSY_REPLY)

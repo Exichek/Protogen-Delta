@@ -31,6 +31,8 @@ _EXTENSION_MIME_TYPES = {
     ".webp": "image/webp",
 }
 _SUPPORTED_MIME_TYPES = frozenset(_EXTENSION_MIME_TYPES.values())
+_ANIMATION_MIME_TYPES = frozenset({"video/mp4", "video/webm"})
+_ANIMATION_EXTENSIONS = frozenset({".mp4", ".webm"})
 
 
 def _detected_mime_type(data: bytes) -> str | None:
@@ -67,6 +69,16 @@ def _has_supported_image_document(message: Message) -> bool:
         )
         is not None
     )
+
+
+def _has_supported_animation_document(message: Message) -> bool:
+    """Распознать отправленную файлом Telegram-анимацию с превью."""
+    document = message.document
+    if document is None or document.thumbnail is None:
+        return False
+    mime_type = (document.mime_type or "").lower()
+    suffix = Path(document.file_name or "").suffix.lower()
+    return mime_type in _ANIMATION_MIME_TYPES or suffix in _ANIMATION_EXTENSIONS
 
 
 async def _download_image(
@@ -115,7 +127,7 @@ def create_media_router(
     response_engine: ResponseEngine,
     bot: Bot,
     rate_limiter: UserRateLimiter | None = None,
-    album_delay_seconds: float = 0.6,
+    album_delay_seconds: float = 1.2,
 ) -> Router:
     """Создать роутер поддерживаемых изображений и стикеров."""
     if album_delay_seconds <= 0:
@@ -123,7 +135,10 @@ def create_media_router(
 
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
-    albums: dict[tuple[int, str], list[tuple[Message, ImageInput]]] = {}
+    albums: dict[
+        tuple[int, str],
+        list[tuple[Message, asyncio.Task[ImageInput]]],
+    ] = {}
     album_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
 
     async def respond_with_images(
@@ -157,15 +172,34 @@ def create_media_router(
             album_tasks.pop(key, None)
             if not entries:
                 return
+            results = await asyncio.gather(
+                *(download for _, download in entries),
+                return_exceptions=True,
+            )
+            images = tuple(
+                result for result in results if isinstance(result, ImageInput)
+            )
             representative = next(
                 (message for message, _ in entries if message.caption),
                 entries[0][0],
             )
-            label = f"альбом из {len(entries)} изображений"
+            if not images:
+                logger.warning("Не удалось скачать ни одного элемента альбома")
+                await representative.answer(IMAGE_DOWNLOAD_ERROR_REPLY)
+                return
+            failed = len(entries) - len(images)
+            if failed:
+                logger.warning(
+                    "Часть Telegram-альбома не обработана: %d из %d",
+                    failed,
+                    len(entries),
+                )
+            label = f"альбом из {len(images)} изображений"
+            logger.info("Собран Telegram-альбом: images=%d", len(images))
             await respond_with_images(
                 representative,
                 _media_message(representative, label),
-                tuple(image for _, image in entries),
+                images,
             )
         except asyncio.CancelledError:
             raise
@@ -174,10 +208,14 @@ def create_media_router(
             album_tasks.pop(key, None)
             logger.exception("Не удалось обработать Telegram-альбом")
 
-    def queue_album(message: Message, image: ImageInput, group_id: str) -> None:
-        """Добавить изображение в альбом и перенести момент его обработки."""
+    def queue_album(
+        message: Message,
+        download: asyncio.Task[ImageInput],
+        group_id: str,
+    ) -> None:
+        """Сразу учесть элемент альбома и параллельно скачать его содержимое."""
         key = (message.chat.id, group_id)
-        albums.setdefault(key, []).append((message, image))
+        albums.setdefault(key, []).append((message, download))
         previous = album_tasks.get(key)
         if previous is not None:
             previous.cancel()
@@ -194,6 +232,22 @@ def create_media_router(
     ) -> None:
         """Скачать изображение и передать его общему движку ответа."""
         if message.from_user is None:
+            return
+        media_group_id = message.media_group_id
+        if media_group_id:
+            queue_album(
+                message,
+                asyncio.create_task(
+                    _download_image(
+                        bot,
+                        file_id,
+                        expected_mime_type=mime_type,
+                        file_size=file_size,
+                        label=label,
+                    )
+                ),
+                media_group_id,
+            )
             return
         try:
             image = await _download_image(
@@ -214,11 +268,6 @@ def create_media_router(
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать изображение из Telegram", exc_info=True)
             await message.answer(IMAGE_DOWNLOAD_ERROR_REPLY)
-            return
-
-        media_group_id = message.media_group_id
-        if media_group_id:
-            queue_album(message, image, media_group_id)
             return
 
         await respond_with_images(
@@ -285,6 +334,38 @@ def create_media_router(
             file_size=thumbnail.file_size,
             label="превью анимированного стикера",
             emoji=sticker.emoji,
+        )
+
+    @router.message(F.animation)
+    async def handle_animation(message: Message) -> None:
+        """Передать модели кадр Telegram GIF-анимации."""
+        animation = message.animation
+        if animation is None:
+            return
+        thumbnail = animation.thumbnail
+        if thumbnail is None:
+            await message.answer(UNSUPPORTED_IMAGE_REPLY)
+            return
+        await handle_image(
+            message,
+            file_id=thumbnail.file_id,
+            mime_type="image/jpeg",
+            file_size=thumbnail.file_size,
+            label="кадр GIF-анимации",
+        )
+
+    @router.message(F.document, _has_supported_animation_document)
+    async def handle_animation_document(message: Message) -> None:
+        """Передать модели кадр анимации, отправленной обычным файлом."""
+        document = message.document
+        if document is None or document.thumbnail is None:
+            return
+        await handle_image(
+            message,
+            file_id=document.thumbnail.file_id,
+            mime_type="image/jpeg",
+            file_size=document.thumbnail.file_size,
+            label="кадр GIF-анимации, отправленной файлом",
         )
 
     return router

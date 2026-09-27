@@ -8,7 +8,8 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from protogen_delta.core.message_utils import split_message
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.user_state import ContentMode, UserStateStore
+from protogen_delta.handlers.adult import send_age_prompt
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import (
     DeepSeekError,
@@ -135,12 +136,16 @@ def create_start_router(
 
         pending.add(user.id)
         try:
-            async with states.use(user.id):
-                await greet(message, user.id)
+            async with states.use(user.id) as state:
+                await greet(message, user.id, state.content_mode)
         finally:
             pending.remove(user.id)
 
-    async def greet(message: Message, user_id: int) -> None:
+    async def greet(
+        message: Message,
+        user_id: int,
+        content_mode: ContentMode,
+    ) -> None:
         """Отправить приветствие под общей блокировкой состояния."""
         if user_id not in users_repository.get_all():
 
@@ -154,14 +159,16 @@ def create_start_router(
 
             users_repository.add(user_id)
             logger.info("Зарегистрирован новый пользователь: %s", user_id)
-            return
+        else:
+            reply = await _generate_repeat_start_message(
+                deepseek,
+                repeat_start_prompt or first_start_prompt,
+            )
 
-        reply = await _generate_repeat_start_message(
-            deepseek,
-            repeat_start_prompt or first_start_prompt,
-        )
+            for chunk in split_message(reply):
+                await message.answer(chunk)
 
-        for chunk in split_message(reply):
-            await message.answer(chunk)
+        if content_mode == "unselected":
+            await send_age_prompt(message, user_id)
 
     return router

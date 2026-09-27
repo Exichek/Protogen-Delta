@@ -18,8 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def show_typing(message: Message, bot: Bot | None) -> AsyncIterator[None]:
+async def show_typing(
+    message: Message,
+    bot: Bot | None,
+    *,
+    initial_delay_seconds: float = 0.7,
+) -> AsyncIterator[None]:
     """Показывать статус набора, пока бот формирует содержательный ответ."""
+    if initial_delay_seconds < 0:
+        raise ValueError("Задержка статуса набора не может быть отрицательной")
     if bot is None:
         yield
         return
@@ -28,7 +35,7 @@ async def show_typing(message: Message, bot: Bot | None) -> AsyncIterator[None]:
 
     async def worker() -> None:
         """Обновлять Telegram chat action до завершения основного ответа."""
-        delay = 0.7
+        delay = initial_delay_seconds
         while not stopped.is_set():
             try:
                 await wait_for(stopped.wait(), timeout=delay)

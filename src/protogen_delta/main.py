@@ -16,13 +16,13 @@ from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
+from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.media import create_media_router
-from protogen_delta.handlers.proactive import create_proactive_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
@@ -159,20 +159,6 @@ async def main() -> None:
             "personality/rp.txt",
         )
 
-        system_prompt = "\n\n".join(
-            (
-                core_prompt,
-                protogen_lore_prompt,
-                body_prompt,
-            )
-        )
-        rp_prompt = "\n\n".join(
-            (
-                system_prompt,
-                rp_modifier_prompt,
-            )
-        )
-
         deepseek = DeepSeekService(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
@@ -201,8 +187,10 @@ async def main() -> None:
         response_engine_config = ResponseEngineConfig(
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
-            system_prompt=system_prompt,
-            rp_prompt=rp_prompt,
+            system_prompt=core_prompt,
+            rp_prompt=rp_modifier_prompt,
+            protogen_lore_prompt=protogen_lore_prompt,
+            body_prompt=body_prompt,
         )
 
         response_engine = ResponseEngine(
@@ -253,7 +241,7 @@ async def main() -> None:
             creator_id=settings.creator_id,
         )
 
-        proactive_router = create_proactive_router(memories_repository)
+        adult_router = create_adult_router(user_states)
 
         rate_limiter = UserRateLimiter(
             cooldown_seconds=settings.rate_limit_seconds,
@@ -303,7 +291,7 @@ async def main() -> None:
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(creator_router)
-        dispatcher.include_router(proactive_router)
+        dispatcher.include_router(adult_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
@@ -317,13 +305,17 @@ async def main() -> None:
         )
         await set_commands(bot)
 
+        # Команда /proactive временно скрыта: на время этого режима фоновые
+        # сообщения включаются всем, включая ранее отключившие их в тестах.
+        await memories_repository.enable_proactive_for_all()
+
         logger.info("Бот запущен")
 
         proactive_messenger = ProactiveMessenger(
             bot=bot,
             deepseek=deepseek,
             repository=memories_repository,
-            system_prompt=system_prompt,
+            system_prompt=core_prompt,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,

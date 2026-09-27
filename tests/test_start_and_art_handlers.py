@@ -13,6 +13,7 @@ from aiogram.types import Message
 
 import protogen_delta.handlers.art as art_module
 from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.handlers.adult import AGE_PROMPT_TEXT
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.start import (
     FIRST_START_FALLBACK_BODY,
@@ -76,9 +77,9 @@ def _assert_first_start_reply(
     expected_body: str,
 ) -> None:
     """Проверить вариативное начало и ожидаемое тело первого приветствия."""
-    answer_mock.assert_awaited_once()
+    assert answer_mock.await_count == 2
 
-    call = answer_mock.await_args
+    call = answer_mock.await_args_list[0]
 
     assert call is not None
 
@@ -89,6 +90,11 @@ def _assert_first_start_reply(
     assert prefix in FIRST_START_PREFIXES
     assert separator == "\n\n"
     assert body == expected_body
+    age_call = answer_mock.await_args_list[1]
+    assert age_call.args == (AGE_PROMPT_TEXT,)
+    assert age_call.kwargs["reply_markup"].inline_keyboard[0][0].text == (
+        "🔞 Мне есть 18"
+    )
 
 
 def test_start_generates_greeting_for_new_user() -> None:
@@ -231,7 +237,8 @@ def test_start_generates_new_message_for_existing_user() -> None:
         system_prompt="REPEAT START PROMPT",
         user_message=ANY,
     )
-    answer_mock.assert_awaited_once_with("Снова привет. Что сегодня делаем?")
+    assert answer_mock.await_args_list[0].args == ("Снова привет. Что сегодня делаем?",)
+    assert answer_mock.await_args_list[1].args == (AGE_PROMPT_TEXT,)
 
 
 def test_repeat_start_uses_fallback_when_generation_fails() -> None:
@@ -262,7 +269,29 @@ def test_repeat_start_uses_fallback_when_generation_fails() -> None:
     )
 
     deepseek_mock.chat.assert_awaited_once()
-    answer_mock.assert_awaited_once_with(REPEAT_START_FALLBACK)
+    assert answer_mock.await_args_list[0].args == (REPEAT_START_FALLBACK,)
+    assert answer_mock.await_args_list[1].args == (AGE_PROMPT_TEXT,)
+
+
+def test_start_does_not_repeat_age_prompt_after_selection() -> None:
+    """После сохранённого выбора повторный /start должен прислать лишь приветствие."""
+    users_mock = Mock(spec=UsersRepository)
+    users_mock.get_all.return_value = [123]
+    deepseek_mock = _create_deepseek_mock()
+    states = UserStateStore()
+    states.get(123).content_mode = "adult"
+    router = create_start_router(
+        users_repository=cast(UsersRepository, users_mock),
+        deepseek=cast(DeepSeekService, deepseek_mock),
+        first_start_prompt="START PROMPT",
+        repeat_start_prompt="REPEAT START PROMPT",
+        user_states=states,
+    )
+    message, _, answer_mock, _ = _create_message_mock()
+
+    asyncio.run(_call_handler(router, 0, message))
+
+    answer_mock.assert_awaited_once_with("Сгенерированное приветствие.")
 
 
 def test_start_ignores_message_without_user() -> None:
@@ -628,7 +657,7 @@ def test_start_rejects_duplicate_and_reset_waits_for_send(tmp_path: Path) -> Non
     async def scenario() -> None:
         entered, release = asyncio.Event(), asyncio.Event()
 
-        async def send(text: str) -> None:
+        async def send(text: str, **kwargs: object) -> None:
             entered.set()
             await release.wait()
 

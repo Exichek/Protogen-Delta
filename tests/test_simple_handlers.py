@@ -217,7 +217,7 @@ def test_text_handler_sends_paragraphs_with_typing_delay(
     sleep.assert_awaited_once()
     sleep_call = sleep.await_args
     assert sleep_call is not None
-    assert 1.7 <= sleep_call.args[0] <= 2.4
+    assert 1.5 <= sleep_call.args[0] <= 2.5
 
 
 def test_text_handler_ignores_commands() -> None:

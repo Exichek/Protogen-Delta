@@ -16,6 +16,7 @@ from protogen_delta.handlers.media import (
     IMAGE_TOO_LARGE_REPLY,
     MAX_IMAGE_BYTES,
     UNSUPPORTED_IMAGE_REPLY,
+    _has_supported_animation_document,
     create_media_router,
 )
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
@@ -37,6 +38,7 @@ def _message(**values: Any) -> tuple[Message, AsyncMock]:
     message.photo = values.pop("photo", None)
     message.document = values.pop("document", None)
     message.sticker = values.pop("sticker", None)
+    message.animation = values.pop("animation", None)
     for key, value in values.items():
         setattr(message, key, value)
     message.answer = AsyncMock()
@@ -164,6 +166,76 @@ def test_sticker_without_thumbnail_reports_unsupported_format() -> None:
 
     answer.assert_awaited_once_with(UNSUPPORTED_IMAGE_REPLY)
     engine.respond_and_deliver.assert_not_awaited()
+
+
+def test_telegram_animation_uses_thumbnail_as_visual_frame() -> None:
+    """Telegram GIF должен передавать модели доступный статичный кадр."""
+    router, engine, bot = _router(JPEG_DATA)
+    thumbnail = SimpleNamespace(file_id="gif-thumb", file_size=len(JPEG_DATA))
+    animation = SimpleNamespace(thumbnail=thumbnail)
+    message, _ = _message(animation=animation, caption="Что скажешь?")
+
+    asyncio.run(router.message.handlers[3].callback(message))
+
+    bot.download.assert_awaited_once_with("gif-thumb", destination=ANY)
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert call.args[1] == "Что скажешь?"
+    assert call.kwargs["images"][0].label == "кадр GIF-анимации"
+
+
+def test_telegram_animation_without_thumbnail_is_rejected() -> None:
+    """GIF без доступного Telegram-превью должен получить понятный отказ."""
+    router, engine, _ = _router(JPEG_DATA)
+    message, answer = _message(animation=SimpleNamespace(thumbnail=None))
+
+    asyncio.run(router.message.handlers[3].callback(message))
+
+    answer.assert_awaited_once_with(UNSUPPORTED_IMAGE_REPLY)
+    engine.respond_and_deliver.assert_not_awaited()
+
+
+def test_animation_document_uses_thumbnail() -> None:
+    """MP4-анимация, отправленная файлом, не должна уходить в документы."""
+    router, engine, bot = _router(JPEG_DATA)
+    thumbnail = SimpleNamespace(file_id="file-thumb", file_size=len(JPEG_DATA))
+    document = SimpleNamespace(
+        file_id="animation-file",
+        file_size=500,
+        mime_type="video/mp4",
+        file_name="reaction.mp4",
+        thumbnail=thumbnail,
+    )
+    message, _ = _message(document=document)
+
+    asyncio.run(router.message.handlers[4].callback(message))
+
+    bot.download.assert_awaited_once_with("file-thumb", destination=ANY)
+    image = engine.respond_and_deliver.await_args.kwargs["images"][0]
+    assert "отправленной файлом" in image.label
+
+
+def test_animation_document_filter_requires_supported_video_and_thumbnail() -> None:
+    """Роутер должен перехватывать только анимационные файлы с превью."""
+    thumbnail = SimpleNamespace(file_id="thumb", file_size=10)
+    message, _ = _message(
+        document=SimpleNamespace(
+            mime_type="video/mp4",
+            file_name="reaction.bin",
+            thumbnail=thumbnail,
+        )
+    )
+    assert _has_supported_animation_document(message) is True
+
+    message.document.thumbnail = None  # type: ignore[union-attr]
+    assert _has_supported_animation_document(message) is False
+
+    message.document = SimpleNamespace(
+        mime_type="application/octet-stream",
+        file_name="reaction.webm",
+        thumbnail=thumbnail,
+    )
+    assert _has_supported_animation_document(message) is True
 
 
 def test_large_image_is_rejected_before_download() -> None:
@@ -315,6 +387,82 @@ def test_album_is_combined_into_one_multimodal_turn() -> None:
     assert call.args[1] == "Сравни их"
     assert len(call.kwargs["images"]) == 2
     assert bot.download.await_count == 2
+
+
+def test_album_counts_slow_last_download_before_reply() -> None:
+    """Медленное скачивание не должно отделять последний элемент альбома."""
+    engine = AsyncMock(spec=ResponseEngine)
+    bot = AsyncMock(spec=Bot)
+
+    async def download(file_id: str, *, destination: io.BytesIO) -> io.BytesIO:
+        if file_id == "six":
+            await asyncio.sleep(0.03)
+        destination.write(JPEG_DATA)
+        return destination
+
+    bot.download.side_effect = download
+    router = create_media_router(
+        cast(ResponseEngine, engine),
+        cast(Bot, bot),
+        album_delay_seconds=0.01,
+    )
+
+    async def scenario() -> None:
+        for number in range(1, 7):
+            photo = SimpleNamespace(
+                file_id="six" if number == 6 else str(number),
+                file_size=len(JPEG_DATA),
+            )
+            message, _ = _message(
+                photo=[photo],
+                caption="Сколько их?" if number == 1 else None,
+                media_group_id="album-six",
+            )
+            await router.message.handlers[0].callback(message)
+        await asyncio.sleep(0.06)
+
+    asyncio.run(scenario())
+
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert len(call.kwargs["images"]) == 6
+    assert bot.download.await_count == 6
+
+
+def test_album_keeps_valid_images_when_one_download_is_invalid() -> None:
+    """Один повреждённый элемент не должен ломать весь Telegram-альбом."""
+    engine = AsyncMock(spec=ResponseEngine)
+    bot = AsyncMock(spec=Bot)
+
+    async def download(file_id: str, *, destination: io.BytesIO) -> io.BytesIO:
+        destination.write(b"broken" if file_id == "bad" else JPEG_DATA)
+        return destination
+
+    bot.download.side_effect = download
+    router = create_media_router(
+        cast(ResponseEngine, engine),
+        cast(Bot, bot),
+        album_delay_seconds=0.01,
+    )
+    valid, _ = _message(
+        photo=[SimpleNamespace(file_id="good", file_size=10)],
+        media_group_id="partial",
+    )
+    invalid, _ = _message(
+        photo=[SimpleNamespace(file_id="bad", file_size=10)],
+        media_group_id="partial",
+    )
+
+    async def scenario() -> None:
+        await router.message.handlers[0].callback(valid)
+        await router.message.handlers[0].callback(invalid)
+        await asyncio.sleep(0.03)
+
+    asyncio.run(scenario())
+
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert len(call.kwargs["images"]) == 1
 
 
 def test_album_delay_must_be_positive() -> None:

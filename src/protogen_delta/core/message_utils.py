@@ -86,10 +86,10 @@ def reply_delay_seconds(next_part: str) -> float:
     """Выбрать естественную паузу перед следующим фрагментом ответа."""
     length = len(next_part)
     if length <= 160:
-        return random.uniform(1.0, 1.6)
+        return random.uniform(0.8, 1.5)
     if length <= 500:
-        return random.uniform(1.7, 2.4)
-    return random.uniform(2.5, 3.3)
+        return random.uniform(1.5, 2.5)
+    return random.uniform(2.2, 3.0)
 
 
 def _split_blocks(text: str) -> list[str]:
