@@ -230,7 +230,7 @@ def test_animation_document_filter_requires_supported_video_and_thumbnail() -> N
     message.document.thumbnail = None  # type: ignore[union-attr]
     assert _has_supported_animation_document(message) is False
 
-    message.document = SimpleNamespace(
+    cast(Any, message).document = SimpleNamespace(
         mime_type="application/octet-stream",
         file_name="reaction.webm",
         thumbnail=thumbnail,

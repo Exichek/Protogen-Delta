@@ -1,5 +1,7 @@
 """Тесты тематической сборки системного промпта."""
 
+import pytest
+
 from protogen_delta.services.prompt_composer import PromptComposer, PromptSections
 
 
@@ -13,6 +15,12 @@ def _composer() -> PromptComposer:
             roleplay="RP",
         )
     )
+
+
+def test_prompt_composer_requires_core_section() -> None:
+    """Компоновщик не должен работать без обязательного ядра личности."""
+    with pytest.raises(ValueError, match="не может быть пустой"):
+        PromptComposer(PromptSections(core="   "))
 
 
 def test_prompt_composer_keeps_regular_request_compact() -> None:
