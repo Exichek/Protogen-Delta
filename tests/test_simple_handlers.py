@@ -199,7 +199,7 @@ def test_text_handler_sends_paragraphs_with_typing_delay(
     engine.respond_and_deliver.return_value = f"{first}\n\n{second}"
     bot = AsyncMock(spec=Bot)
     sleep = AsyncMock()
-    monkeypatch.setattr("protogen_delta.handlers.delivery.asyncio.sleep", sleep)
+    monkeypatch.setattr("protogen_delta.handlers.delivery.sleep", sleep)
     router = create_text_router(cast(ResponseEngine, engine), bot=cast(Bot, bot))
     message, answer, _ = _create_message_mock("Расскажи подробнее")
     message.chat = Mock(id=321)
@@ -214,7 +214,10 @@ def test_text_handler_sends_paragraphs_with_typing_delay(
         chat_id=321,
         action=ChatAction.TYPING,
     )
-    sleep.assert_awaited_once_with(2.0)
+    sleep.assert_awaited_once()
+    sleep_call = sleep.await_args
+    assert sleep_call is not None
+    assert 1.7 <= sleep_call.args[0] <= 2.4
 
 
 def test_text_handler_ignores_commands() -> None:

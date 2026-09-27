@@ -11,7 +11,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
-from protogen_delta.handlers.delivery import create_reply_delivery
+from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
@@ -54,6 +54,19 @@ def _document_mime_type(mime_type: str | None, file_name: str | None) -> str | N
     if file_name:
         return _EXTENSION_MIME_TYPES.get(Path(file_name).suffix.lower())
     return None
+
+
+def _has_supported_image_document(message: Message) -> bool:
+    """Пропустить в vision только поддерживаемое изображение-документ."""
+    document = message.document
+    return (
+        document is not None
+        and _document_mime_type(
+            document.mime_type,
+            document.file_name,
+        )
+        is not None
+    )
 
 
 async def _download_image(
@@ -126,12 +139,13 @@ def create_media_router(
             await message.answer(RATE_LIMIT_REPLY)
             return
         try:
-            await response_engine.respond_and_deliver(
-                user_id,
-                text,
-                create_reply_delivery(message, bot),
-                images=images,
-            )
+            async with show_typing(message, bot):
+                await response_engine.respond_and_deliver(
+                    user_id,
+                    text,
+                    create_reply_delivery(message, bot),
+                    images=images,
+                )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)
 
@@ -227,7 +241,7 @@ def create_media_router(
             label="фотографию",
         )
 
-    @router.message(F.document)
+    @router.message(F.document, _has_supported_image_document)
     async def handle_document(message: Message) -> None:
         """Передать модели поддерживаемое изображение-документ."""
         document = message.document

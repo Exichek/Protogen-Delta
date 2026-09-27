@@ -30,6 +30,9 @@ class Settings:
     proactive_check_seconds: float = 300.0
     proactive_idle_seconds: float = 14400.0
     proactive_cooldown_seconds: float = 86400.0
+    whisper_model_size: str = "small"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
 
 
 def _parse_admin_ids(value: str) -> frozenset[int]:
@@ -217,4 +220,9 @@ def load_settings() -> Settings:
         proactive_check_seconds=proactive_check_seconds,
         proactive_idle_seconds=proactive_idle_seconds,
         proactive_cooldown_seconds=proactive_cooldown_seconds,
+        whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "small").strip() or "small",
+        whisper_device=os.getenv("WHISPER_DEVICE", "cpu").strip() or "cpu",
+        whisper_compute_type=(
+            os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
+        ),
     )

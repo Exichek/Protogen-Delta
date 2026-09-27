@@ -37,6 +37,9 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("PROACTIVE_CHECK_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_IDLE_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_COOLDOWN_SECONDS", raising=False)
+    monkeypatch.delenv("WHISPER_MODEL_SIZE", raising=False)
+    monkeypatch.delenv("WHISPER_DEVICE", raising=False)
+    monkeypatch.delenv("WHISPER_COMPUTE_TYPE", raising=False)
     monkeypatch.delenv("RATE_LIMIT_SECONDS", raising=False)
     monkeypatch.delenv(
         "RATE_LIMIT_RETENTION_SECONDS",
@@ -75,6 +78,9 @@ def test_load_settings_with_defaults(
     assert settings.rate_limit_retention_seconds == 300.0
     assert settings.conversation_history_limit == 8
     assert settings.user_state_retention_seconds == 86400.0
+    assert settings.whisper_model_size == "small"
+    assert settings.whisper_device == "cpu"
+    assert settings.whisper_compute_type == "int8"
 
 
 def test_load_settings_with_custom_values(
@@ -106,6 +112,9 @@ def test_load_settings_with_custom_values(
     monkeypatch.setenv("PROACTIVE_CHECK_SECONDS", "60")
     monkeypatch.setenv("PROACTIVE_IDLE_SECONDS", "120")
     monkeypatch.setenv("PROACTIVE_COOLDOWN_SECONDS", "240")
+    monkeypatch.setenv("WHISPER_MODEL_SIZE", "base")
+    monkeypatch.setenv("WHISPER_DEVICE", "cuda")
+    monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "float16")
 
     monkeypatch.setenv(
         "RATE_LIMIT_SECONDS",
@@ -148,6 +157,9 @@ def test_load_settings_with_custom_values(
     assert settings.rate_limit_retention_seconds == 600.0
     assert settings.conversation_history_limit == 12
     assert settings.user_state_retention_seconds == 3600.0
+    assert settings.whisper_model_size == "base"
+    assert settings.whisper_device == "cuda"
+    assert settings.whisper_compute_type == "float16"
 
 
 def test_load_settings_without_telegram_token(

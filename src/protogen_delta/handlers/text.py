@@ -4,7 +4,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
-from protogen_delta.handlers.delivery import create_reply_delivery
+from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.rp import (
     RP_ALREADY_DISABLED_REPLY,
     RP_DISABLED_REPLY,
@@ -56,11 +56,12 @@ def create_text_router(
             return
 
         try:
-            await response_engine.respond_and_deliver(
-                user_id,
-                message.text,
-                create_reply_delivery(message, bot),
-            )
+            async with show_typing(message, bot):
+                await response_engine.respond_and_deliver(
+                    user_id,
+                    message.text,
+                    create_reply_delivery(message, bot),
+                )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)
 

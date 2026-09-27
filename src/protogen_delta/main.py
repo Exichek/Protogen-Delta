@@ -18,6 +18,7 @@ from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
+from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.media import create_media_router
@@ -27,6 +28,7 @@ from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
+from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -39,6 +41,7 @@ from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
 logger = logging.getLogger(__name__)
@@ -279,6 +282,21 @@ async def main() -> None:
             bot,
             rate_limiter=rate_limiter,
         )
+        document_router = create_document_router(
+            response_engine,
+            bot,
+            rate_limiter=rate_limiter,
+        )
+        voice_router = create_voice_router(
+            response_engine,
+            bot,
+            SpeechTranscriber(
+                model_size=settings.whisper_model_size,
+                device=settings.whisper_device,
+                compute_type=settings.whisper_compute_type,
+            ),
+            rate_limiter=rate_limiter,
+        )
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(help_router)
@@ -290,6 +308,8 @@ async def main() -> None:
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
         dispatcher.include_router(media_router)
+        dispatcher.include_router(document_router)
+        dispatcher.include_router(voice_router)
         dispatcher.include_router(text_router)
 
         await bot.delete_webhook(

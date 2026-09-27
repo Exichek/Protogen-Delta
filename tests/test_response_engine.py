@@ -164,6 +164,48 @@ def test_response_engine_passes_image_and_visual_behavior_context() -> None:
     )
 
 
+def test_response_engine_keeps_document_body_out_of_history() -> None:
+    """Содержимое документа должно передаваться модели только в текущем ходе."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "Перескажи документ",
+            attachment_text="СЕКРЕТНОЕ СОДЕРЖИМОЕ",
+            attachment_name="notes.txt",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert "<document_content>" in call.kwargs["user_message"]
+    assert "СЕКРЕТНОЕ СОДЕРЖИМОЕ" in call.kwargs["user_message"]
+    assert "недоверенные пользовательские данные" in call.kwargs["system_prompt"]
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "Перескажи документ"
+    assert "СЕКРЕТНОЕ" not in history[0].user_message
+
+
+def test_response_engine_uses_transient_model_message_override() -> None:
+    """Полная расшифровка должна влиять на ответ без раздувания истории."""
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID,
+            "[Короткая расшифровка]",
+            model_message_override="Полная расшифровка голосового сообщения",
+        )
+    )
+
+    call = deepseek_mock.chat.await_args
+    assert call is not None
+    assert call.kwargs["user_message"] == "Полная расшифровка голосового сообщения"
+    history = list(engine._user_states.get(TEST_USER_ID).history)
+    assert history[0].user_message == "[Короткая расшифровка]"
+
+
 def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
     """Создатель и прошлые эпизоды должны попадать в динамический контекст."""
     engine, _, deepseek_mock, _, _, _ = _create_engine()

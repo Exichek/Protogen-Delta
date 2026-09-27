@@ -1,5 +1,7 @@
 """Утилиты для работы с сообщениями Telegram."""
 
+import random
+
 TELEGRAM_MESSAGE_LIMIT = 4096
 CONVERSATIONAL_PART_MIN_LENGTH = 60
 CONVERSATIONAL_TARGET_PART_LENGTH = 550
@@ -84,10 +86,10 @@ def reply_delay_seconds(next_part: str) -> float:
     """Выбрать естественную паузу перед следующим фрагментом ответа."""
     length = len(next_part)
     if length <= 160:
-        return 1.0
+        return random.uniform(1.0, 1.6)
     if length <= 500:
-        return 2.0
-    return 3.0
+        return random.uniform(1.7, 2.4)
+    return random.uniform(2.5, 3.3)
 
 
 def _split_blocks(text: str) -> list[str]:

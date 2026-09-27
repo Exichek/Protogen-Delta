@@ -190,6 +190,20 @@ def test_main_builds_application_and_starts_polling(
     create_media_router_mock = Mock(
         return_value=media_router,
     )
+    document_router = Mock(
+        name="document_router",
+    )
+    create_document_router_mock = Mock(
+        return_value=document_router,
+    )
+    voice_router = Mock(
+        name="voice_router",
+    )
+    create_voice_router_mock = Mock(
+        return_value=voice_router,
+    )
+    speech_transcriber = Mock(name="speech_transcriber")
+    speech_transcriber_constructor_mock = Mock(return_value=speech_transcriber)
 
     set_commands_mock = AsyncMock()
 
@@ -282,6 +296,21 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_media_router",
         create_media_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_document_router",
+        create_document_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_voice_router",
+        create_voice_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "SpeechTranscriber",
+        speech_transcriber_constructor_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -388,7 +417,7 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    assert dispatcher_mock.include_router.call_count == 11
+    assert dispatcher_mock.include_router.call_count == 13
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -417,10 +446,32 @@ def test_main_builds_application_and_starts_polling(
     dispatcher_mock.include_router.assert_any_call(
         media_router,
     )
+    dispatcher_mock.include_router.assert_any_call(
+        document_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        voice_router,
+    )
 
     create_media_router_mock.assert_called_once_with(
         reset_response_engine,
         bot_mock,
+        rate_limiter=ANY,
+    )
+    create_document_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
+    )
+    speech_transcriber_constructor_mock.assert_called_once_with(
+        model_size="small",
+        device="cpu",
+        compute_type="int8",
+    )
+    create_voice_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        speech_transcriber,
         rate_limiter=ANY,
     )
 

@@ -1,7 +1,9 @@
 """Доставка сформированных ответов в Telegram."""
 
-import asyncio
 import logging
+from asyncio import CancelledError, Event, create_task, sleep, wait_for
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from time import perf_counter
 
 from aiogram import Bot
@@ -13,6 +15,45 @@ from protogen_delta.core.message_utils import reply_delay_seconds, split_reply
 from protogen_delta.services.response_engine import ReplyDelivery
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def show_typing(message: Message, bot: Bot | None) -> AsyncIterator[None]:
+    """Показывать статус набора, пока бот формирует содержательный ответ."""
+    if bot is None:
+        yield
+        return
+
+    stopped = Event()
+
+    async def worker() -> None:
+        """Обновлять Telegram chat action до завершения основного ответа."""
+        delay = 0.7
+        while not stopped.is_set():
+            try:
+                await wait_for(stopped.wait(), timeout=delay)
+                return
+            except TimeoutError:
+                pass
+            try:
+                await bot.send_chat_action(
+                    chat_id=message.chat.id,
+                    action=ChatAction.TYPING,
+                )
+            except TelegramAPIError:
+                logger.debug(
+                    "Не удалось показать статус набора сообщения",
+                    exc_info=True,
+                )
+                return
+            delay = 4.5
+
+    task = create_task(worker())
+    try:
+        yield
+    finally:
+        stopped.set()
+        await task
 
 
 def create_reply_delivery(message: Message, bot: Bot | None) -> ReplyDelivery:
@@ -36,11 +77,11 @@ def create_reply_delivery(message: Message, bot: Bot | None) -> ReplyDelivery:
                             "Не удалось показать статус набора сообщения",
                             exc_info=True,
                         )
-                    await asyncio.sleep(reply_delay_seconds(chunk))
+                    await sleep(reply_delay_seconds(chunk))
                 await message.answer(chunk)
                 sent += 1
             outcome = "sent"
-        except asyncio.CancelledError:
+        except CancelledError:
             outcome = "cancelled"
             raise
         finally:

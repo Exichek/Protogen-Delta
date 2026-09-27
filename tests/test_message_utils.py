@@ -104,10 +104,14 @@ def test_split_reply_does_not_split_inside_code_block() -> None:
 
 @pytest.mark.parametrize(
     ("length", "expected"),
-    [(100, 1.0), (300, 2.0), (700, 3.0)],
+    [(100, 1.3), (300, 2.05), (700, 2.9)],
 )
 def test_reply_delay_depends_on_next_message_length(
-    length: int, expected: float
+    length: int, expected: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Пауза должна ситуативно занимать от одной до трёх секунд."""
+    monkeypatch.setattr(
+        "protogen_delta.core.message_utils.random.uniform",
+        lambda lower, upper: round((lower + upper) / 2, 2),
+    )
     assert reply_delay_seconds("x" * length) == expected
