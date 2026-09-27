@@ -1495,6 +1495,11 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
     second_call = deepseek_mock.chat.await_args_list[1]
 
     assert second_call.kwargs["system_prompt"].startswith("RP PROMPT")
+    assert "RP-режим уже активен" in second_call.kwargs["system_prompt"]
+    assert "не согласовывай их заново" in second_call.kwargs["system_prompt"]
+    assert "нейтральные описания молча" in second_call.kwargs["system_prompt"]
+    assert "Не повторяй декоративные реакции" in second_call.kwargs["system_prompt"]
+    assert "принадлежностью частей тела" in second_call.kwargs["system_prompt"]
 
     assert second_call.kwargs["history"] == (
         ConversationTurn(
@@ -1582,6 +1587,7 @@ def test_response_engine_disables_only_roleplay() -> None:
     state.emotions.adjust(
         warmth=0.4,
         irritation=0.2,
+        arousal=0.6,
     )
 
     state.relationship.adjust(
@@ -1610,6 +1616,7 @@ def test_response_engine_disables_only_roleplay() -> None:
 
     assert state.emotions.warmth == pytest.approx(0.4)
     assert state.emotions.irritation == pytest.approx(0.2)
+    assert state.emotions.arousal == 0.0
 
     assert state.relationship.familiarity == pytest.approx(0.5)
     assert state.relationship.trust == pytest.approx(0.4)
@@ -1709,12 +1716,14 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     state.roleplay_active = True
     state.roleplay_configuration = "female"
     state.roleplay_character = "человек"
+    state.emotions.adjust(arousal=0.7)
     state.relationship.trust = 0.7
     state.history.append(ConversationTurn("*подхожу*", "*подняла голову*"))
     asyncio.run(engine.respond(TEST_USER_ID, "Стоп RP, объясни *TCP*"))
     assert state.roleplay_active is False
     assert state.roleplay_configuration == "male"
     assert state.roleplay_character == ""
+    assert state.emotions.arousal == 0.0
     assert state.relationship.trust == pytest.approx(0.7)
     call = deepseek.chat.await_args
     assert call is not None

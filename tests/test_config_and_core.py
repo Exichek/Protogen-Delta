@@ -345,3 +345,29 @@ def test_core_prompt_varies_response_length_by_context() -> None:
     assert (
         "Не создавай вступление, основную часть и вывод только ради структуры" in prompt
     )
+
+
+def test_roleplay_prompt_does_not_renegotiate_established_scene() -> None:
+    """RP не должен превращаться в повторяющееся обсуждение правил сцены."""
+    prompt = load_prompt("personality/rp.txt")
+
+    assert "считай сам факт ролевой игры согласованным" in prompt
+    assert "не требуют новой лекции о самостоятельности" in prompt
+    assert "задай максимум один необходимый вопрос" in prompt
+    assert "Делай это молча" in prompt
+    assert "Большинство коротких RP-ходов" in prompt
+    assert "не заканчивай постоянно фразами" in prompt
+    assert "Не копируй собственный шаблон из истории сцены" in prompt
+    assert "Внимательно различай принадлежность частей тела" in prompt
+    assert "Обращение внутри роли" in prompt
+    assert "Убирай внутренние противоречия" in prompt
+    assert "Нарастающее возбуждение" in prompt
+    assert "одного насыщенного сообщения" in prompt
+
+
+def test_protogen_lore_answers_robot_question_unambiguously() -> None:
+    """Ответ о природе Дельты не должен одновременно подтверждать и отрицать одно."""
+    prompt = load_prompt("personality/protogen_lore.txt")
+
+    assert "отвечай однозначно: нет" in prompt
+    assert "двусмысленного «точно»" in prompt

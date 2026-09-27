@@ -121,6 +121,7 @@ def test_user_state_reset_preserves_persistent_state() -> None:
 
     state.emotions.adjust(
         irritation=0.6,
+        arousal=0.5,
     )
     state.relationship.adjust(
         familiarity=0.7,
@@ -141,6 +142,7 @@ def test_user_state_reset_preserves_persistent_state() -> None:
     assert list(state.history) == []
 
     assert state.emotions.irritation == pytest.approx(0.6)
+    assert state.emotions.arousal == 0.0
     assert state.relationship.familiarity == pytest.approx(0.7)
     assert state.relationship.resentment == pytest.approx(0.4)
 

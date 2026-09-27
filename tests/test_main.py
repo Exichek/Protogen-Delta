@@ -10,18 +10,6 @@ import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
 
 
-def test_require_string_list_rejects_invalid_value() -> None:
-    """Список должен содержать только строки."""
-    with pytest.raises(
-        TypeError,
-        match="TEST должен содержать список строк",
-    ):
-        main_module._require_string_list(
-            ["ok", 123],
-            "TEST",
-        )
-
-
 def test_require_string_lists_rejects_invalid_value() -> None:
     """Словарь должен содержать списки строк."""
     with pytest.raises(
@@ -110,11 +98,6 @@ def test_main_builds_application_and_starts_polling(
     )
 
     json_data: dict[str, object] = {
-        "start_messages.json": {
-            "START_MESSAGES": [
-                "Я уже работаю",
-            ]
-        },
         "fetishes_triggers.json": {
             "bondage": [
                 "связал",
@@ -131,6 +114,7 @@ def test_main_builds_application_and_starts_polling(
 
     prompts = {
         "start_greeting.txt": "START GREETING PROMPT",
+        "repeat_start_greeting.txt": "REPEAT START GREETING PROMPT",
         "insult_classification.txt": "INSULT PROMPT",
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
@@ -311,6 +295,7 @@ def test_main_builds_application_and_starts_polling(
         call("mood_classification.txt"),
         call("fetish_role_classification.txt"),
         call("start_greeting.txt"),
+        call("repeat_start_greeting.txt"),
         call("personality/core.txt"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
@@ -362,11 +347,12 @@ def test_main_builds_application_and_starts_polling(
         start_router_call.kwargs["users_repository"],
         main_module.UsersRepository,
     )
-    assert start_router_call.kwargs["start_messages"] == [
-        "Я уже работаю",
-    ]
     assert start_router_call.kwargs["deepseek"] is deepseek_mock
     assert start_router_call.kwargs["first_start_prompt"] == "START GREETING PROMPT"
+    assert (
+        start_router_call.kwargs["repeat_start_prompt"]
+        == "REPEAT START GREETING PROMPT"
+    )
 
     create_reset_router_mock.assert_called_once()
 

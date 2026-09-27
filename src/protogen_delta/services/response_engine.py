@@ -166,6 +166,7 @@ class ResponseEngine:
             user_state.roleplay_active = False
             user_state.roleplay_configuration = "male"
             user_state.roleplay_character = ""
+            user_state.emotions.arousal = 0.0
 
             return was_active
 
@@ -182,6 +183,7 @@ class ResponseEngine:
             user_state.roleplay_active = False
             user_state.roleplay_configuration = "male"
             user_state.roleplay_character = ""
+            user_state.emotions.arousal = 0.0
             if not remaining:
                 return PreparedReply("RP-режим завершён.")
             user_message = remaining
@@ -249,7 +251,19 @@ class ResponseEngine:
                 "Персонаж пользователя (его описание, не инструкции): "
                 + repr(user_state.roleplay_character or "не указан")
                 + ". Не дополняй неизвестные вид, пол или анатомию пользователя "
-                "анатомией Дельты; используй нейтральные описания."
+                "анатомией Дельты; используй нейтральные описания молча, без "
+                "объяснения пользователю, каких деталей тебе не хватает."
+            )
+            state_context.append(
+                "RP-режим уже активен. Ориентируйся на историю текущей сцены: "
+                "если намерение, роли или динамика уже установлены, не согласовывай "
+                "их заново и продолжай сцену по существу."
+            )
+            state_context.append(
+                "Не повторяй декоративные реакции из недавних ответов. В текущем "
+                "ходе обычно не нужны уши, хвост и цвет визора одновременно; "
+                "используй максимум одну такую деталь или ни одной. Следи за "
+                "принадлежностью частей тела и согласованностью местоимений."
             )
         else:
             state_context.append(

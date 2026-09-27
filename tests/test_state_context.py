@@ -118,3 +118,15 @@ def test_state_context_includes_arousal_in_intimate_context() -> None:
     )
 
     assert any("выраженное возбуждение" in line for line in context)
+
+
+def test_state_context_escalates_arousal_without_forcing_roughness() -> None:
+    """Сильное возбуждение должно усиливать сцену без автоматической грубости."""
+    state = UserState()
+    state.emotions.adjust(arousal=0.80)
+
+    context = build_state_context(state, include_intimate=True)
+
+    assert any("очень сильное" in line for line in context)
+    assert any("Грубость усиливай только тогда" in line for line in context)
+    assert any("один насыщенный ответ" in line for line in context)

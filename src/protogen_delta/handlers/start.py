@@ -39,9 +39,20 @@ FIRST_START_FALLBACK_BODY = (
     "Ну а дальше разберёмся по ходу дела. С чего начнём?"
 )
 
+REPEAT_START_FALLBACK = (
+    "Снова привет. Я на месте: можем просто поболтать, продолжить RP, "
+    "разобрать вопрос или проверить что-нибудь актуальное вроде погоды и курса. "
+    "Что сегодня делаем?"
+)
+
 _FIRST_START_REQUEST = (
     "Продолжи уже начатое первое знакомство с новым пользователем. "
     "Не здоровайся и не представляйся заново."
+)
+
+_REPEAT_START_REQUEST = (
+    "Пользователь снова вызвал /start. Поприветствуй его заново одним живым "
+    "сообщением и кратко напомни о нескольких своих возможностях."
 )
 
 
@@ -73,11 +84,35 @@ async def _generate_first_start_message(
     return f"{prefix}\n\n{generated}"
 
 
+async def _generate_repeat_start_message(
+    deepseek: DeepSeekService,
+    prompt: str,
+) -> str:
+    """Сгенерировать новое приветствие для уже зарегистрированного пользователя."""
+    try:
+        generated = await deepseek.chat(
+            system_prompt=prompt,
+            user_message=_REPEAT_START_REQUEST,
+        )
+    except DeepSeekError:
+        logger.warning(
+            "Не удалось сгенерировать повторное приветствие через DeepSeek",
+            exc_info=True,
+        )
+        return REPEAT_START_FALLBACK
+
+    generated = generated.strip()
+    if not generated:
+        logger.warning("DeepSeek вернул пустое повторное приветствие")
+        return REPEAT_START_FALLBACK
+    return generated
+
+
 def create_start_router(
     users_repository: UsersRepository,
-    start_messages: list[str],
     deepseek: DeepSeekService,
     first_start_prompt: str,
+    repeat_start_prompt: str | None = None,
     user_states: UserStateStore | None = None,
 ) -> Router:
     """Создать роутер команды /start."""
@@ -121,10 +156,10 @@ def create_start_router(
             logger.info("Зарегистрирован новый пользователь: %s", user_id)
             return
 
-        if start_messages:
-            reply = random.choice(start_messages)
-        else:
-            reply = "Я уже запущен :D"
+        reply = await _generate_repeat_start_message(
+            deepseek,
+            repeat_start_prompt or first_start_prompt,
+        )
 
         for chunk in split_message(reply):
             await message.answer(chunk)

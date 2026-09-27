@@ -43,14 +43,6 @@ from protogen_delta.services.tools import ToolExecutor, default_registry
 logger = logging.getLogger(__name__)
 
 
-def _require_string_list(value: object, name: str) -> list[str]:
-    """Проверить, что значение является списком строк."""
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise TypeError(f"{name} должен содержать список строк")
-
-    return cast(list[str], value)
-
-
 def _require_string_lists(
     value: object,
     name: str,
@@ -124,12 +116,6 @@ async def main() -> None:
             persistence=user_state_repository,
         )
 
-        start_data = load_json("start_messages.json")
-        start_messages = _require_string_list(
-            start_data.get("START_MESSAGES", []),
-            "START_MESSAGES",
-        )
-
         fetish_triggers = _require_string_lists(
             load_json("fetishes_triggers.json"),
             "fetishes_triggers.json",
@@ -151,6 +137,9 @@ async def main() -> None:
 
         first_start_prompt = load_prompt(
             "start_greeting.txt",
+        )
+        repeat_start_prompt = load_prompt(
+            "repeat_start_greeting.txt",
         )
 
         core_prompt = load_prompt(
@@ -227,9 +216,9 @@ async def main() -> None:
         start_router = create_start_router(
             users_repository=users_repository,
             user_states=user_states,
-            start_messages=start_messages,
             deepseek=deepseek,
             first_start_prompt=first_start_prompt,
+            repeat_start_prompt=repeat_start_prompt,
         )
         help_router = create_help_router()
 

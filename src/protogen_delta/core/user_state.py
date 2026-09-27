@@ -206,6 +206,7 @@ class UserState:
         self.mood = "neutral"
         self.reply_count = 0
         self.history.clear()
+        self.emotions.arousal = 0.0
         self.roleplay_active = False
         self.roleplay_configuration = "male"
         self.roleplay_character = ""
