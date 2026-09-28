@@ -125,3 +125,13 @@ def test_real_fetish_triggers_handle_new_live_scene_examples() -> None:
     assert request == ["humiliation"]
     assert combined == ["mutual_masturbation", "handjob"]
     assert receiving == ["anal"]
+
+
+def test_real_fetish_triggers_recognize_logged_humiliation_requests() -> None:
+    """Английское название и просьбы из живого диалога распознаются сразу."""
+    triggers = load_json("fetishes_triggers.json")
+
+    assert "humiliation" in detect_fetishes("humiliation :3", triggers)
+    assert "humiliation" in detect_fetishes("зачморишь меня?", triggers)
+    assert "humiliation" in detect_fetishes("обзывай меня грубее", triggers)
+    assert "dirtytalk" in detect_fetishes("не стесняйся мата", triggers)

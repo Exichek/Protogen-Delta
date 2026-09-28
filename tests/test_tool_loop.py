@@ -134,3 +134,94 @@ def test_loop_forces_web_search_for_explicit_request(
         "type": "function",
         "function": {"name": "web_search"},
     }
+
+
+def test_chat_skips_tool_schemas_when_composer_selects_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry([Tool("test", "test", {}, (), AsyncMock(return_value={}))])
+        ),
+    )
+
+    assert asyncio.run(service.chat("system", "Привет", tool_names=())) == "Итог"
+    assert "tools" not in client.chat.completions.create.await_args.kwargs
+
+
+def test_chat_handles_selected_tool_that_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Запрос к отсутствующему Brave не должен возвращать все остальные схемы."""
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "fetch_web_page",
+                        "fetch",
+                        {"url": "url"},
+                        ("url",),
+                        AsyncMock(return_value={}),
+                    )
+                ]
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        service.chat(
+            "system",
+            "Найди актуальные новости",
+            tool_names={"web_search"},
+        )
+    )
+
+    assert result == "Итог"
+    kwargs = client.chat.completions.create.await_args.kwargs
+    assert "tools" not in kwargs
+    assert "Поиск по интернету не настроен" in kwargs["messages"][1]["content"]
+
+
+def test_chat_exposes_only_requested_live_data_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock(return_value={})
+    tools = [
+        Tool("get_current_time", "time", {}, (), handler),
+        Tool("get_exchange_rate", "rate", {}, (), handler),
+        Tool("get_weather", "weather", {}, (), handler),
+        Tool("fetch_web_page", "fetch", {}, (), handler),
+        Tool("unused", "unused", {}, (), handler),
+    ]
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry(tools)),
+    )
+    selected = {
+        "get_current_time",
+        "get_exchange_rate",
+        "get_weather",
+        "fetch_web_page",
+    }
+
+    assert asyncio.run(service.chat("system", "данные", tool_names=selected)) == "Итог"
+    schemas = client.chat.completions.create.await_args.kwargs["tools"]
+    assert {schema["function"]["name"] for schema in schemas} == selected

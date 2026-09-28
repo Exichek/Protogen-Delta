@@ -33,6 +33,8 @@ def test_registry_and_time() -> None:
         x["function"]["parameters"]["additionalProperties"] is False
         for x in registry.schemas()
     )
+    filtered = registry.schemas({"get_weather"})
+    assert [schema["function"]["name"] for schema in filtered] == ["get_weather"]
     tool = next(iter(registry.tools.values()))
     with pytest.raises(ValueError):
         ToolRegistry([tool, tool])

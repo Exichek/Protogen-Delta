@@ -130,6 +130,7 @@ def test_response_engine_routes_greeting_through_chat() -> None:
         system_prompt=ANY,
         user_message="Привет!",
         history=(),
+        tool_names=frozenset(),
     )
 
     assert list(engine._user_states.get(TEST_USER_ID).history) == [
@@ -262,7 +263,7 @@ def test_response_engine_treats_sticker_as_short_contextual_reaction() -> None:
     prompt = call.kwargs["system_prompt"]
     assert "одной короткой естественной реакцией" in prompt
     assert "впиши смысл стикера в текущую сцену" in prompt
-    assert "только репрезентативный статичный кадр" in prompt
+    assert "последовательность кадров" in prompt
     assert "ровно 2 визуальных элементов" in prompt
 
 
@@ -343,7 +344,11 @@ def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
     prompt = call.kwargs["system_prompt"]
     assert "создатель Дельты" in prompt
     assert "Долговременный смешной момент" in prompt
-    memory.context.assert_awaited_once_with(TEST_USER_ID)
+    memory.context.assert_awaited_once_with(
+        TEST_USER_ID,
+        "Помнишь тот мем?",
+        char_limit=2000,
+    )
     memory.note_message.assert_awaited_once_with(
         TEST_USER_ID,
         "Помнишь тот мем?",
@@ -363,7 +368,11 @@ def test_response_engine_keeps_replying_when_memory_storage_fails() -> None:
     result = asyncio.run(engine.respond(TEST_USER_ID, "Привет"))
 
     assert result == "Ответ"
-    memory.context.assert_awaited_once_with(TEST_USER_ID)
+    memory.context.assert_awaited_once_with(
+        TEST_USER_ID,
+        "Привет",
+        char_limit=2000,
+    )
     memory.note_message.assert_awaited_once()
 
 
@@ -437,6 +446,7 @@ def test_response_engine_updates_mood_and_calls_chat() -> None:
         system_prompt=ANY,
         user_message="Как дела?",
         history=(),
+        tool_names=frozenset(),
     )
 
     role_mock.classify.assert_not_awaited()
@@ -776,6 +786,7 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp() -> None:
         system_prompt=ANY,
         user_message="Ты меня связал?",
         history=(),
+        tool_names=frozenset(),
     )
 
 
@@ -1036,6 +1047,7 @@ def test_response_engine_does_not_add_context_for_neutral_message() -> None:
         system_prompt=ANY,
         user_message="Как установить Docker?",
         history=(),
+        tool_names=frozenset(),
     )
 
 
@@ -1162,6 +1174,7 @@ def test_response_engine_passes_user_history_to_deepseek() -> None:
         system_prompt=ANY,
         user_message="Как меня зовут?",
         history=(previous_turn,),
+        tool_names=frozenset(),
     )
 
     assert list(user_state.history) == [
@@ -1246,7 +1259,9 @@ def test_response_engine_serializes_requests_from_same_user() -> None:
             system_prompt: str,
             user_message: str,
             history: tuple[ConversationTurn, ...],
+            tool_names: object,
         ) -> str:
+            del system_prompt, history, tool_names
             nonlocal chat_calls
 
             chat_calls += 1
@@ -1395,7 +1410,9 @@ def test_response_engine_reset_waits_for_active_request() -> None:
             system_prompt: str,
             user_message: str,
             history: tuple[ConversationTurn, ...],
+            tool_names: object,
         ) -> str:
+            del system_prompt, user_message, history, tool_names
             request_started.set()
             await release_request.wait()
             return "Ответ"

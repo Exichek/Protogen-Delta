@@ -28,7 +28,10 @@ _QUERY_META_PREFIXES = (
     "type:",
 )
 _MAX_JSON_BYTES = 4 * 1024 * 1024
-MAX_MEDIA_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+# Telegram Bot API принимает отправляемые ботом видео размером до 50 МБ.
+# Оставляем небольшой запас на границе ограничения.
+MAX_VIDEO_BYTES = 49 * 1024 * 1024
 
 
 class E621Error(RuntimeError):
@@ -63,8 +66,13 @@ class E621Post:
 
     @property
     def media_url(self) -> str | None:
-        """Выбрать файл разумного размера, затем превью."""
-        if self.file_size <= MAX_MEDIA_BYTES and self.file_url:
+        """Выбрать оригинал в пределах Telegram-лимита, затем превью."""
+        limit = (
+            MAX_VIDEO_BYTES
+            if self.file_ext.casefold() in {"mp4", "webm"}
+            else MAX_IMAGE_BYTES
+        )
+        if self.file_size <= limit and self.file_url:
             return self.file_url
         return self.sample_url or self.preview_url
 
@@ -192,8 +200,10 @@ class E621Client:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise E621Error("e621 вернул неожиданный ответ.") from error
 
-    async def download(self, url: str) -> bytes:
+    async def download(self, url: str, *, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
         """Загрузить медиа с тем же User-Agent и строгим лимитом размера."""
+        if max_bytes <= 0:
+            raise ValueError("max_bytes должен быть больше нуля")
         await self._throttle()
         try:
             async with self._session(30) as session:
@@ -202,7 +212,7 @@ class E621Client:
                 ) as response:
                     if response.status != 200:
                         raise E621Error(f"Файл e621 вернул HTTP {response.status}.")
-                    return await _read_limited(response.content, MAX_MEDIA_BYTES)
+                    return await _read_limited(response.content, max_bytes)
         except E621Error:
             raise
         except Exception as error:

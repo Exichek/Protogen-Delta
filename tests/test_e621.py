@@ -110,6 +110,25 @@ def test_post_parsing_and_media_fallback() -> None:
     assert post.artists == ("someone",)
 
 
+def test_video_uses_original_above_old_image_limit() -> None:
+    post = E621Post(
+        post_id=10,
+        rating="e",
+        file_url="video",
+        file_ext="webm",
+        file_size=30_000_000,
+        sample_url="sample",
+        preview_url="preview",
+        fav_count=1,
+        score=1,
+        artists=(),
+        tags=frozenset(),
+        sources=(),
+    )
+
+    assert post.media_url == "video"
+
+
 def test_e621_client_validates_configuration() -> None:
     with pytest.raises(ValueError, match="USER_AGENT"):
         E621Client(" ")
@@ -230,6 +249,8 @@ def test_client_download_returns_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
         client, "_session", lambda timeout: _Session(_Response(200, b"abc"))
     )
     assert asyncio.run(client.download("https://static.example/a.jpg")) == b"abc"
+    with pytest.raises(ValueError, match="больше нуля"):
+        asyncio.run(client.download("https://static.example/a.jpg", max_bytes=0))
 
 
 def test_client_download_reports_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,8 +288,8 @@ class _Client:
         self.queries.append(query)
         return self.posts
 
-    async def download(self, url: str) -> bytes:
-        del url
+    async def download(self, url: str, *, max_bytes: int) -> bytes:
+        del url, max_bytes
         return b"image"
 
 
@@ -292,6 +313,7 @@ def _message(text: str = "/e6 dragon", user_id: int = 7) -> tuple[Message, Mock]
     message.answer_photo = AsyncMock()
     message.answer_animation = AsyncMock()
     message.answer_video = AsyncMock()
+    message.answer_document = AsyncMock()
     return cast(Message, message), message
 
 
@@ -338,6 +360,7 @@ def test_animation_and_video_use_matching_telegram_methods(
     for post_id, ext, method in [
         (1, "gif", "answer_animation"),
         (2, "mp4", "answer_video"),
+        (3, "webm", "answer_document"),
     ]:
         message, raw = _message(user_id=post_id)
         router = create_e621_router(
