@@ -7,6 +7,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+DEFAULT_E621_USER_AGENT = (
+    "ProtogenDelta/0.1 (by Exichek; " "https://github.com/Exichek/Protogen-Delta)"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -23,6 +27,8 @@ class Settings:
     admin_ids: frozenset[int] = frozenset()
     creator_id: int | None = None
     brave_search_api_key: str | None = None
+    e621_user_agent: str = DEFAULT_E621_USER_AGENT
+    e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
@@ -184,6 +190,10 @@ def load_settings() -> Settings:
         os.getenv("PROACTIVE_COOLDOWN_SECONDS", "86400.0"),
         "PROACTIVE_COOLDOWN_SECONDS",
     )
+    e621_request_interval_seconds = _parse_non_negative_float(
+        os.getenv("E621_REQUEST_INTERVAL_SECONDS", "1.0"),
+        "E621_REQUEST_INTERVAL_SECONDS",
+    )
 
     return Settings(
         telegram_token=telegram_token,
@@ -213,6 +223,14 @@ def load_settings() -> Settings:
         ),
         creator_id=creator_id,
         brave_search_api_key=brave_search_api_key or None,
+        e621_user_agent=(
+            os.getenv(
+                "E621_USER_AGENT",
+                DEFAULT_E621_USER_AGENT,
+            ).strip()
+            or DEFAULT_E621_USER_AGENT
+        ),
+        e621_request_interval_seconds=e621_request_interval_seconds,
         rate_limit_seconds=rate_limit_seconds,
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,

@@ -264,6 +264,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.command for command in commands] == [
         "start",
         "randomart",
+        "e6",
         "rp",
         "adult",
         "reset",
@@ -273,6 +274,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.description for command in commands] == [
         "🚀 Запустить бота",
         "🎨 Случайный арт",
+        "🔎 Поиск артов e621 по тегам",
         "🎭 Управление RP — /rp off",
         "🔞 Выбрать возрастной режим",
         "🧹 Полностью очистить память",

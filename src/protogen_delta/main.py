@@ -20,6 +20,7 @@ from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.documents import create_document_router
+from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.media import create_media_router
@@ -30,11 +31,13 @@ from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
 from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.memory import MemoryService
@@ -111,6 +114,7 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
         memories_repository = MemoriesRepository(settings.data_dir)
+        e621_history = E621HistoryRepository(settings.data_dir)
         memory = MemoryService(memories_repository)
 
         bot_state = BotState()
@@ -242,6 +246,15 @@ async def main() -> None:
         )
 
         adult_router = create_adult_router(user_states)
+        e621_router = create_e621_router(
+            E621Client(
+                settings.e621_user_agent,
+                proxy_url=settings.telegram_proxy_url,
+                request_interval=settings.e621_request_interval_seconds,
+            ),
+            e621_history,
+            user_states,
+        )
 
         rate_limiter = UserRateLimiter(
             cooldown_seconds=settings.rate_limit_seconds,
@@ -292,6 +305,7 @@ async def main() -> None:
         dispatcher.include_router(admin_router)
         dispatcher.include_router(creator_router)
         dispatcher.include_router(adult_router)
+        dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
         dispatcher.include_router(unknown_command_router)
