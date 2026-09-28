@@ -16,6 +16,7 @@ from protogen_delta.handlers.voice import (
     AUDIO_TOO_LARGE_REPLY,
     create_voice_router,
 )
+from protogen_delta.services.audio_analysis import AudioAnalysis
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.speech import (
     MAX_AUDIO_BYTES,
@@ -97,9 +98,22 @@ def test_voice_is_transcribed_and_sent_as_user_message() -> None:
     answer.assert_awaited_once_with("Нормально.")
 
 
-def test_audio_caption_and_truncation_are_preserved() -> None:
+def test_audio_caption_and_truncation_are_preserved(monkeypatch: Any) -> None:
     """Подпись аудиофайла должна дополнять расшифровку и отметку об обрезании."""
     router, engine, _, _ = _router(Transcript("слова песни", "ru", truncated=True))
+    monkeypatch.setattr(
+        "protogen_delta.handlers.voice.analyze_audio",
+        lambda data: AudioAnalysis(
+            30,
+            48_000,
+            2,
+            -14,
+            -1,
+            2,
+            8,
+            1800,
+        ),
+    )
     audio = SimpleNamespace(file_id="audio-id", file_size=100, duration=30)
     message, _ = _message(audio=audio, caption="Что тут по смыслу?")
 
@@ -110,6 +124,7 @@ def test_audio_caption_and_truncation_are_preserved() -> None:
     assert call.args[1].startswith("Что тут по смыслу?")
     assert "Расшифровка речи" in call.kwargs["model_message_override"]
     assert "обрезана" in call.kwargs["model_message_override"]
+    assert "48000 Гц" in call.kwargs["model_message_override"]
 
 
 def test_large_or_long_audio_is_rejected() -> None:
@@ -125,6 +140,51 @@ def test_large_or_long_audio_is_rejected() -> None:
         bot.download.assert_not_awaited()
         transcriber.transcribe.assert_not_awaited()
         engine.respond_and_deliver.assert_not_awaited()
+
+
+def test_audio_without_sender_is_ignored() -> None:
+    router, engine, bot, transcriber = _router()
+    audio = SimpleNamespace(file_id="audio-id", file_size=100, duration=30)
+    message, answer = _message(audio=audio)
+    message.from_user = None
+
+    asyncio.run(router.message.handlers[0].callback(message))
+
+    answer.assert_not_awaited()
+    bot.download.assert_not_awaited()
+    transcriber.transcribe.assert_not_awaited()
+    engine.respond_and_deliver.assert_not_awaited()
+
+
+def test_music_without_recognized_speech_uses_signal_analysis(
+    monkeypatch: Any,
+) -> None:
+    """Музыка без расшифровки должна получить ответ по измеримым метрикам."""
+    router, engine, _, transcriber = _router()
+    transcriber.transcribe.side_effect = SpeechRecognitionError("no speech")
+    monkeypatch.setattr(
+        "protogen_delta.handlers.voice.analyze_audio",
+        lambda data: AudioAnalysis(
+            duration_seconds=30,
+            source_sample_rate=48_000,
+            channels=2,
+            loudness_dbfs=-14,
+            peak_dbfs=-1,
+            silence_percent=2,
+            dynamic_range_db=8,
+            spectral_centroid_hz=1800,
+        ),
+    )
+    audio = SimpleNamespace(file_id="music", file_size=100, duration=30)
+    message, answer = _message(audio=audio, caption="Как звучит?")
+
+    asyncio.run(router.message.handlers[0].callback(message))
+
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert "48000 Гц" in call.kwargs["model_message_override"]
+    assert "не выдумывай жанр" in call.kwargs["trusted_input_context"]
+    answer.assert_awaited_once_with("Нормально.")
 
 
 def test_download_recognition_and_busy_errors_are_handled() -> None:

@@ -12,6 +12,7 @@ from aiogram.types import Message
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.documents import (
     MAX_DOCUMENT_BYTES,
     DocumentReadError,
@@ -102,12 +103,21 @@ def create_document_router(
 
         try:
             async with show_typing(message, bot):
+                images = tuple(
+                    ImageInput(
+                        data=image.data,
+                        mime_type=image.mime_type,
+                        label=image.label,
+                    )
+                    for image in extracted.images
+                )
                 await response_engine.respond_and_deliver(
                     user_id,
                     request,
                     create_reply_delivery(message, bot),
                     attachment_text=attachment_text,
                     attachment_name=f"{file_name} ({extracted.kind})",
+                    images=images,
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)

@@ -4,7 +4,7 @@ import asyncio
 import io
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import ANY, AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock, call
 
 import pytest
 from aiogram import Bot, Router
@@ -20,6 +20,7 @@ from protogen_delta.handlers.media import (
     create_media_router,
 )
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 
 TEST_USER_ID = 123456
@@ -132,8 +133,8 @@ def test_static_sticker_passes_emoji_and_webp() -> None:
     assert call.kwargs["images"][0].label == "статический стикер"
 
 
-def test_animated_tgs_sticker_uses_thumbnail() -> None:
-    """TGS-стикер пока использует JPEG-превью."""
+def test_invalid_tgs_sticker_falls_back_to_thumbnail() -> None:
+    """Повреждённый TGS должен использовать Telegram-превью как запасной путь."""
     router, engine, bot = _router(JPEG_DATA)
     thumbnail = SimpleNamespace(file_id="thumb-id", file_size=len(JPEG_DATA))
     sticker = SimpleNamespace(
@@ -148,9 +149,43 @@ def test_animated_tgs_sticker_uses_thumbnail() -> None:
 
     asyncio.run(router.message.handlers[2].callback(message))
 
-    bot.download.assert_awaited_once_with("thumb-id", destination=ANY)
+    assert bot.download.await_args_list == [
+        call("animated-id", destination=ANY),
+        call("thumb-id", destination=ANY),
+    ]
     image = engine.respond_and_deliver.await_args.kwargs["images"][0]
     assert image.label == "превью TGS-стикера"
+
+
+def test_animated_tgs_sticker_uses_rendered_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Валидный TGS должен передавать последовательность кадров без thumbnail."""
+    router, engine, bot = _router(b"tgs")
+    frames = (
+        ImageInput(PNG_DATA, "image/png", "TGS-анимация, кадр 1"),
+        ImageInput(PNG_DATA, "image/png", "TGS-анимация, кадр 2"),
+    )
+    monkeypatch.setattr(
+        "protogen_delta.handlers.media.extract_tgs_frames",
+        lambda *args, **kwargs: frames,
+    )
+    sticker = SimpleNamespace(
+        file_id="animated-id",
+        file_size=100,
+        is_animated=True,
+        is_video=False,
+        emoji="🔥",
+        thumbnail=None,
+    )
+    message, _ = _message(sticker=sticker)
+
+    asyncio.run(router.message.handlers[2].callback(message))
+
+    bot.download.assert_awaited_once_with("animated-id", destination=ANY)
+    call_args = engine.respond_and_deliver.await_args
+    assert call_args is not None
+    assert call_args.kwargs["images"] == frames
 
 
 def test_video_sticker_uses_actual_file_without_thumbnail() -> None:

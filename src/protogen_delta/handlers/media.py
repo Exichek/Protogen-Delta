@@ -16,6 +16,7 @@ from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.tgs_frames import MAX_TGS_BYTES, extract_tgs_frames
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +336,43 @@ def create_media_router(
             frames,
         )
 
+    async def handle_tgs_sticker(message: Message) -> None:
+        """Скачать и отрисовать TGS, используя thumbnail только как запасной путь."""
+        sticker = message.sticker
+        if sticker is None:
+            return
+        frames: tuple[ImageInput, ...] = ()
+        if sticker.file_size is None or sticker.file_size <= MAX_TGS_BYTES:
+            destination = io.BytesIO()
+            try:
+                await bot.download(sticker.file_id, destination=destination)
+                frames = await asyncio.to_thread(
+                    extract_tgs_frames,
+                    destination.getvalue(),
+                    label="TGS-анимация стикера",
+                )
+            except TelegramAPIError, OSError:
+                logger.warning("Не удалось скачать TGS-стикер", exc_info=True)
+        if frames:
+            await respond_with_images(
+                message,
+                _media_message(message, "анимированный стикер", sticker.emoji),
+                frames,
+            )
+            return
+        thumbnail = sticker.thumbnail
+        if thumbnail is not None:
+            await handle_image(
+                message,
+                file_id=thumbnail.file_id,
+                mime_type="image/jpeg",
+                file_size=thumbnail.file_size,
+                label="превью TGS-стикера",
+                emoji=sticker.emoji,
+            )
+            return
+        await message.answer(UNSUPPORTED_IMAGE_REPLY)
+
     @router.message(F.photo)
     async def handle_photo(message: Message) -> None:
         """Передать модели фотографию в максимальном доступном размере."""
@@ -391,18 +429,7 @@ def create_media_router(
                 emoji=sticker.emoji,
             )
             return
-        thumbnail = sticker.thumbnail
-        if thumbnail is None:
-            await message.answer(UNSUPPORTED_IMAGE_REPLY)
-            return
-        await handle_image(
-            message,
-            file_id=thumbnail.file_id,
-            mime_type="image/jpeg",
-            file_size=thumbnail.file_size,
-            label="превью TGS-стикера",
-            emoji=sticker.emoji,
-        )
+        await handle_tgs_sticker(message)
 
     @router.message(F.animation)
     async def handle_animation(message: Message) -> None:
