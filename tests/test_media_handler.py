@@ -39,6 +39,7 @@ def _message(**values: Any) -> tuple[Message, AsyncMock]:
     message.document = values.pop("document", None)
     message.sticker = values.pop("sticker", None)
     message.animation = values.pop("animation", None)
+    message.video = values.pop("video", None)
     for key, value in values.items():
         setattr(message, key, value)
     message.answer = AsyncMock()
@@ -131,8 +132,8 @@ def test_static_sticker_passes_emoji_and_webp() -> None:
     assert call.kwargs["images"][0].label == "статический стикер"
 
 
-def test_animated_sticker_uses_thumbnail() -> None:
-    """Для анимированного стикера должно использоваться его JPEG-превью."""
+def test_animated_tgs_sticker_uses_thumbnail() -> None:
+    """TGS-стикер пока использует JPEG-превью."""
     router, engine, bot = _router(JPEG_DATA)
     thumbnail = SimpleNamespace(file_id="thumb-id", file_size=len(JPEG_DATA))
     sticker = SimpleNamespace(
@@ -149,15 +150,38 @@ def test_animated_sticker_uses_thumbnail() -> None:
 
     bot.download.assert_awaited_once_with("thumb-id", destination=ANY)
     image = engine.respond_and_deliver.await_args.kwargs["images"][0]
-    assert image.label == "превью анимированного стикера"
+    assert image.label == "превью TGS-стикера"
 
 
-def test_sticker_without_thumbnail_reports_unsupported_format() -> None:
-    """Анимация без превью должна получать понятный отказ."""
+def test_video_sticker_uses_actual_file_without_thumbnail() -> None:
+    """Видеостикер должен декодировать сам файл, а не требовать превью."""
     router, engine, _ = _router(JPEG_DATA)
     sticker = SimpleNamespace(
+        file_id="video-sticker",
+        file_size=len(JPEG_DATA),
         is_animated=False,
         is_video=True,
+        emoji="🔥",
+        thumbnail=None,
+    )
+    message, answer = _message(sticker=sticker)
+
+    asyncio.run(router.message.handlers[2].callback(message))
+
+    answer.assert_awaited_once_with("Вижу изображение.")
+    assert (
+        "видеостикер" in engine.respond_and_deliver.await_args.kwargs["images"][0].label
+    )
+
+
+def test_tgs_sticker_without_thumbnail_reports_unsupported() -> None:
+    router, engine, _ = _router(JPEG_DATA)
+    sticker = SimpleNamespace(
+        file_id="tgs",
+        file_size=10,
+        is_animated=True,
+        is_video=False,
+        emoji="🔥",
         thumbnail=None,
     )
     message, answer = _message(sticker=sticker)
@@ -168,35 +192,45 @@ def test_sticker_without_thumbnail_reports_unsupported_format() -> None:
     engine.respond_and_deliver.assert_not_awaited()
 
 
-def test_telegram_animation_uses_thumbnail_as_visual_frame() -> None:
-    """Telegram GIF должен передавать модели доступный статичный кадр."""
+def test_telegram_animation_uses_actual_file() -> None:
+    """Telegram GIF должен декодировать сам файл."""
     router, engine, bot = _router(JPEG_DATA)
     thumbnail = SimpleNamespace(file_id="gif-thumb", file_size=len(JPEG_DATA))
-    animation = SimpleNamespace(thumbnail=thumbnail)
+    animation = SimpleNamespace(
+        file_id="gif-file",
+        file_size=len(JPEG_DATA),
+        thumbnail=thumbnail,
+    )
     message, _ = _message(animation=animation, caption="Что скажешь?")
 
     asyncio.run(router.message.handlers[3].callback(message))
 
-    bot.download.assert_awaited_once_with("gif-thumb", destination=ANY)
+    bot.download.assert_awaited_once_with("gif-file", destination=ANY)
     call = engine.respond_and_deliver.await_args
     assert call is not None
     assert call.args[1] == "Что скажешь?"
-    assert call.kwargs["images"][0].label == "кадр GIF-анимации"
+    assert "GIF-анимация" in call.kwargs["images"][0].label
 
 
-def test_telegram_animation_without_thumbnail_is_rejected() -> None:
-    """GIF без доступного Telegram-превью должен получить понятный отказ."""
+def test_telegram_animation_without_thumbnail_still_uses_file() -> None:
+    """GIF без Telegram-превью всё равно должен обрабатываться по исходнику."""
     router, engine, _ = _router(JPEG_DATA)
-    message, answer = _message(animation=SimpleNamespace(thumbnail=None))
+    message, answer = _message(
+        animation=SimpleNamespace(
+            file_id="gif-file",
+            file_size=len(JPEG_DATA),
+            thumbnail=None,
+        )
+    )
 
     asyncio.run(router.message.handlers[3].callback(message))
 
-    answer.assert_awaited_once_with(UNSUPPORTED_IMAGE_REPLY)
-    engine.respond_and_deliver.assert_not_awaited()
+    answer.assert_awaited_once_with("Вижу изображение.")
+    engine.respond_and_deliver.assert_awaited_once()
 
 
-def test_animation_document_uses_thumbnail() -> None:
-    """MP4-анимация, отправленная файлом, не должна уходить в документы."""
+def test_animation_document_uses_actual_file() -> None:
+    """MP4-анимация, отправленная файлом, декодируется по исходнику."""
     router, engine, bot = _router(JPEG_DATA)
     thumbnail = SimpleNamespace(file_id="file-thumb", file_size=len(JPEG_DATA))
     document = SimpleNamespace(
@@ -210,13 +244,13 @@ def test_animation_document_uses_thumbnail() -> None:
 
     asyncio.run(router.message.handlers[4].callback(message))
 
-    bot.download.assert_awaited_once_with("file-thumb", destination=ANY)
+    bot.download.assert_awaited_once_with("animation-file", destination=ANY)
     image = engine.respond_and_deliver.await_args.kwargs["images"][0]
-    assert "отправленной файлом" in image.label
+    assert "файлом" in image.label
 
 
-def test_animation_document_filter_requires_supported_video_and_thumbnail() -> None:
-    """Роутер должен перехватывать только анимационные файлы с превью."""
+def test_animation_document_filter_requires_supported_video() -> None:
+    """Роутер должен перехватывать поддерживаемые видео даже без превью."""
     thumbnail = SimpleNamespace(file_id="thumb", file_size=10)
     message, _ = _message(
         document=SimpleNamespace(
@@ -228,7 +262,7 @@ def test_animation_document_filter_requires_supported_video_and_thumbnail() -> N
     assert _has_supported_animation_document(message) is True
 
     message.document.thumbnail = None  # type: ignore[union-attr]
-    assert _has_supported_animation_document(message) is False
+    assert _has_supported_animation_document(message) is True
 
     cast(Any, message).document = SimpleNamespace(
         mime_type="application/octet-stream",
@@ -236,6 +270,47 @@ def test_animation_document_filter_requires_supported_video_and_thumbnail() -> N
         thumbnail=thumbnail,
     )
     assert _has_supported_animation_document(message) is True
+
+
+def test_regular_video_uses_multiple_frame_pipeline() -> None:
+    router, engine, bot = _router(JPEG_DATA)
+    video = SimpleNamespace(file_id="video-file", file_size=len(JPEG_DATA))
+    message, _ = _message(video=video, caption="Что происходит?")
+
+    asyncio.run(router.message.handlers[5].callback(message))
+
+    bot.download.assert_awaited_once_with("video-file", destination=ANY)
+    call = engine.respond_and_deliver.await_args
+    assert call.args[1] == "Что происходит?"
+    assert "видео" in call.kwargs["images"][0].label
+
+
+def test_moving_media_reports_size_format_and_download_errors() -> None:
+    large_router, large_engine, large_bot = _router(JPEG_DATA)
+    large, large_answer = _message(
+        video=SimpleNamespace(file_id="large", file_size=MAX_IMAGE_BYTES + 1)
+    )
+    asyncio.run(large_router.message.handlers[5].callback(large))
+    large_answer.assert_awaited_once_with(IMAGE_TOO_LARGE_REPLY)
+    large_bot.download.assert_not_awaited()
+    large_engine.respond_and_deliver.assert_not_awaited()
+
+    broken_router, broken_engine, _ = _router(b"not-video")
+    broken, broken_answer = _message(
+        video=SimpleNamespace(file_id="broken", file_size=9)
+    )
+    asyncio.run(broken_router.message.handlers[5].callback(broken))
+    broken_answer.assert_awaited_once_with(UNSUPPORTED_IMAGE_REPLY)
+    broken_engine.respond_and_deliver.assert_not_awaited()
+
+    error_router, error_engine, error_bot = _router(JPEG_DATA)
+    error_bot.download.side_effect = OSError("network")
+    failed, failed_answer = _message(
+        video=SimpleNamespace(file_id="failed", file_size=9)
+    )
+    asyncio.run(error_router.message.handlers[5].callback(failed))
+    failed_answer.assert_awaited_once_with(IMAGE_DOWNLOAD_ERROR_REPLY)
+    error_engine.respond_and_deliver.assert_not_awaited()
 
 
 def test_large_image_is_rejected_before_download() -> None:

@@ -18,6 +18,7 @@ dependencies = [
     "python-docx (>=1.2,<2.0)",
     "openpyxl (>=3.1,<4.0)",
     "faster-whisper (>=1.2,<2.0)",
+    "av (>=16,<19)",
     "tokenizers (>=0.22,<1.0)",
 ]
 

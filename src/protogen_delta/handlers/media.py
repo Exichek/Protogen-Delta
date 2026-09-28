@@ -13,6 +13,7 @@ from aiogram.types import Message
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 
@@ -72,9 +73,9 @@ def _has_supported_image_document(message: Message) -> bool:
 
 
 def _has_supported_animation_document(message: Message) -> bool:
-    """Распознать отправленную файлом Telegram-анимацию с превью."""
+    """Распознать поддерживаемую анимацию, отправленную обычным файлом."""
     document = message.document
-    if document is None or document.thumbnail is None:
+    if document is None:
         return False
     mime_type = (document.mime_type or "").lower()
     suffix = Path(document.file_name or "").suffix.lower()
@@ -112,6 +113,30 @@ async def _download_image(
         )
 
     return ImageInput(data=data, mime_type=detected, label=label)
+
+
+async def _download_animation(
+    bot: Bot,
+    file_id: str,
+    *,
+    file_size: int | None,
+    label: str,
+) -> tuple[ImageInput, ...]:
+    """Скачать ролик и извлечь до четырёх кадров по временной шкале."""
+    if file_size is not None and file_size > MAX_IMAGE_BYTES:
+        raise ValueError("image_too_large")
+    destination = io.BytesIO()
+    await bot.download(file_id, destination=destination)
+    data = destination.getvalue()
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ValueError("image_too_large")
+    detected = _detected_mime_type(data)
+    if detected is not None and detected != "image/gif":
+        return (ImageInput(data=data, mime_type=detected, label=f"{label}, кадр"),)
+    frames = await asyncio.to_thread(extract_animation_frames, data, label=label)
+    if not frames:
+        raise ValueError("unsupported_image")
+    return frames
 
 
 def _media_message(message: Message, label: str, emoji: str | None = None) -> str:
@@ -276,6 +301,40 @@ def create_media_router(
             (image,),
         )
 
+    async def handle_moving_media(
+        message: Message,
+        *,
+        file_id: str,
+        file_size: int | None,
+        label: str,
+        emoji: str | None = None,
+    ) -> None:
+        """Передать модели последовательность кадров движущегося медиа."""
+        try:
+            frames = await _download_animation(
+                bot,
+                file_id,
+                file_size=file_size,
+                label=label,
+            )
+        except ValueError as error:
+            reply = (
+                IMAGE_TOO_LARGE_REPLY
+                if str(error) == "image_too_large"
+                else UNSUPPORTED_IMAGE_REPLY
+            )
+            await message.answer(reply)
+            return
+        except TelegramAPIError, OSError:
+            logger.warning("Не удалось скачать анимацию из Telegram", exc_info=True)
+            await message.answer(IMAGE_DOWNLOAD_ERROR_REPLY)
+            return
+        await respond_with_images(
+            message,
+            _media_message(message, label, emoji),
+            frames,
+        )
+
     @router.message(F.photo)
     async def handle_photo(message: Message) -> None:
         """Передать модели фотографию в максимальном доступном размере."""
@@ -323,6 +382,15 @@ def create_media_router(
                 emoji=sticker.emoji,
             )
             return
+        if sticker.is_video:
+            await handle_moving_media(
+                message,
+                file_id=sticker.file_id,
+                file_size=sticker.file_size,
+                label="видеостикер",
+                emoji=sticker.emoji,
+            )
+            return
         thumbnail = sticker.thumbnail
         if thumbnail is None:
             await message.answer(UNSUPPORTED_IMAGE_REPLY)
@@ -332,7 +400,7 @@ def create_media_router(
             file_id=thumbnail.file_id,
             mime_type="image/jpeg",
             file_size=thumbnail.file_size,
-            label="превью анимированного стикера",
+            label="превью TGS-стикера",
             emoji=sticker.emoji,
         )
 
@@ -342,30 +410,37 @@ def create_media_router(
         animation = message.animation
         if animation is None:
             return
-        thumbnail = animation.thumbnail
-        if thumbnail is None:
-            await message.answer(UNSUPPORTED_IMAGE_REPLY)
-            return
-        await handle_image(
+        await handle_moving_media(
             message,
-            file_id=thumbnail.file_id,
-            mime_type="image/jpeg",
-            file_size=thumbnail.file_size,
-            label="кадр GIF-анимации",
+            file_id=animation.file_id,
+            file_size=animation.file_size,
+            label="GIF-анимация",
         )
 
     @router.message(F.document, _has_supported_animation_document)
     async def handle_animation_document(message: Message) -> None:
         """Передать модели кадр анимации, отправленной обычным файлом."""
         document = message.document
-        if document is None or document.thumbnail is None:
+        if document is None:
             return
-        await handle_image(
+        await handle_moving_media(
             message,
-            file_id=document.thumbnail.file_id,
-            mime_type="image/jpeg",
-            file_size=document.thumbnail.file_size,
-            label="кадр GIF-анимации, отправленной файлом",
+            file_id=document.file_id,
+            file_size=document.file_size,
+            label="видео или анимация, отправленная файлом",
+        )
+
+    @router.message(F.video)
+    async def handle_video(message: Message) -> None:
+        """Передать модели несколько кадров обычного Telegram-видео."""
+        video = message.video
+        if video is None:
+            return
+        await handle_moving_media(
+            message,
+            file_id=video.file_id,
+            file_size=video.file_size,
+            label="видео",
         )
 
     return router

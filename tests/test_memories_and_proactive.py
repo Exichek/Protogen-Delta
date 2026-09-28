@@ -86,6 +86,28 @@ def test_memory_service_classifies_and_builds_untrusted_context(tmp_path: Path) 
     asyncio.run(scenario())
 
 
+def test_memory_service_selects_relevant_entries_and_honors_limits(
+    tmp_path: Path,
+) -> None:
+    repository = MemoriesRepository(tmp_path)
+    memory = MemoryService(repository)
+
+    async def scenario() -> None:
+        await repository.remember(1, "topic", "обсуждали Python и asyncio", 1.0)
+        await repository.remember(1, "topic", "говорили про драконов", 2.0)
+        context = "\n".join(await memory.context(1, "вернёмся к Python", limit=1))
+        assert "Python" in context
+        assert "драконов" not in context
+        short = await memory.context(1, char_limit=150)
+        assert len(short) == 1
+        assert await memory.context(1, limit=0) == []
+        assert await memory.context(2) == []
+        await memory.delete_user(1)
+        assert await repository.recent(1) == []
+
+    asyncio.run(scenario())
+
+
 def test_proactive_messenger_sends_once_and_respects_quiet_hours(
     tmp_path: Path,
 ) -> None:

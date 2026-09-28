@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -31,8 +31,9 @@ class ToolRegistry:
         if len(self.tools) != len(tools):
             raise ValueError("Повтор имени инструмента")
 
-    def schemas(self) -> list[dict[str, Any]]:
+    def schemas(self, names: Collection[str] | None = None) -> list[dict[str, Any]]:
         """Преобразовать инструменты в JSON Schema для DeepSeek."""
+        allowed = set(names) if names is not None else None
         return [
             {
                 "type": "function",
@@ -51,6 +52,7 @@ class ToolRegistry:
                 },
             }
             for tool in self.tools.values()
+            if allowed is None or tool.name in allowed
         ]
 
 

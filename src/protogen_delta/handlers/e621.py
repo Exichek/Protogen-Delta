@@ -17,6 +17,8 @@ from aiogram.types import (
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.services.e621 import (
+    MAX_IMAGE_BYTES,
+    MAX_VIDEO_BYTES,
     E621Client,
     E621Error,
     E621Post,
@@ -29,11 +31,17 @@ from protogen_delta.services.e621 import (
 logger = logging.getLogger(__name__)
 
 E621_USAGE = (
-    "🎨 Поиск по тегам e621: /e6 dragon order:favcount\n\n"
-    "Можно отправить явный tag-query без команды, например "
-    "dragon order:favcount. Теги разделяются пробелами, исключение — через -tag. "
-    "Кнопка «Ещё» продолжает тот же поиск без повторов. Возрастной режим /adult "
-    "определяет доступный рейтинг."
+    "🎨 Поиск артов e621 по тегам\n\n"
+    "Примеры:\n"
+    "• /e6 dragon — арты с драконом\n"
+    "• /e6 dragon order:favcount — сначала самые популярные\n"
+    "• /e6 dragon -male — исключить тег male\n"
+    "• /e6 dragon rating:e — только explicit в режиме 18+\n\n"
+    "Теги пишутся по-английски через пробел. Явный запрос вроде "
+    "dragon order:favcount можно отправить и без /e6. Кнопка «Ещё» продолжит "
+    "тот же поиск без уже показанных постов. /adult определяет доступные рейтинги: "
+    "в мягком режиме выдаётся только safe, во взрослом доступны safe, "
+    "questionable и explicit."
 )
 _NO_RESULTS = "По этим тегам свежих результатов не нашлось. Попробуй изменить запрос."
 _CALLBACK_PREFIX = "e6:next"
@@ -113,16 +121,21 @@ def create_e621_router(
                 "У поста нет доступного файла.", reply_markup=_keyboard(user_id, post)
             )
             return
-        data = await client.download(url)
         original = url == post.file_url
         ext = post.file_ext if original else "jpg"
+        max_bytes = MAX_VIDEO_BYTES if ext in {"mp4", "webm"} else MAX_IMAGE_BYTES
+        data = await client.download(url, max_bytes=max_bytes)
         media = BufferedInputFile(data, filename=_filename(post, ext))
         caption = _caption(post)
         markup = _keyboard(user_id, post)
         if ext == "gif":
             await message.answer_animation(media, caption=caption, reply_markup=markup)
-        elif ext in {"mp4", "webm"}:
+        elif ext == "mp4":
             await message.answer_video(media, caption=caption, reply_markup=markup)
+        elif ext == "webm":
+            # Bot API гарантирует sendVideo только для MPEG-4. WebM отправляем
+            # исходным файлом, чтобы не заменять ролик статичным preview.
+            await message.answer_document(media, caption=caption, reply_markup=markup)
         else:
             await message.answer_photo(media, caption=caption, reply_markup=markup)
         await history.mark_seen(user_id, post.post_id, time())
