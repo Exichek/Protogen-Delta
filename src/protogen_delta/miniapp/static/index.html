@@ -21,6 +21,7 @@
     select,textarea { padding:12px; color:var(--tg-theme-text-color,#eef4ff); background:var(--tg-theme-bg-color,#0c1420); outline:1px solid #ffffff18; }
     textarea { min-height:110px; resize:vertical; }
     button { margin-top:16px; padding:13px; font-weight:700; color:var(--tg-theme-button-text-color,#fff); background:var(--tg-theme-button-color,#6c5ce7); cursor:pointer; }
+    button.secondary { color:#ffb2b9; background:#ff556622; outline:1px solid #ff718044; }
     button:disabled { opacity:.55; cursor:wait; } #status { min-height:22px; margin:12px 2px; font-size:14px; }
     .error { color:#ff7d88; } .ok { color:#62dca4; }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
@@ -40,7 +41,13 @@
     <select id="configuration"><option value="male">Мужская</option><option value="female">Женская</option></select>
     <label for="character">Мой персонаж для RP</label>
     <textarea id="character" maxlength="1000" placeholder="Вид, внешность, важные детали и роль в сцене"></textarea>
+    <label for="preferences">Что мне нравится в RP</label>
+    <textarea id="preferences" maxlength="1000" placeholder="Темы, динамика, тон и детали, которые хочется видеть чаще"></textarea>
+    <label for="boundaries">Мои границы</label>
+    <textarea id="boundaries" maxlength="1000" placeholder="Что нельзя добавлять в сцену"></textarea>
+    <p class="muted" id="fetishes">Распознанные темы: пока нет</p>
     <button id="save">Сохранить настройки</button>
+    <button class="secondary" id="clear-rp">Очистить RP-профиль</button>
     <div id="status"></div>
   </section>
   <section class="card"><b>Текущий облик Дельты</b><p class="muted" id="appearance">Базовый облик</p></section>
@@ -48,8 +55,8 @@
 <script>
   const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
   const initData = tg?.initData || ""; const status = document.querySelector("#status");
-  const api = async (method="GET", body=null) => {
-    const response = await fetch("/api/profile", {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":"application/json"}, body:body?JSON.stringify(body):null});
+  const api = async (method="GET", body=null, path="/api/profile") => {
+    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":"application/json"}, body:body?JSON.stringify(body):null});
     if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`); return response.json();
   };
   const render = p => {
@@ -57,13 +64,17 @@
     document.querySelector("#content-mode").value = p.content_mode === "adult" ? "adult" : "soft";
     document.querySelector("#configuration").value = p.roleplay_configuration;
     document.querySelector("#character").value = p.roleplay_character;
+    document.querySelector("#preferences").value = p.roleplay_preferences;
+    document.querySelector("#boundaries").value = p.roleplay_boundaries;
+    document.querySelector("#fetishes").textContent = `Распознанные темы: ${p.roleplay_fetishes.length ? p.roleplay_fetishes.join(", ") : "пока нет"}`;
     document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
     document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
     document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
   };
   const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
   api().then(render).catch(fail);
-  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
+  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
+  document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });
 </script>
 </body>
 </html>

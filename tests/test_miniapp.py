@@ -138,18 +138,24 @@ def test_miniapp_profile_api_reads_and_updates_own_state() -> None:
                     "roleplay_active": True,
                     "roleplay_configuration": "female",
                     "roleplay_character": "Синий дракон",
+                    "roleplay_preferences": "Медленная сцена и юмор",
+                    "roleplay_boundaries": "Без унижения",
                 },
             )
             assert updated.status == 200
             payload = await updated.json()
             assert payload["content_mode"] == "adult"
             assert payload["roleplay_character"] == "Синий дракон"
+            assert payload["roleplay_preferences"] == "Медленная сцена и юмор"
+            assert payload["roleplay_boundaries"] == "Без унижения"
 
     asyncio.run(scenario())
     state = states.get(42)
     assert state.content_mode == "adult"
     assert state.roleplay_active is True
     assert state.roleplay_configuration == "female"
+    assert state.roleplay_preferences == "Медленная сцена и юмор"
+    assert state.roleplay_boundaries == "Без унижения"
 
 
 def test_miniapp_profile_api_rejects_unknown_or_invalid_settings() -> None:
@@ -173,6 +179,12 @@ def test_miniapp_profile_api_rejects_unknown_or_invalid_settings() -> None:
                 json={"roleplay_character": "x" * 1001},
             )
             assert too_long.status == 400
+            long_preferences = await client.patch(
+                "/api/profile",
+                headers=headers,
+                json={"roleplay_preferences": "x" * 1001},
+            )
+            assert long_preferences.status == 400
             invalid_rp = await client.patch(
                 "/api/profile", headers=headers, json={"roleplay_active": "yes"}
             )
@@ -195,6 +207,42 @@ def test_miniapp_profile_api_rejects_unknown_or_invalid_settings() -> None:
             assert array_body.status == 400
 
     asyncio.run(scenario())
+
+
+def test_miniapp_can_clear_only_roleplay_profile() -> None:
+    """Удаление RP-профиля не должно стирать режим контента и облик Дельты."""
+    states = UserStateStore()
+    state = states.get(42)
+    state.content_mode = "adult"
+    state.delta_appearance = "синий дракон"
+    state.roleplay_active = True
+    state.roleplay_configuration = "female"
+    state.roleplay_character = "лиса"
+    state.roleplay_fetishes = ("bondage",)
+    state.roleplay_preferences = "медленно"
+    state.roleplay_boundaries = "без боли"
+    state.emotions.arousal = 0.8
+    application = MiniAppServer(TOKEN, states).application()
+
+    async def scenario() -> None:
+        async with TestClient(TestServer(application)) as client:
+            response = await client.delete(
+                "/api/profile/roleplay",
+                headers={"X-Telegram-Init-Data": _signed_init_data()},
+            )
+            assert response.status == 200
+            payload = await response.json()
+            assert payload["roleplay_character"] == ""
+            assert payload["roleplay_fetishes"] == []
+            assert payload["roleplay_preferences"] == ""
+            assert payload["roleplay_boundaries"] == ""
+            assert payload["content_mode"] == "adult"
+            assert payload["delta_appearance"] == "синий дракон"
+
+    asyncio.run(scenario())
+    assert state.roleplay_active is False
+    assert state.roleplay_configuration == "male"
+    assert state.emotions.arousal == 0.0
 
 
 def test_miniapp_server_validates_bind_configuration() -> None:

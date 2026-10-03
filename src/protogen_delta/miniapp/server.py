@@ -12,7 +12,7 @@ from protogen_delta.miniapp.auth import (
     validate_init_data,
 )
 
-_MAX_CHARACTER_CHARS = 1000
+_MAX_PROFILE_FIELD_CHARS = 1000
 
 
 def _profile(state: UserState, user: MiniAppUser) -> dict[str, Any]:
@@ -29,6 +29,8 @@ def _profile(state: UserState, user: MiniAppUser) -> dict[str, Any]:
         "roleplay_character": state.roleplay_character,
         "delta_appearance": state.delta_appearance,
         "roleplay_fetishes": list(state.roleplay_fetishes),
+        "roleplay_preferences": state.roleplay_preferences,
+        "roleplay_boundaries": state.roleplay_boundaries,
     }
 
 
@@ -65,6 +67,7 @@ class MiniAppServer:
                 web.get("/", self._index),
                 web.get("/api/profile", self._get_profile),
                 web.patch("/api/profile", self._update_profile),
+                web.delete("/api/profile/roleplay", self._delete_roleplay_profile),
                 web.get("/health", self._health),
             ]
         )
@@ -148,6 +151,8 @@ class MiniAppServer:
             "roleplay_active",
             "roleplay_configuration",
             "roleplay_character",
+            "roleplay_preferences",
+            "roleplay_boundaries",
         }
         if set(payload) - allowed:
             raise web.HTTPBadRequest(text="Переданы неизвестные настройки")
@@ -162,9 +167,21 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text="Некорректная конфигурация Дельты")
         character = payload.get("roleplay_character")
         if character is not None and (
-            not isinstance(character, str) or len(character) > _MAX_CHARACTER_CHARS
+            not isinstance(character, str) or len(character) > _MAX_PROFILE_FIELD_CHARS
         ):
             raise web.HTTPBadRequest(text="Описание персонажа слишком длинное")
+        preferences = payload.get("roleplay_preferences")
+        if preferences is not None and (
+            not isinstance(preferences, str)
+            or len(preferences) > _MAX_PROFILE_FIELD_CHARS
+        ):
+            raise web.HTTPBadRequest(text="Предпочтения слишком длинные")
+        boundaries = payload.get("roleplay_boundaries")
+        if boundaries is not None and (
+            not isinstance(boundaries, str)
+            or len(boundaries) > _MAX_PROFILE_FIELD_CHARS
+        ):
+            raise web.HTTPBadRequest(text="Границы слишком длинные")
 
         async with self._user_states.use(user.id) as state:
             if content_mode is not None:
@@ -175,5 +192,23 @@ class MiniAppServer:
                 state.roleplay_configuration = configuration
             if character is not None:
                 state.roleplay_character = character.strip()
+            if preferences is not None:
+                state.roleplay_preferences = preferences.strip()
+            if boundaries is not None:
+                state.roleplay_boundaries = boundaries.strip()
+            response = _profile(state, user)
+        return web.json_response(response, headers={"Cache-Control": "no-store"})
+
+    async def _delete_roleplay_profile(self, request: web.Request) -> web.Response:
+        """Удалить RP-профиль пользователя, сохранив прочую память и настройки."""
+        user = self._authenticate(request)
+        async with self._user_states.use(user.id) as state:
+            state.roleplay_active = False
+            state.roleplay_configuration = "male"
+            state.roleplay_character = ""
+            state.roleplay_fetishes = ()
+            state.roleplay_preferences = ""
+            state.roleplay_boundaries = ""
+            state.emotions.arousal = 0.0
             response = _profile(state, user)
         return web.json_response(response, headers={"Cache-Control": "no-store"})

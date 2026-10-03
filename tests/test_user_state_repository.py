@@ -451,6 +451,8 @@ def test_user_state_repository_migrates_legacy_database(
     assert state.roleplay_configuration == "male"
     assert state.roleplay_character == ""
     assert state.roleplay_fetishes == ()
+    assert state.roleplay_preferences == ""
+    assert state.roleplay_boundaries == ""
     assert state.delta_appearance == ""
     assert state.content_mode == "unselected"
 
@@ -462,6 +464,8 @@ def test_user_state_repository_migrates_legacy_database(
     assert "emotions_updated_at" in columns
     assert "roleplay_active" in columns
     assert "roleplay_fetishes" in columns
+    assert "roleplay_preferences" in columns
+    assert "roleplay_boundaries" in columns
     assert "delta_appearance" in columns
     assert "content_mode" in columns
 
@@ -719,6 +723,8 @@ def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
             state.roleplay_configuration = "female"
             state.roleplay_character = "человек в пальто"
             state.roleplay_fetishes = ("bondage", "dirtytalk")
+            state.roleplay_preferences = "медленная динамика"
+            state.roleplay_boundaries = "без унижения"
             state.delta_appearance = "серый волк"
             state.content_mode = "adult"
             state.relationship.trust = 0.7
@@ -728,6 +734,8 @@ def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
             assert restored.roleplay_configuration == "female"
             assert restored.roleplay_character == "человек в пальто"
             assert restored.roleplay_fetishes == ("bondage", "dirtytalk")
+            assert restored.roleplay_preferences == "медленная динамика"
+            assert restored.roleplay_boundaries == "без унижения"
             assert restored.delta_appearance == "серый волк"
             assert restored.content_mode == "adult"
             assert restored.relationship.trust == pytest.approx(0.7)
@@ -738,6 +746,8 @@ def test_scene_details_survive_restart_and_reset(tmp_path: Path) -> None:
             assert cleared.roleplay_configuration == "male"
             assert cleared.roleplay_character == ""
             assert cleared.roleplay_fetishes == ()
+            assert cleared.roleplay_preferences == ""
+            assert cleared.roleplay_boundaries == ""
             assert cleared.delta_appearance == ""
             assert cleared.content_mode == "unselected"
             assert cleared.relationship.trust == 0.0
