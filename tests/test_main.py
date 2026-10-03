@@ -2,9 +2,11 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, call
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
 
 import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
@@ -40,13 +42,16 @@ def test_require_string_dict_rejects_invalid_value() -> None:
         )
 
 
+@pytest.mark.parametrize("pack_available", [None, True, False])
 def test_main_builds_application_and_starts_polling(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    pack_available: bool | None,
 ) -> None:
     """main должен собрать приложение и запустить polling."""
     settings = Settings(
         telegram_token="telegram-token",
+        sticker_pack_enabled=pack_available is not None,
         deepseek_api_key="deepseek-key",
         art_chat_id=-1001234567890,
         deepseek_base_url="https://api.test.local",
@@ -66,6 +71,20 @@ def test_main_builds_application_and_starts_polling(
 
     bot_mock = Mock()
     bot_mock.delete_webhook = AsyncMock()
+    bot_mock.get_sticker_set = AsyncMock(
+        return_value=SimpleNamespace(
+            name="delta_sticksss",
+            stickers=[
+                SimpleNamespace(
+                    file_unique_id="AgAD_qUAAi5dCUo", file_id="greeting", emoji="👋"
+                )
+            ],
+        )
+    )
+    if pack_available is False:
+        bot_mock.get_sticker_set.side_effect = TelegramBadRequest(
+            method=Mock(), message="unavailable"
+        )
     bot_mock.session = Mock()
     bot_mock.session.close = AsyncMock()
 
@@ -360,6 +379,15 @@ def test_main_builds_application_and_starts_polling(
     asyncio.run(
         main_module.main(),
     )
+
+    if pack_available is None:
+        bot_mock.get_sticker_set.assert_not_awaited()
+    else:
+        bot_mock.get_sticker_set.assert_awaited_once_with("delta_sticksss")
+    if pack_available is True:
+        assert len(main_module.StickersRepository(tmp_path).get_all()) == 1
+    else:
+        assert main_module.StickersRepository(tmp_path).get_all() == []
 
     load_settings_mock.assert_called_once_with()
 

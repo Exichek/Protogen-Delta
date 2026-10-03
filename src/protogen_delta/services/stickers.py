@@ -2,6 +2,7 @@
 
 import logging
 import random
+import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from time import monotonic
@@ -13,6 +14,33 @@ from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
 
 logger = logging.getLogger(__name__)
+
+_CONTEXT_PATTERNS = {
+    "greeting": r"^\s*(?:привет\w*|здравствуй\w*|доброе утро|hi|hello|йоу)\b",
+    "coffee": r"\b(?:кофе\w*|coffee|капучино|эспрессо)\b",
+    "tired": r"\b(?:устал\w*|сонн\w*|спать|выспаться|sleepy|tired)\b",
+    "hungry": r"\b(?:голод\w*|проголод\w*|хочу есть|hungry)\b",
+    "food": r"\b(?:ед[ау]|поесть|перекус\w*|кушать|food)\b",
+    "sushi": r"\b(?:суши|роллы|sushi)\b",
+    "toaster": r"\b(?:тостер\w*|toaster|тост[аы]?|хлеб\w*)\b",
+    "laugh": r"\b(?:ахах\w*|хаха\w*|лол|ржу\w*|смешн\w*|lol|rofl)\b",
+    "oops": r"\b(?:упс|ой|неловк\w*|oops)\b",
+    "okay": r"^\s*(?:окей|ок|понял\w*|согласен|okay|ok)\b",
+    "oral": r"\b(?:минет\w*|отсос\w*|сос[аёе]\w*|oral)\b",
+    "rimming": r"\b(?:римминг\w*|анилингус\w*|rimming)\b",
+    "dominance": r"\b(?:доминир\w*|подчини\w*|dominance)\b",
+    "humiliation": r"\b(?:униж\w*|humiliation)\b",
+    "cuddle": r"\b(?:обним\w*|обня\w*|прижм\w*|cuddle)\b",
+}
+
+
+def sticker_context_tags(text: str) -> set[str]:
+    """Найти конкретный повод для реакции без нового запроса к модели."""
+    return {
+        tag
+        for tag, pattern in _CONTEXT_PATTERNS.items()
+        if re.search(pattern, text, re.IGNORECASE)
+    }
 
 
 @dataclass(slots=True)
@@ -61,6 +89,7 @@ class ContextualStickerService:
         chat_id: int,
         user_id: int,
         context_tags: Collection[str] = (),
+        context_text: str = "",
     ) -> bool:
         """Иногда отправить подходящий стикер и сообщить об успехе."""
         reaction = self._reactions.setdefault(user_id, _ReactionState())
@@ -79,6 +108,8 @@ class ContextualStickerService:
 
         state = self._user_states.get(user_id)
         tags = {tag.strip().lower() for tag in context_tags if tag.strip()}
+        semantic_tags = sticker_context_tags(context_text)
+        tags.update(semantic_tags)
         tags.add(state.mood)
         if state.roleplay_active:
             tags.add("rp")
@@ -88,9 +119,18 @@ class ContextualStickerService:
             for entry in self._repository.get_all()
             if tags.intersection(entry.tags)
             and (state.content_mode == "adult" or entry.rating == "safe")
+            and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
         ]
         if not entries:
             return False
+
+        def score(entry: StickerEntry) -> int:
+            return 10 * len(semantic_tags.intersection(entry.tags)) + len(
+                tags.intersection(entry.tags)
+            )
+
+        best_score = max(map(score, entries))
+        entries = [entry for entry in entries if score(entry) == best_score]
 
         without_repeat = [
             entry

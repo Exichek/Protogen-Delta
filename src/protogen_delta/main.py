@@ -6,6 +6,7 @@ from typing import cast
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramAPIError
 
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
@@ -50,6 +51,7 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
+from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
@@ -225,6 +227,22 @@ async def main() -> None:
             cooldown_seconds=settings.sticker_cooldown_seconds,
             min_replies=settings.sticker_min_replies,
         )
+        sticker_importer = StickerPackImporter(bot, stickers_repository)
+        if settings.sticker_pack_enabled:
+            try:
+                async with asyncio.timeout(15):
+                    imported = await sticker_importer.sync()
+                logger.info(
+                    "Sticker pack matched=%d added=%d unknown=%d",
+                    imported.matched,
+                    imported.added,
+                    imported.unknown,
+                )
+            except (TelegramAPIError, TimeoutError) as error:
+                logger.warning(
+                    "Не удалось обновить стикерпак (%s); использую локальную разметку",
+                    type(error).__name__,
+                )
 
         start_router = create_start_router(
             users_repository=users_repository,
@@ -258,6 +276,7 @@ async def main() -> None:
         sticker_admin_router = create_sticker_admin_router(
             stickers_repository,
             effective_admin_ids,
+            sticker_importer,
         )
 
         creator_router = create_creator_router(

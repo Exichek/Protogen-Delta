@@ -31,6 +31,7 @@ class Settings:
     sticker_reaction_chance: float = 0.15
     sticker_cooldown_seconds: float = 900.0
     sticker_min_replies: int = 4
+    sticker_pack_enabled: bool = True
     telegram_proxy_url: str | None = None
     log_level: str = "INFO"
     data_dir: Path = Path("data")
@@ -300,6 +301,9 @@ def load_settings() -> Settings:
         sticker_reaction_chance=sticker_reaction_chance,
         sticker_cooldown_seconds=sticker_cooldown_seconds,
         sticker_min_replies=sticker_min_replies,
+        sticker_pack_enabled=_parse_bool(
+            os.getenv("STICKER_PACK_ENABLED", "true"), "STICKER_PACK_ENABLED"
+        ),
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,
         telegram_proxy_url=telegram_proxy_url or None,

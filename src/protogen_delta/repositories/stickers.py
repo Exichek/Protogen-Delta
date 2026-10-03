@@ -1,6 +1,6 @@
 """Хранилище размеченных стикеров Дельты."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,9 +19,10 @@ class StickerEntry:
     rating: StickerRating = "safe"
     emoji: str | None = None
     set_name: str | None = None
+    name: str | None = None
 
 
-def _entries(data: dict[str, Any]) -> list[StickerEntry]:
+def parse_sticker_entries(data: dict[str, Any]) -> list[StickerEntry]:
     """Проверить JSON и вернуть типизированные записи."""
     raw_entries = data.get("STICKERS", [])
     if not isinstance(raw_entries, list):
@@ -37,6 +38,7 @@ def _entries(data: dict[str, Any]) -> list[StickerEntry]:
         rating = raw.get("rating", "safe")
         emoji = raw.get("emoji")
         set_name = raw.get("set_name")
+        name = raw.get("name")
         if (
             not isinstance(file_id, str)
             or not file_id
@@ -50,6 +52,8 @@ def _entries(data: dict[str, Any]) -> list[StickerEntry]:
             and not isinstance(emoji, str)
             or set_name is not None
             and not isinstance(set_name, str)
+            or name is not None
+            and not isinstance(name, str)
         ):
             raise TypeError("Некорректная запись STICKERS")
         entries.append(
@@ -60,6 +64,7 @@ def _entries(data: dict[str, Any]) -> list[StickerEntry]:
                 rating=rating,
                 emoji=emoji,
                 set_name=set_name,
+                name=name,
             )
         )
     return entries
@@ -76,7 +81,7 @@ class StickersRepository:
 
     def get_all(self) -> list[StickerEntry]:
         """Вернуть все размеченные стикеры."""
-        return _entries(self._storage.load())
+        return parse_sticker_entries(self._storage.load())
 
     def upsert(self, entry: StickerEntry) -> bool:
         """Добавить или обновить запись; вернуть True при создании."""
@@ -84,13 +89,19 @@ class StickersRepository:
 
         def update(data: dict[str, Any]) -> bool:
             nonlocal created
-            entries = _entries(data)
+            entries = parse_sticker_entries(data)
+            disabled = data.get("DISABLED_STICKERS", [])
+            if entry.file_unique_id in disabled:
+                data["DISABLED_STICKERS"] = [
+                    item for item in disabled if item != entry.file_unique_id
+                ]
             for index, existing in enumerate(entries):
                 if existing.file_unique_id == entry.file_unique_id:
                     created = False
-                    if existing == entry:
+                    updated = replace(entry, name=entry.name or existing.name)
+                    if existing == updated:
                         return False
-                    entries[index] = entry
+                    entries[index] = updated
                     data["STICKERS"] = [asdict(item) for item in entries]
                     return True
             entries.append(entry)
@@ -100,17 +111,55 @@ class StickersRepository:
         self._storage.update(update)
         return created
 
+    def import_entries(self, incoming: list[StickerEntry]) -> int:
+        """Атомарно импортировать пак, сохранив ручные теги уже известных ID."""
+        created = 0
+
+        def update(data: dict[str, Any]) -> bool:
+            nonlocal created
+            entries = parse_sticker_entries(data)
+            disabled = data.get("DISABLED_STICKERS", [])
+            indexes = {entry.file_unique_id: i for i, entry in enumerate(entries)}
+            original = list(entries)
+            for entry in incoming:
+                if entry.file_unique_id in disabled:
+                    continue
+                index = indexes.get(entry.file_unique_id)
+                if index is None:
+                    indexes[entry.file_unique_id] = len(entries)
+                    entries.append(entry)
+                    created += 1
+                else:
+                    old = entries[index]
+                    entries[index] = replace(
+                        old,
+                        file_id=entry.file_id,
+                        emoji=entry.emoji,
+                        set_name=entry.set_name,
+                        name=old.name or entry.name,
+                    )
+            if entries == original:
+                return False
+            data["STICKERS"] = [asdict(entry) for entry in entries]
+            return True
+
+        self._storage.update(update)
+        return created
+
     def remove(self, file_unique_id: str) -> bool:
         """Удалить стикер по постоянному Telegram ID."""
 
         def update(data: dict[str, Any]) -> bool:
-            entries = _entries(data)
+            entries = parse_sticker_entries(data)
             remaining = [
                 item for item in entries if item.file_unique_id != file_unique_id
             ]
             if len(remaining) == len(entries):
                 return False
             data["STICKERS"] = [asdict(item) for item in remaining]
+            data["DISABLED_STICKERS"] = list(
+                dict.fromkeys((*data.get("DISABLED_STICKERS", []), file_unique_id))
+            )
             return True
 
         return self._storage.update(update)

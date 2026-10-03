@@ -18,6 +18,7 @@ from protogen_delta.repositories.stickers import (
     StickerRating,
     StickersRepository,
 )
+from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
 
 
@@ -265,5 +266,117 @@ def test_sticker_admin_rejects_non_admin_and_bad_add(tmp_path: Path) -> None:
         invalid, invalid_answer, _ = _admin_message("/stickers add плохой тег")
         await _call(router, invalid)
         assert "Ответь" in _answer_text(invalid_answer)
+
+    asyncio.run(scenario())
+
+
+def test_pack_import_matches_ids_preserves_tags_and_skips_unknown(
+    tmp_path: Path,
+) -> None:
+    """Перестановка и добавление новых стикеров не должны менять их смысл."""
+    repository = StickersRepository(tmp_path)
+    known_id = "AgAD6rAAAhoQCUo"
+    repository.upsert(_entry(known_id, "custom", rating="adult"))
+    bot = AsyncMock(spec=Bot)
+    bot.get_sticker_set.return_value = SimpleNamespace(
+        name="delta_sticksss",
+        stickers=[
+            SimpleNamespace(file_unique_id="unknown", file_id="new", emoji="🙂"),
+            SimpleNamespace(file_unique_id=known_id, file_id="fresh", emoji="😴"),
+            SimpleNamespace(
+                file_unique_id="AgAD_qUAAi5dCUo", file_id="greeting", emoji="👋"
+            ),
+        ],
+    )
+    importer = StickerPackImporter(cast(Bot, bot), repository)
+    first = asyncio.run(importer.sync())
+    assert (first.matched, first.added, first.unknown) == (2, 1, 1)
+    second = asyncio.run(importer.sync())
+    assert second.added == 0
+    entries = StickersRepository(tmp_path).get_all()
+    assert len(entries) == 2
+    assert entries[0].file_id == "fresh"
+    assert entries[0].tags == ("custom",)
+    assert entries[0].rating == "adult"
+    assert entries[0].name == "boring"
+    assert entries[1].tags == ("greeting",)
+    assert entries[1].name == "hi_sticker"
+    assert repository.remove(known_id) is True
+    asyncio.run(importer.sync())
+    assert len(repository.get_all()) == 1
+    repository.upsert(_entry(known_id, "custom"))
+    asyncio.run(importer.sync())
+    assert len(repository.get_all()) == 2
+
+
+def test_sticker_prefers_specific_context_to_generic_mood(tmp_path: Path) -> None:
+    """Запрос про кофе должен выбрать кофе, даже при игривом настроении."""
+    repository = StickersRepository(tmp_path)
+    repository.upsert(_entry("happy", "playful"))
+    repository.upsert(_entry("coffee", "coffee"))
+    states = UserStateStore()
+    states.get(42).mood = "playful"
+    bot = AsyncMock(spec=Bot)
+    service = ContextualStickerService(
+        cast(Bot, bot),
+        repository,
+        states,
+        chance=1,
+        min_replies=1,
+        cooldown_seconds=0,
+        random_value=lambda: 0,
+        choose=lambda items: items[0],
+    )
+    assert (
+        asyncio.run(
+            service.maybe_send(chat_id=7, user_id=42, context_text="Нужен кофе")
+        )
+        is True
+    )
+    bot.send_sticker.assert_awaited_once_with(chat_id=7, sticker="file-coffee")
+
+
+def test_active_rp_alone_does_not_send_adult_sticker(tmp_path: Path) -> None:
+    """Даже взрослому пользователю RP само по себе не повод для adult-реакции."""
+    repository = StickersRepository(tmp_path)
+    repository.upsert(_entry("adult", "rp", rating="adult"))
+    states = UserStateStore()
+    states.get(42).content_mode = "adult"
+    states.get(42).roleplay_active = True
+    bot = AsyncMock(spec=Bot)
+    service = ContextualStickerService(
+        cast(Bot, bot),
+        repository,
+        states,
+        chance=1,
+        min_replies=1,
+        cooldown_seconds=0,
+        random_value=lambda: 0,
+    )
+    assert asyncio.run(service.maybe_send(chat_id=7, user_id=42)) is False
+    bot.send_sticker.assert_not_awaited()
+
+
+def test_admin_pack_import_reports_results(tmp_path: Path) -> None:
+    """Импорт доступен только администратору, ошибки Telegram понятны."""
+    importer = AsyncMock(spec=StickerPackImporter)
+    importer.sync.return_value = SimpleNamespace(matched=19, added=19, unknown=0)
+    router = create_sticker_admin_router(
+        StickersRepository(tmp_path),
+        frozenset({1}),
+        cast(StickerPackImporter, importer),
+    )
+
+    async def scenario() -> None:
+        denied, _, _ = _admin_message("/stickers import", user_id=2)
+        await _call(router, denied)
+        importer.sync.assert_not_awaited()
+        message, answer, _ = _admin_message("/stickers import")
+        await _call(router, message)
+        assert "19" in _answer_text(answer)
+        importer.sync.side_effect = TelegramBadRequest(method=Mock(), message="missing")
+        failed, failure_answer, _ = _admin_message("/stickers import")
+        await _call(router, failed)
+        assert "позже" in _answer_text(failure_answer)
 
     asyncio.run(scenario())

@@ -42,6 +42,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("STICKER_REACTION_CHANCE", raising=False)
     monkeypatch.delenv("STICKER_COOLDOWN_SECONDS", raising=False)
     monkeypatch.delenv("STICKER_MIN_REPLIES", raising=False)
+    monkeypatch.delenv("STICKER_PACK_ENABLED", raising=False)
     monkeypatch.delenv("LOG_LEVEL", raising=False)
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("ADMIN_IDS", raising=False)
@@ -90,6 +91,7 @@ def test_load_settings_with_defaults(
     assert settings.sticker_reaction_chance == 0.15
     assert settings.sticker_cooldown_seconds == 900.0
     assert settings.sticker_min_replies == 4
+    assert settings.sticker_pack_enabled is True
     assert settings.telegram_proxy_url is None
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
@@ -147,6 +149,7 @@ def test_load_settings_with_custom_values(
     monkeypatch.setenv("STICKER_REACTION_CHANCE", "0.25")
     monkeypatch.setenv("STICKER_COOLDOWN_SECONDS", "120")
     monkeypatch.setenv("STICKER_MIN_REPLIES", "2")
+    monkeypatch.setenv("STICKER_PACK_ENABLED", "false")
     monkeypatch.setenv("MINI_APP_URL", "https://delta.example/app")
     monkeypatch.setenv("MINI_APP_SERVER_ENABLED", "true")
     monkeypatch.setenv("MINI_APP_HOST", "0.0.0.0")
@@ -202,6 +205,7 @@ def test_load_settings_with_custom_values(
     assert settings.sticker_reaction_chance == 0.25
     assert settings.sticker_cooldown_seconds == 120.0
     assert settings.sticker_min_replies == 2
+    assert settings.sticker_pack_enabled is False
     assert settings.mini_app_server_enabled is True
     assert settings.mini_app_host == "0.0.0.0"
     assert settings.mini_app_port == 9000

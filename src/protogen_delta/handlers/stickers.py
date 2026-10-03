@@ -5,15 +5,18 @@ from collections import Counter
 from typing import cast
 
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from protogen_delta.repositories.stickers import StickerEntry, StickerRating
 from protogen_delta.repositories.stickers import StickersRepository as Repository
+from protogen_delta.services.sticker_pack import StickerPackImporter
 
 _TAG_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
 _HELP = (
     "🎭 Контекстные стикеры:\n\n"
+    "Импорт моего пака: /stickers import\n"
     "Ответь на стикер: /stickers add playful happy\n"
     "Для взрослого: /stickers add horny rp rating:adult\n"
     "Удалить ответом: /stickers remove\n"
@@ -51,6 +54,7 @@ def _parse_tags(values: list[str]) -> tuple[tuple[str, ...], StickerRating] | No
 def create_sticker_admin_router(
     repository: Repository,
     admin_ids: frozenset[int],
+    importer: StickerPackImporter | None = None,
 ) -> Router:
     """Создать закрытый роутер управления стикерами Дельты."""
     router = Router(name=__name__)
@@ -68,6 +72,18 @@ def create_sticker_admin_router(
             return
 
         action = arguments[0].lower()
+        if action == "import" and importer is not None:
+            try:
+                imported = await importer.sync()
+            except TelegramAPIError:
+                await message.answer("Telegram не отдал пак. Попробуй импорт позже.")
+                return
+            await message.answer(
+                f"✅ Пак delta_sticksss: {imported.matched} размеченных стикеров, "
+                f"добавлено {imported.added}.\n"
+                f"Новых без разметки: {imported.unknown}. Ручные теги сохранены."
+            )
+            return
         if action == "list":
             entries = repository.get_all()
             if not entries:
@@ -82,6 +98,12 @@ def create_sticker_admin_router(
                 f"🎭 Размечено: {len(entries)}\n"
                 f"Safe: {len(entries) - adult}, adult: {adult}\n"
                 f"Теги: {summary}"
+                + "\n\n"
+                + "\n".join(
+                    f"• {entry.name or entry.file_unique_id}: "
+                    f"{', '.join(entry.tags)} ({entry.rating})"
+                    for entry in entries[:30]
+                )
             )
             return
 
@@ -132,7 +154,11 @@ def create_sticker_admin_router(
         if action == "test" and len(arguments) > 1:
             tag = arguments[1].lower()
             entry = next(
-                (item for item in repository.get_all() if tag in item.tags),
+                (
+                    item
+                    for item in repository.get_all()
+                    if tag in item.tags or tag == item.name
+                ),
                 None,
             )
             if entry is None:

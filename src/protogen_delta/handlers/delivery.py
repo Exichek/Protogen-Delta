@@ -101,6 +101,7 @@ def create_reply_delivery(
                         chat_id=message.chat.id,
                         user_id=user_id,
                         context_tags=context_tags,
+                        context_text=message.text or message.caption or "",
                     )
                 except Exception:
                     logger.exception("Не удалось обработать контекстный стикер")
