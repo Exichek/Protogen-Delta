@@ -11,6 +11,7 @@ from protogen_delta.handlers.rp import (
     is_roleplay_stop_message,
 )
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.stickers import ContextualStickerService
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
 BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщение. Подожди немного."
@@ -20,6 +21,7 @@ def create_text_router(
     response_engine: ResponseEngine,
     rate_limiter: UserRateLimiter | None = None,
     bot: Bot | None = None,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер обычных текстовых сообщений."""
     router = Router(name=__name__)
@@ -60,7 +62,12 @@ def create_text_router(
                 await response_engine.respond_and_deliver(
                     user_id,
                     message.text,
-                    create_reply_delivery(message, bot),
+                    create_reply_delivery(
+                        message,
+                        bot,
+                        sticker_service,
+                        user_id=user_id,
+                    ),
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)

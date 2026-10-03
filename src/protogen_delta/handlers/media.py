@@ -16,6 +16,7 @@ from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tgs_frames import MAX_TGS_BYTES, extract_tgs_frames
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,7 @@ def create_media_router(
     bot: Bot,
     rate_limiter: UserRateLimiter | None = None,
     album_delay_seconds: float = 1.2,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер поддерживаемых изображений и стикеров."""
     if album_delay_seconds <= 0:
@@ -184,7 +186,13 @@ def create_media_router(
                 await response_engine.respond_and_deliver(
                     user_id,
                     text,
-                    create_reply_delivery(message, bot),
+                    create_reply_delivery(
+                        message,
+                        bot,
+                        sticker_service,
+                        user_id=user_id,
+                        context_tags=("media",),
+                    ),
                     images=images,
                 )
         except ResponseBusyError:

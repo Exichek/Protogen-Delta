@@ -35,6 +35,9 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_DISABLE_THINKING", raising=False)
     monkeypatch.delenv("MINI_APP_URL", raising=False)
+    monkeypatch.delenv("STICKER_REACTION_CHANCE", raising=False)
+    monkeypatch.delenv("STICKER_COOLDOWN_SECONDS", raising=False)
+    monkeypatch.delenv("STICKER_MIN_REPLIES", raising=False)
     monkeypatch.delenv("LOG_LEVEL", raising=False)
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("ADMIN_IDS", raising=False)
@@ -76,6 +79,9 @@ def test_load_settings_with_defaults(
     assert settings.llm_provider == "deepseek"
     assert settings.llm_disable_thinking is True
     assert settings.mini_app_url is None
+    assert settings.sticker_reaction_chance == 0.15
+    assert settings.sticker_cooldown_seconds == 900.0
+    assert settings.sticker_min_replies == 4
     assert settings.telegram_proxy_url is None
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
@@ -130,6 +136,9 @@ def test_load_settings_with_custom_values(
     monkeypatch.setenv("WHISPER_MODEL_SIZE", "base")
     monkeypatch.setenv("WHISPER_DEVICE", "cuda")
     monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "float16")
+    monkeypatch.setenv("STICKER_REACTION_CHANCE", "0.25")
+    monkeypatch.setenv("STICKER_COOLDOWN_SECONDS", "120")
+    monkeypatch.setenv("STICKER_MIN_REPLIES", "2")
 
     monkeypatch.setenv(
         "RATE_LIMIT_SECONDS",
@@ -177,6 +186,9 @@ def test_load_settings_with_custom_values(
     assert settings.whisper_model_size == "base"
     assert settings.whisper_device == "cuda"
     assert settings.whisper_compute_type == "float16"
+    assert settings.sticker_reaction_chance == 0.25
+    assert settings.sticker_cooldown_seconds == 120.0
+    assert settings.sticker_min_replies == 2
 
 
 def test_load_settings_without_telegram_token(
@@ -383,6 +395,8 @@ def test_load_settings_with_invalid_admin_ids(
         ("USER_STATE_RETENTION_SECONDS", "abc"),
         ("E621_REQUEST_INTERVAL_SECONDS", "-1"),
         ("E621_REQUEST_INTERVAL_SECONDS", "nan"),
+        ("STICKER_REACTION_CHANCE", "-1"),
+        ("STICKER_COOLDOWN_SECONDS", "-1"),
     ],
 )
 def test_load_settings_rejects_invalid_float_values(
@@ -454,6 +468,20 @@ def test_load_settings_rejects_invalid_history_limit(
         ValueError,
         match="CONVERSATION_HISTORY_LIMIT",
     ):
+        load_settings()
+
+
+def test_load_settings_rejects_sticker_chance_above_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Вероятность стикера должна оставаться в диапазоне 0..1."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("STICKER_REACTION_CHANCE", "1.1")
+
+    with pytest.raises(ValueError, match="STICKER_REACTION_CHANCE"):
         load_settings()
 
 

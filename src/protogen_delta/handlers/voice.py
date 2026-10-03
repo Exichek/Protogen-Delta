@@ -19,6 +19,7 @@ from protogen_delta.services.speech import (
     SpeechRecognitionError,
     SpeechTranscriber,
 )
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def create_voice_router(
     bot: Bot,
     transcriber: SpeechTranscriber,
     rate_limiter: UserRateLimiter | None = None,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер распознавания голосовых и обычного аудио."""
     router = Router(name=__name__)
@@ -130,7 +132,13 @@ def create_voice_router(
                 await response_engine.respond_and_deliver(
                     user_id,
                     history_text,
-                    create_reply_delivery(message, bot),
+                    create_reply_delivery(
+                        message,
+                        bot,
+                        sticker_service,
+                        user_id=user_id,
+                        context_tags=("voice",),
+                    ),
                     model_message_override=model_message,
                     trusted_input_context=trusted_context,
                 )

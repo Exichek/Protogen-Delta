@@ -24,6 +24,9 @@ class Settings:
     llm_provider: str = "deepseek"
     llm_disable_thinking: bool = True
     mini_app_url: str | None = None
+    sticker_reaction_chance: float = 0.15
+    sticker_cooldown_seconds: float = 900.0
+    sticker_min_replies: int = 4
     telegram_proxy_url: str | None = None
     log_level: str = "INFO"
     data_dir: Path = Path("data")
@@ -243,6 +246,20 @@ def load_settings() -> Settings:
         os.getenv("E621_REQUEST_INTERVAL_SECONDS", "1.0"),
         "E621_REQUEST_INTERVAL_SECONDS",
     )
+    sticker_reaction_chance = _parse_non_negative_float(
+        os.getenv("STICKER_REACTION_CHANCE", "0.15"),
+        "STICKER_REACTION_CHANCE",
+    )
+    if sticker_reaction_chance > 1:
+        raise ValueError("STICKER_REACTION_CHANCE не может быть больше 1")
+    sticker_cooldown_seconds = _parse_non_negative_float(
+        os.getenv("STICKER_COOLDOWN_SECONDS", "900"),
+        "STICKER_COOLDOWN_SECONDS",
+    )
+    sticker_min_replies = _parse_positive_int(
+        os.getenv("STICKER_MIN_REPLIES", "4"),
+        "STICKER_MIN_REPLIES",
+    )
     mini_app_url = os.getenv("MINI_APP_URL", "").strip()
     if mini_app_url and not mini_app_url.startswith("https://"):
         raise ValueError("MINI_APP_URL должен начинаться с https://")
@@ -254,6 +271,9 @@ def load_settings() -> Settings:
         llm_provider=llm_provider,
         llm_disable_thinking=llm_disable_thinking,
         mini_app_url=mini_app_url or None,
+        sticker_reaction_chance=sticker_reaction_chance,
+        sticker_cooldown_seconds=sticker_cooldown_seconds,
+        sticker_min_replies=sticker_min_replies,
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,
         telegram_proxy_url=telegram_proxy_url or None,

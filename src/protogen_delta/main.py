@@ -28,6 +28,7 @@ from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
+from protogen_delta.handlers.stickers import create_sticker_admin_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
 from protogen_delta.handlers.utilities import create_utilities_router
@@ -36,6 +37,7 @@ from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import DeepSeekService
@@ -47,6 +49,7 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
+from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
 logger = logging.getLogger(__name__)
@@ -116,6 +119,7 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
         memories_repository = MemoriesRepository(settings.data_dir)
+        stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
         memory = MemoryService(memories_repository)
 
@@ -211,6 +215,14 @@ async def main() -> None:
             memory=memory,
             creator_id=settings.creator_id,
         )
+        sticker_service = ContextualStickerService(
+            bot,
+            stickers_repository,
+            user_states,
+            chance=settings.sticker_reaction_chance,
+            cooldown_seconds=settings.sticker_cooldown_seconds,
+            min_replies=settings.sticker_min_replies,
+        )
 
         start_router = create_start_router(
             users_repository=users_repository,
@@ -230,18 +242,20 @@ async def main() -> None:
             sources=ArtSourcesRepository(settings.data_dir, settings.art_chat_id),
         )
 
+        effective_admin_ids = settings.admin_ids | (
+            frozenset({settings.creator_id})
+            if settings.creator_id is not None
+            else frozenset()
+        )
         admin_router = create_admin_router(
             images_repository=images_repository,
             users_repository=users_repository,
             bot_state=bot_state,
-            admin_ids=(
-                settings.admin_ids
-                | (
-                    frozenset({settings.creator_id})
-                    if settings.creator_id is not None
-                    else frozenset()
-                )
-            ),
+            admin_ids=effective_admin_ids,
+        )
+        sticker_admin_router = create_sticker_admin_router(
+            stickers_repository,
+            effective_admin_ids,
         )
 
         creator_router = create_creator_router(
@@ -282,16 +296,19 @@ async def main() -> None:
             response_engine,
             rate_limiter=rate_limiter,
             bot=bot,
+            sticker_service=sticker_service,
         )
         media_router = create_media_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
         document_router = create_document_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
         voice_router = create_voice_router(
             response_engine,
@@ -302,6 +319,7 @@ async def main() -> None:
                 compute_type=settings.whisper_compute_type,
             ),
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
 
         dispatcher.include_router(start_router)
@@ -310,6 +328,7 @@ async def main() -> None:
         dispatcher.include_router(utilities_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
+        dispatcher.include_router(sticker_admin_router)
         dispatcher.include_router(creator_router)
         dispatcher.include_router(adult_router)
         dispatcher.include_router(e621_router)
