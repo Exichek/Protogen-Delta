@@ -17,6 +17,7 @@ from protogen_delta.handlers.voice import (
     create_voice_router,
 )
 from protogen_delta.services.audio_analysis import AudioAnalysis
+from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.speech import (
     MAX_AUDIO_BYTES,
@@ -26,6 +27,47 @@ from protogen_delta.services.speech import (
 )
 
 TEST_USER_ID = 123456
+
+
+def test_audio_model_report_is_used_and_failure_falls_back(monkeypatch: Any) -> None:
+    import protogen_delta.handlers.voice as voice_module
+
+    monkeypatch.setattr(
+        voice_module,
+        "analyze_audio",
+        Mock(side_effect=voice_module.AudioAnalysisError("bad")),
+    )
+    engine = AsyncMock(spec=ResponseEngine)
+    bot = AsyncMock(spec=Bot)
+
+    async def download(file_id: str, *, destination: io.BytesIO) -> None:
+        destination.write(b"audio")
+
+    bot.download.side_effect = download
+    transcriber = AsyncMock(spec=SpeechTranscriber)
+    transcriber.transcribe.side_effect = SpeechRecognitionError("no speech")
+    model = AsyncMock(spec=AudioUnderstandingService)
+    model.analyze.return_value = "Вероятно, рок с гитарой"
+
+    def router() -> Any:
+        return create_voice_router(
+            cast(ResponseEngine, engine),
+            cast(Bot, bot),
+            cast(SpeechTranscriber, transcriber),
+            audio_understanding=cast(AudioUnderstandingService, model),
+        )
+
+    audio = SimpleNamespace(file_id="audio", file_size=20, duration=40)
+    message, answer = _message(audio=audio)
+    asyncio.run(router().message.handlers[0].callback(message))
+    arguments = engine.respond_and_deliver.await_args.kwargs
+    assert "рок" in arguments["model_message_override"]
+    assert "60 секундам" in arguments["trusted_input_context"]
+    model.analyze.side_effect = voice_module.AudioAnalysisError("not available")
+    asyncio.run(router().message.handlers[0].callback(message))
+    call = answer.await_args
+    assert call is not None
+    assert AUDIO_RECOGNITION_ERROR_REPLY in call.args[0]
 
 
 def _message(

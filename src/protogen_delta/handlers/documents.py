@@ -46,6 +46,8 @@ def create_document_router(
     bot: Bot,
     rate_limiter: UserRateLimiter | None = None,
     sticker_service: ContextualStickerService | None = None,
+    *,
+    ocr_enabled: bool = False,
 ) -> Router:
     """Создать роутер чтения поддерживаемых документов."""
     router = Router(name=__name__)
@@ -75,11 +77,13 @@ def create_document_router(
 
         file_name = _safe_file_name(document.file_name)
         try:
+            arguments = {"ocr_enabled": True} if ocr_enabled else {}
             extracted = await asyncio.to_thread(
                 extract_document,
                 destination.getvalue(),
                 file_name,
                 document.mime_type,
+                **arguments,
             )
         except DocumentTooLargeError:
             await message.answer(DOCUMENT_TOO_LARGE_REPLY)
@@ -100,7 +104,8 @@ def create_document_router(
         attachment_text = extracted.text
         if extracted.truncated:
             attachment_text += (
-                "\n\n[Документ был обрезан приложением после первых " "60000 символов.]"
+                "\n\n[Документ обработан частично: достигнут лимит страниц, "
+                "времени, OCR/vision или 60000 символов. Не считай пропущенное прочитанным.]"
             )
 
         try:

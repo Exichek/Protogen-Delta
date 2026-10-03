@@ -1,14 +1,18 @@
 """Безопасное извлечение текста из пользовательских документов."""
 
 import io
-from dataclasses import dataclass
+import subprocess
+from dataclasses import dataclass, replace
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from docx import Document
 from openpyxl import load_workbook
 from PIL import Image
 from pypdf import PdfReader
+
+from protogen_delta.services.pdf_ocr import recognize_page, render_pdf_page
 
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_DOCUMENT_CHARS = 60_000
@@ -128,8 +132,9 @@ def _decode_text(data: bytes) -> str:
     raise DocumentReadError("Не удалось определить кодировку документа")
 
 
-def _extract_pdf(data: bytes) -> ExtractedDocument:
+def _extract_pdf(data: bytes, *, ocr_enabled: bool = False) -> ExtractedDocument:
     """Извлечь текстовый слой и изображения сканированных страниц PDF."""
+    rendered: Any = None
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted and reader.decrypt("") == 0:
@@ -137,8 +142,23 @@ def _extract_pdf(data: bytes) -> ExtractedDocument:
         parts: list[str] = []
         images: list[ExtractedImage] = []
         size = 0
+        truncated = False
+        ocr_failed = False
+        deadline = monotonic() + 90
+        if ocr_enabled:
+            import pypdfium2  # type: ignore[import-untyped]
+
+            rendered = pypdfium2.PdfDocument(data)
         for number, page in enumerate(reader.pages, start=1):
+            if number > 40 or monotonic() > deadline:
+                truncated = True
+                break
             text = page.extract_text() or ""
+            if not text.strip() and rendered is not None and not ocr_failed:
+                try:
+                    text = recognize_page(render_pdf_page(rendered, number - 1))
+                except OSError, subprocess.SubprocessError, ValueError:
+                    ocr_failed = True
             if text.strip():
                 part = f"[Страница {number}]\n{text.strip()}"
                 parts.append(part)
@@ -148,12 +168,24 @@ def _extract_pdf(data: bytes) -> ExtractedDocument:
                 if image is not None:
                     images.append(image)
                     parts.append(f"[Страница {number}: передана как скан] ")
+                else:
+                    parts.append(f"[Страница {number}: текст не извлечён]")
+                    truncated = True
+            else:
+                parts.append(f"[Страница {number}: скан не прочитан, лимит vision]")
+                truncated = True
             if size >= MAX_DOCUMENT_CHARS:
+                truncated = number < len(reader.pages) or size > MAX_DOCUMENT_CHARS
                 break
     except DocumentReadError:
         raise
     except Exception as error:
         raise DocumentReadError("Не удалось прочитать PDF") from error
+    finally:
+        if rendered is not None:
+            rendered.close()
+    if not size and not images:
+        raise DocumentReadError("В документе не найден читаемый текст")
     if images and not size:
         parts.insert(
             0,
@@ -161,7 +193,10 @@ def _extract_pdf(data: bytes) -> ExtractedDocument:
             "детали с приложенных изображений страниц.",
         )
     kind = "PDF (скан)" if images and not size else "PDF"
-    return _limited("\n\n".join(parts), kind, images=tuple(images))
+    result = _limited("\n\n".join(parts), kind, images=tuple(images))
+    if truncated:
+        result = replace(result, truncated=True)
+    return result
 
 
 def _extract_scanned_page(page: Any, number: int) -> ExtractedImage | None:
@@ -255,6 +290,8 @@ def extract_document(
     data: bytes,
     file_name: str | None,
     mime_type: str | None,
+    *,
+    ocr_enabled: bool = False,
 ) -> ExtractedDocument:
     """Извлечь ограниченный текст из поддерживаемого документа."""
     if len(data) > MAX_DOCUMENT_BYTES:
@@ -264,7 +301,7 @@ def extract_document(
     normalized_mime = (mime_type or "").lower().split(";", maxsplit=1)[0]
 
     if suffix == ".pdf" or normalized_mime == "application/pdf":
-        return _extract_pdf(data)
+        return _extract_pdf(data, ocr_enabled=ocr_enabled)
     if suffix == ".docx" or normalized_mime == (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ):

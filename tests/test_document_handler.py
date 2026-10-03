@@ -234,7 +234,7 @@ def test_truncated_document_is_marked_for_model(
 
     call = engine.respond_and_deliver.await_args
     assert call is not None
-    assert "обрезан" in call.kwargs["attachment_text"]
+    assert "обработан частично" in call.kwargs["attachment_text"]
 
 
 def test_scanned_pdf_images_are_passed_to_vision(
