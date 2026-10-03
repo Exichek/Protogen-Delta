@@ -141,6 +141,12 @@ def test_main_builds_application_and_starts_polling(
     help_router = Mock(
         name="help_router",
     )
+    menu_router = Mock(
+        name="menu_router",
+    )
+    utilities_router = Mock(
+        name="utilities_router",
+    )
     art_router = Mock(
         name="art_router",
     )
@@ -168,6 +174,12 @@ def test_main_builds_application_and_starts_polling(
     )
     create_help_router_mock = Mock(
         return_value=help_router,
+    )
+    create_menu_router_mock = Mock(
+        return_value=menu_router,
+    )
+    create_utilities_router_mock = Mock(
+        return_value=utilities_router,
     )
     create_art_router_mock = Mock(
         return_value=art_router,
@@ -267,6 +279,16 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_help_router",
         create_help_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_menu_router",
+        create_menu_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_utilities_router",
+        create_utilities_router_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -379,6 +401,7 @@ def test_main_builds_application_and_starts_polling(
         api_key="deepseek-key",
         base_url="https://api.test.local",
         model="test-model",
+        disable_thinking=True,
         tools=ANY,
     )
 
@@ -430,13 +453,19 @@ def test_main_builds_application_and_starts_polling(
 
     create_adult_router_mock.assert_called_once_with(user_states)
 
-    assert dispatcher_mock.include_router.call_count == 14
+    assert dispatcher_mock.include_router.call_count == 16
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         help_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        menu_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        utilities_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         art_router,
@@ -495,9 +524,9 @@ def test_main_builds_application_and_starts_polling(
         drop_pending_updates=True,
     )
 
-    set_commands_mock.assert_awaited_once_with(
-        bot_mock,
-    )
+    create_menu_router_mock.assert_called_once_with(None)
+    create_utilities_router_mock.assert_called_once_with(bot_mock)
+    set_commands_mock.assert_awaited_once_with(bot_mock, None)
 
     dispatcher_mock.start_polling.assert_awaited_once_with(
         bot_mock,

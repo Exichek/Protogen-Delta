@@ -220,7 +220,7 @@ def _log_request_metrics(
 
 
 class DeepSeekService:
-    """Выполнять текстовые запросы к DeepSeek."""
+    """Выполнять запросы к OpenAI-совместимому LLM API."""
 
     def __init__(
         self,
@@ -230,6 +230,7 @@ class DeepSeekService:
         timeout: float = 15.0,
         max_retries: int = 1,
         tools: ToolExecutor | None = None,
+        disable_thinking: bool = True,
     ) -> None:
         """Инициализировать клиент DeepSeek."""
         if timeout <= 0:
@@ -246,6 +247,11 @@ class DeepSeekService:
         )
         self._model = model
         self._tools = tools
+        self._provider_options: dict[str, Any] = (
+            {"extra_body": {"thinking": {"type": "disabled"}}}
+            if disable_thinking
+            else {}
+        )
 
     async def chat(
         self,
@@ -325,11 +331,7 @@ class DeepSeekService:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
-                extra_body={
-                    "thinking": {
-                        "type": "disabled",
-                    }
-                },
+                **self._provider_options,
             )
         except TimeoutError as error:
             raise DeepSeekTimeoutError(
@@ -414,7 +416,7 @@ class DeepSeekService:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
-                extra_body={"thinking": {"type": "disabled"}},
+                **self._provider_options,
             )
             _log_request_metrics(
                 request_type="chat_no_selected_tools",
@@ -440,7 +442,7 @@ class DeepSeekService:
                 tools=cast(Any, schemas),
                 tool_choice=tool_choice,
                 max_tokens=4096,
-                extra_body={"thinking": {"type": "disabled"}},
+                **self._provider_options,
             )
             _log_request_metrics(
                 request_type=f"chat_tools_{step}",
@@ -503,11 +505,7 @@ class DeepSeekService:
                 ],
                 max_tokens=5,
                 temperature=0,
-                extra_body={
-                    "thinking": {
-                        "type": "disabled",
-                    }
-                },
+                **self._provider_options,
             )
         except OpenAIError as error:
             raise _translate_openai_error(error) from error
@@ -524,5 +522,5 @@ class DeepSeekService:
         return (response.choices[0].message.content or "").strip().lower()
 
     async def close(self) -> None:
-        """Закрыть HTTP-клиент DeepSeek."""
+        """Закрыть HTTP-клиент LLM-провайдера."""
         await self._client.close()

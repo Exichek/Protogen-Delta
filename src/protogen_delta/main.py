@@ -24,11 +24,13 @@ from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.media import create_media_router
+from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
+from protogen_delta.handlers.utilities import create_utilities_router
 from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
@@ -164,9 +166,10 @@ async def main() -> None:
         )
 
         deepseek = DeepSeekService(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-            model=settings.deepseek_model,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            disable_thinking=settings.llm_disable_thinking,
             tools=ToolExecutor(
                 default_registry(
                     proxy_url=settings.telegram_proxy_url,
@@ -217,6 +220,8 @@ async def main() -> None:
             repeat_start_prompt=repeat_start_prompt,
         )
         help_router = create_help_router()
+        menu_router = create_menu_router(settings.mini_app_url)
+        utilities_router = create_utilities_router(bot)
 
         art_router = create_art_router(
             images_repository=images_repository,
@@ -300,7 +305,9 @@ async def main() -> None:
         )
 
         dispatcher.include_router(start_router)
+        dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
+        dispatcher.include_router(utilities_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(creator_router)
@@ -317,7 +324,7 @@ async def main() -> None:
         await bot.delete_webhook(
             drop_pending_updates=True,
         )
-        await set_commands(bot)
+        await set_commands(bot, settings.mini_app_url)
 
         # Команда /proactive временно скрыта: на время этого режима фоновые
         # сообщения включаются всем, включая ранее отключившие их в тестах.
