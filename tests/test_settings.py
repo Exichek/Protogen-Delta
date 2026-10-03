@@ -35,6 +35,10 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_DISABLE_THINKING", raising=False)
     monkeypatch.delenv("MINI_APP_URL", raising=False)
+    monkeypatch.delenv("MINI_APP_SERVER_ENABLED", raising=False)
+    monkeypatch.delenv("MINI_APP_HOST", raising=False)
+    monkeypatch.delenv("MINI_APP_PORT", raising=False)
+    monkeypatch.delenv("MINI_APP_AUTH_MAX_AGE_SECONDS", raising=False)
     monkeypatch.delenv("STICKER_REACTION_CHANCE", raising=False)
     monkeypatch.delenv("STICKER_COOLDOWN_SECONDS", raising=False)
     monkeypatch.delenv("STICKER_MIN_REPLIES", raising=False)
@@ -79,6 +83,10 @@ def test_load_settings_with_defaults(
     assert settings.llm_provider == "deepseek"
     assert settings.llm_disable_thinking is True
     assert settings.mini_app_url is None
+    assert settings.mini_app_server_enabled is False
+    assert settings.mini_app_host == "127.0.0.1"
+    assert settings.mini_app_port == 8080
+    assert settings.mini_app_auth_max_age_seconds == 3600
     assert settings.sticker_reaction_chance == 0.15
     assert settings.sticker_cooldown_seconds == 900.0
     assert settings.sticker_min_replies == 4
@@ -139,6 +147,11 @@ def test_load_settings_with_custom_values(
     monkeypatch.setenv("STICKER_REACTION_CHANCE", "0.25")
     monkeypatch.setenv("STICKER_COOLDOWN_SECONDS", "120")
     monkeypatch.setenv("STICKER_MIN_REPLIES", "2")
+    monkeypatch.setenv("MINI_APP_URL", "https://delta.example/app")
+    monkeypatch.setenv("MINI_APP_SERVER_ENABLED", "true")
+    monkeypatch.setenv("MINI_APP_HOST", "0.0.0.0")
+    monkeypatch.setenv("MINI_APP_PORT", "9000")
+    monkeypatch.setenv("MINI_APP_AUTH_MAX_AGE_SECONDS", "600")
 
     monkeypatch.setenv(
         "RATE_LIMIT_SECONDS",
@@ -189,6 +202,10 @@ def test_load_settings_with_custom_values(
     assert settings.sticker_reaction_chance == 0.25
     assert settings.sticker_cooldown_seconds == 120.0
     assert settings.sticker_min_replies == 2
+    assert settings.mini_app_server_enabled is True
+    assert settings.mini_app_host == "0.0.0.0"
+    assert settings.mini_app_port == 9000
+    assert settings.mini_app_auth_max_age_seconds == 600
 
 
 def test_load_settings_without_telegram_token(
@@ -292,6 +309,21 @@ def test_load_settings_rejects_non_https_mini_app(
     monkeypatch.setenv("MINI_APP_URL", "http://delta.example/app")
 
     with pytest.raises(ValueError, match="MINI_APP_URL"):
+        load_settings()
+
+
+def test_load_settings_requires_url_for_embedded_mini_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Встроенный сервер без публичного URL не должен создавать мёртвую панель."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("MINI_APP_SERVER_ENABLED", "true")
+    monkeypatch.delenv("MINI_APP_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="MINI_APP_URL"):
         load_settings()
 
 

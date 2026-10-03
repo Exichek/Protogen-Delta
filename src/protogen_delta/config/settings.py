@@ -24,6 +24,10 @@ class Settings:
     llm_provider: str = "deepseek"
     llm_disable_thinking: bool = True
     mini_app_url: str | None = None
+    mini_app_server_enabled: bool = False
+    mini_app_host: str = "127.0.0.1"
+    mini_app_port: int = 8080
+    mini_app_auth_max_age_seconds: int = 3600
     sticker_reaction_chance: float = 0.15
     sticker_cooldown_seconds: float = 900.0
     sticker_min_replies: int = 4
@@ -263,6 +267,24 @@ def load_settings() -> Settings:
     mini_app_url = os.getenv("MINI_APP_URL", "").strip()
     if mini_app_url and not mini_app_url.startswith("https://"):
         raise ValueError("MINI_APP_URL должен начинаться с https://")
+    mini_app_server_enabled = _parse_bool(
+        os.getenv("MINI_APP_SERVER_ENABLED", "false"),
+        "MINI_APP_SERVER_ENABLED",
+    )
+    if mini_app_server_enabled and not mini_app_url:
+        raise RuntimeError("MINI_APP_URL обязателен для встроенной Mini App")
+    mini_app_host = os.getenv("MINI_APP_HOST", "127.0.0.1").strip()
+    if not mini_app_host:
+        raise ValueError("MINI_APP_HOST не может быть пустым")
+    mini_app_port = _parse_positive_int(
+        os.getenv("MINI_APP_PORT", "8080"), "MINI_APP_PORT"
+    )
+    if mini_app_port > 65535:
+        raise ValueError("MINI_APP_PORT не может быть больше 65535")
+    mini_app_auth_max_age_seconds = _parse_positive_int(
+        os.getenv("MINI_APP_AUTH_MAX_AGE_SECONDS", "3600"),
+        "MINI_APP_AUTH_MAX_AGE_SECONDS",
+    )
 
     return Settings(
         telegram_token=telegram_token,
@@ -271,6 +293,10 @@ def load_settings() -> Settings:
         llm_provider=llm_provider,
         llm_disable_thinking=llm_disable_thinking,
         mini_app_url=mini_app_url or None,
+        mini_app_server_enabled=mini_app_server_enabled,
+        mini_app_host=mini_app_host,
+        mini_app_port=mini_app_port,
+        mini_app_auth_max_age_seconds=mini_app_auth_max_age_seconds,
         sticker_reaction_chance=sticker_reaction_chance,
         sticker_cooldown_seconds=sticker_cooldown_seconds,
         sticker_min_replies=sticker_min_replies,

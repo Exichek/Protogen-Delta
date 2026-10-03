@@ -47,6 +47,7 @@ include = [
     "src/protogen_delta/config/data/*.json",
     "src/protogen_delta/config/prompts/*.txt",
     "src/protogen_delta/config/prompts/personality/*.txt",
+    "src/protogen_delta/miniapp/static/*.html",
 ]
 
 

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Протоген Дельта</title>
+  <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: var(--tg-theme-text-color,#eef4ff); background: var(--tg-theme-bg-color,#0c1420); }
+    main { width: min(100%, 720px); margin: 0 auto; padding: max(20px,env(safe-area-inset-top)) 16px max(32px,env(safe-area-inset-bottom)); }
+    header { display:flex; gap:14px; align-items:center; margin-bottom:20px; }
+    .visor { width:56px; height:56px; border-radius:18px; display:grid; place-items:center; font-size:28px; background:linear-gradient(145deg,#25234c,#00b6d6); box-shadow:0 10px 28px #00b6d633; }
+    h1 { margin:0; font-size:24px; } .muted { color:var(--tg-theme-hint-color,#95a4b8); margin:4px 0 0; }
+    .card { background:var(--tg-theme-secondary-bg-color,#162333); border:1px solid #ffffff12; border-radius:18px; padding:16px; margin:12px 0; box-shadow:0 12px 30px #0003; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .stat { padding:12px; border-radius:14px; background:#ffffff08; } .stat b { display:block; margin-top:5px; }
+    label { display:block; font-size:13px; color:var(--tg-theme-hint-color,#95a4b8); margin:14px 0 6px; }
+    select,textarea,button { width:100%; border:0; border-radius:12px; font:inherit; }
+    select,textarea { padding:12px; color:var(--tg-theme-text-color,#eef4ff); background:var(--tg-theme-bg-color,#0c1420); outline:1px solid #ffffff18; }
+    textarea { min-height:110px; resize:vertical; }
+    button { margin-top:16px; padding:13px; font-weight:700; color:var(--tg-theme-button-text-color,#fff); background:var(--tg-theme-button-color,#6c5ce7); cursor:pointer; }
+    button:disabled { opacity:.55; cursor:wait; } #status { min-height:22px; margin:12px 2px; font-size:14px; }
+    .error { color:#ff7d88; } .ok { color:#62dca4; }
+    @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted" id="hello">Профиль и настройки</p></div></header>
+  <section class="card">
+    <div class="grid">
+      <div class="stat">Возрастной режим<b id="mode">—</b></div>
+      <div class="stat">RP-сцена<b id="rp-state">—</b></div>
+    </div>
+    <label for="content-mode">Режим общения</label>
+    <select id="content-mode"><option value="soft">Мягкий</option><option value="adult">18+</option></select>
+    <label for="configuration">Конфигурация Дельты в RP</label>
+    <select id="configuration"><option value="male">Мужская</option><option value="female">Женская</option></select>
+    <label for="character">Мой персонаж для RP</label>
+    <textarea id="character" maxlength="1000" placeholder="Вид, внешность, важные детали и роль в сцене"></textarea>
+    <button id="save">Сохранить настройки</button>
+    <div id="status"></div>
+  </section>
+  <section class="card"><b>Текущий облик Дельты</b><p class="muted" id="appearance">Базовый облик</p></section>
+</main>
+<script>
+  const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
+  const initData = tg?.initData || ""; const status = document.querySelector("#status");
+  const api = async (method="GET", body=null) => {
+    const response = await fetch("/api/profile", {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":"application/json"}, body:body?JSON.stringify(body):null});
+    if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`); return response.json();
+  };
+  const render = p => {
+    document.querySelector("#hello").textContent = `${p.user.first_name} · ID ${p.user.id}`;
+    document.querySelector("#content-mode").value = p.content_mode === "adult" ? "adult" : "soft";
+    document.querySelector("#configuration").value = p.roleplay_configuration;
+    document.querySelector("#character").value = p.roleplay_character;
+    document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
+    document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
+    document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+  };
+  const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
+  api().then(render).catch(fail);
+  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
+</script>
+</body>
+</html>

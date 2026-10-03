@@ -33,6 +33,7 @@ from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
 from protogen_delta.handlers.utilities import create_utilities_router
 from protogen_delta.handlers.voice import create_voice_router
+from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
@@ -110,6 +111,7 @@ async def main() -> None:
     deepseek: DeepSeekService | None = None
     proactive_messenger: ProactiveMessenger | None = None
     proactive_task: asyncio.Task[None] | None = None
+    mini_app_server: MiniAppServer | None = None
 
     try:
         dispatcher = Dispatcher()
@@ -349,6 +351,16 @@ async def main() -> None:
         # сообщения включаются всем, включая ранее отключившие их в тестах.
         await memories_repository.enable_proactive_for_all()
 
+        if settings.mini_app_server_enabled:
+            mini_app_server = MiniAppServer(
+                settings.telegram_token,
+                user_states,
+                host=settings.mini_app_host,
+                port=settings.mini_app_port,
+                auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
+            )
+            await mini_app_server.start()
+
         logger.info("Бот запущен")
 
         proactive_messenger = ProactiveMessenger(
@@ -374,6 +386,8 @@ async def main() -> None:
             except Exception:
                 logger.exception("Фоновая задача завершилась с ошибкой")
         try:
+            if mini_app_server is not None:
+                await mini_app_server.close()
             if deepseek is not None:
                 await deepseek.close()
         finally:
