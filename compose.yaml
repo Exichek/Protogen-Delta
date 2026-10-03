@@ -1,0 +1,39 @@
+services:
+  delta:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      MINI_APP_URL: https://${MINI_APP_DOMAIN:?Укажи MINI_APP_DOMAIN в .env}
+      MINI_APP_SERVER_ENABLED: "true"
+      MINI_APP_HOST: 0.0.0.0
+      PDF_OCR_ENABLED: "true"
+    volumes:
+      - delta_data:/app/data
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      MINI_APP_DOMAIN: ${MINI_APP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      delta:
+        condition: service_healthy
+volumes:
+  delta_data:
+  caddy_data:
+  caddy_config:

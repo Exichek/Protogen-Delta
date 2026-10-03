@@ -228,3 +228,29 @@ def test_reports_unreadable_office_documents() -> None:
         extract_document(b"broken", "broken.docx", None)
     with pytest.raises(DocumentReadError, match="XLSX"):
         extract_document(b"broken", "broken.xlsx", None)
+
+
+def test_batch_ocr_reads_more_than_four_scans(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Все шесть реальных PDF-страниц рендерятся и читаются локально."""
+    output = io.BytesIO()
+    pages = [Image.new("RGB", (80, 100), "white") for _ in range(6)]
+    pages[0].save(output, "PDF", save_all=True, append_images=pages[1:])
+    ocr = Mock(side_effect=[f"Текст {i}" for i in range(1, 7)])
+    monkeypatch.setattr(documents_module, "recognize_page", ocr)
+    result = extract_document(output.getvalue(), "scan.pdf", None, ocr_enabled=True)
+    assert ocr.call_count == 6
+    assert "Текст 6" in result.text and "[Страница 6]" in result.text
+    assert not result.images and not result.truncated
+    ocr.side_effect = FileNotFoundError()
+    result = extract_document(output.getvalue(), "scan.pdf", None, ocr_enabled=True)
+    assert len(result.images) == 4 and result.truncated
+
+
+def test_ocr_runner_uses_russian_and_english(monkeypatch: pytest.MonkeyPatch) -> None:
+    import protogen_delta.services.pdf_ocr as ocr_module
+
+    runner = Mock(return_value=SimpleNamespace(stdout="Привет".encode()))
+    monkeypatch.setattr(ocr_module.subprocess, "run", runner)
+    assert ocr_module.recognize_page(Image.new("RGB", (40, 30))) == "Привет"
+    assert "rus+eng" in runner.call_args.args[0]
+    assert runner.call_args.kwargs["timeout"] == 15

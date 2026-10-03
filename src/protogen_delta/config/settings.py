@@ -32,6 +32,12 @@ class Settings:
     sticker_cooldown_seconds: float = 900.0
     sticker_min_replies: int = 4
     sticker_pack_enabled: bool = True
+    pdf_ocr_enabled: bool = False
+    audio_understanding_enabled: bool = False
+    audio_api_key: str | None = None
+    audio_base_url: str | None = None
+    audio_model: str | None = None
+    saucenao_api_key: str | None = None
     telegram_proxy_url: str | None = None
     log_level: str = "INFO"
     data_dir: Path = Path("data")
@@ -174,6 +180,22 @@ def load_settings() -> Settings:
     ).strip()
 
     brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+    brave_key_file = os.getenv("BRAVE_SEARCH_API_KEY_FILE", "").strip()
+    if brave_key_file:
+        try:
+            with Path(brave_key_file).open("rb") as key_stream:
+                raw_key = key_stream.read(4097)
+            if len(raw_key) > 4096:
+                raise ValueError("слишком большой файл")
+            brave_search_api_key = raw_key.decode("utf-8").strip()
+            if not brave_search_api_key or any(
+                char.isspace() for char in brave_search_api_key
+            ):
+                raise ValueError("пустой или некорректный ключ")
+        except (OSError, ValueError) as error:
+            raise RuntimeError(
+                "Не удалось прочитать BRAVE_SEARCH_API_KEY_FILE"
+            ) from error
 
     if not telegram_token:
         raise RuntimeError("TELEGRAM_TOKEN не найден в окружении")
@@ -286,6 +308,18 @@ def load_settings() -> Settings:
         os.getenv("MINI_APP_AUTH_MAX_AGE_SECONDS", "3600"),
         "MINI_APP_AUTH_MAX_AGE_SECONDS",
     )
+    audio_enabled = _parse_bool(
+        os.getenv("AUDIO_UNDERSTANDING_ENABLED", "false"), "AUDIO_UNDERSTANDING_ENABLED"
+    )
+    audio_key = os.getenv("AUDIO_API_KEY", "").strip()
+    audio_url = os.getenv("AUDIO_BASE_URL", "").strip()
+    audio_model = os.getenv("AUDIO_MODEL", "").strip()
+    if audio_enabled and (
+        not audio_key or not audio_model or not audio_url.startswith("https://")
+    ):
+        raise RuntimeError(
+            "Для аудиомодели нужны AUDIO_API_KEY, AUDIO_MODEL и HTTPS AUDIO_BASE_URL"
+        )
 
     return Settings(
         telegram_token=telegram_token,
@@ -304,6 +338,14 @@ def load_settings() -> Settings:
         sticker_pack_enabled=_parse_bool(
             os.getenv("STICKER_PACK_ENABLED", "true"), "STICKER_PACK_ENABLED"
         ),
+        pdf_ocr_enabled=_parse_bool(
+            os.getenv("PDF_OCR_ENABLED", "false"), "PDF_OCR_ENABLED"
+        ),
+        audio_understanding_enabled=audio_enabled,
+        audio_api_key=audio_key or None,
+        audio_base_url=audio_url or None,
+        audio_model=audio_model or None,
+        saucenao_api_key=os.getenv("SAUCENAO_API_KEY", "").strip() or None,
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,
         telegram_proxy_url=telegram_proxy_url or None,

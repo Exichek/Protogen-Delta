@@ -1,0 +1,8 @@
+{$MINI_APP_DOMAIN} {
+    reverse_proxy delta:8080
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+}

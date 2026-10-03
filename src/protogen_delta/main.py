@@ -7,6 +7,7 @@ from typing import cast
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramAPIError
+from openai import AsyncOpenAI
 
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
@@ -21,9 +22,11 @@ from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.documents import create_document_router
+from protogen_delta.handlers.download import create_download_router
 from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
+from protogen_delta.handlers.image_source import create_image_source_router
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
@@ -42,10 +45,13 @@ from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.fetishes import FetishRoleClassifier
+from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
+from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
@@ -114,8 +120,19 @@ async def main() -> None:
     proactive_messenger: ProactiveMessenger | None = None
     proactive_task: asyncio.Task[None] | None = None
     mini_app_server: MiniAppServer | None = None
+    audio_understanding: AudioUnderstandingService | None = None
 
     try:
+        if settings.audio_understanding_enabled:
+            audio_understanding = AudioUnderstandingService(
+                AsyncOpenAI(
+                    api_key=settings.audio_api_key,
+                    base_url=settings.audio_base_url,
+                    timeout=40,
+                    max_retries=0,
+                ),
+                settings.audio_model or "",
+            )
         dispatcher = Dispatcher()
         register_error_handler(dispatcher)
 
@@ -330,6 +347,7 @@ async def main() -> None:
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            ocr_enabled=settings.pdf_ocr_enabled,
         )
         voice_router = create_voice_router(
             response_engine,
@@ -341,6 +359,7 @@ async def main() -> None:
             ),
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            audio_understanding=audio_understanding,
         )
 
         dispatcher.include_router(start_router)
@@ -355,6 +374,12 @@ async def main() -> None:
         dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
+        dispatcher.include_router(create_download_router(MediaDownloader()))
+        dispatcher.include_router(
+            create_image_source_router(
+                bot, ImageSourceService(settings.saucenao_api_key or "")
+            )
+        )
         dispatcher.include_router(unknown_command_router)
         dispatcher.include_router(media_router)
         dispatcher.include_router(document_router)
@@ -405,6 +430,8 @@ async def main() -> None:
             except Exception:
                 logger.exception("Фоновая задача завершилась с ошибкой")
         try:
+            if audio_understanding is not None:
+                await audio_understanding.close()
             if mini_app_server is not None:
                 await mini_app_server.close()
             if deepseek is not None:

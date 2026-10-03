@@ -19,6 +19,8 @@ async def set_commands(bot: Bot, mini_app_url: str | None = None) -> None:
         BotCommand(command="rp", description="🎭 Управление RP — /rp off"),
         BotCommand(command="adult", description="🔞 Выбрать возрастной режим"),
         BotCommand(command="id", description="🪪 Узнать Telegram ID"),
+        BotCommand(command="download", description="📥 Скачать видео по ссылке"),
+        BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),
         BotCommand(command="help", description="ℹ️ Помощь"),
     ]
