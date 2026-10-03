@@ -118,6 +118,8 @@ class PersistentUserState:
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
     roleplay_fetishes: tuple[str, ...] = ()
+    roleplay_preferences: str = ""
+    roleplay_boundaries: str = ""
     delta_appearance: str = ""
     content_mode: ContentMode = "unselected"
 
@@ -147,6 +149,8 @@ class UserStatePersistence(Protocol):
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
         roleplay_fetishes: tuple[str, ...] = (),
+        roleplay_preferences: str = "",
+        roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
     ) -> None:
@@ -180,6 +184,8 @@ class UserState:
     roleplay_configuration: str = "male"
     roleplay_character: str = ""
     roleplay_fetishes: tuple[str, ...] = ()
+    roleplay_preferences: str = ""
+    roleplay_boundaries: str = ""
     delta_appearance: str = ""
     content_mode: ContentMode = "unselected"
     emotions_updated_at: float = field(
@@ -219,8 +225,6 @@ class UserState:
         self.history.clear()
         self.emotions.arousal = 0.0
         self.roleplay_active = False
-        self.roleplay_configuration = "male"
-        self.roleplay_character = ""
         self.roleplay_fetishes = ()
 
     def reset_all(self) -> None:
@@ -228,6 +232,10 @@ class UserState:
         self.reset_context()
         self.emotions = EmotionalState()
         self.relationship = RelationshipState()
+        self.roleplay_configuration = "male"
+        self.roleplay_character = ""
+        self.roleplay_preferences = ""
+        self.roleplay_boundaries = ""
         self.delta_appearance = ""
         self.content_mode = "unselected"
 
@@ -319,6 +327,8 @@ class UserStateStore:
                                 roleplay_configuration=state.roleplay_configuration,
                                 roleplay_character=state.roleplay_character,
                                 roleplay_fetishes=state.roleplay_fetishes,
+                                roleplay_preferences=state.roleplay_preferences,
+                                roleplay_boundaries=state.roleplay_boundaries,
                                 delta_appearance=state.delta_appearance,
                                 content_mode=state.content_mode,
                             )
@@ -391,6 +401,8 @@ class UserStateStore:
             state.roleplay_configuration = persistent_state.roleplay_configuration
             state.roleplay_character = persistent_state.roleplay_character
             state.roleplay_fetishes = persistent_state.roleplay_fetishes
+            state.roleplay_preferences = persistent_state.roleplay_preferences
+            state.roleplay_boundaries = persistent_state.roleplay_boundaries
             state.delta_appearance = persistent_state.delta_appearance
             state.content_mode = persistent_state.content_mode
         else:

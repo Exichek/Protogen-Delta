@@ -21,6 +21,7 @@ from protogen_delta.services.documents import (
     extract_document,
 )
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ def create_document_router(
     response_engine: ResponseEngine,
     bot: Bot,
     rate_limiter: UserRateLimiter | None = None,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер чтения поддерживаемых документов."""
     router = Router(name=__name__)
@@ -114,7 +116,13 @@ def create_document_router(
                 await response_engine.respond_and_deliver(
                     user_id,
                     request,
-                    create_reply_delivery(message, bot),
+                    create_reply_delivery(
+                        message,
+                        bot,
+                        sticker_service,
+                        user_id=user_id,
+                        context_tags=("document",),
+                    ),
                     attachment_text=attachment_text,
                     attachment_name=f"{file_name} ({extracted.kind})",
                     images=images,

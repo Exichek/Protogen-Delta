@@ -127,6 +127,10 @@ def test_user_state_reset_preserves_persistent_state() -> None:
         familiarity=0.7,
         resentment=0.4,
     )
+    state.roleplay_preferences = "медленная сцена"
+    state.roleplay_boundaries = "без унижения"
+    state.roleplay_configuration = "female"
+    state.roleplay_character = "лиса"
 
     state.history.append(
         ConversationTurn(
@@ -145,6 +149,10 @@ def test_user_state_reset_preserves_persistent_state() -> None:
     assert state.emotions.arousal == 0.0
     assert state.relationship.familiarity == pytest.approx(0.7)
     assert state.relationship.resentment == pytest.approx(0.4)
+    assert state.roleplay_preferences == "медленная сцена"
+    assert state.roleplay_boundaries == "без унижения"
+    assert state.roleplay_configuration == "female"
+    assert state.roleplay_character == "лиса"
 
 
 def test_user_state_store_returns_same_state() -> None:
@@ -608,6 +616,8 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
         roleplay_configuration="male",
         roleplay_character="",
         roleplay_fetishes=(),
+        roleplay_preferences="",
+        roleplay_boundaries="",
         delta_appearance="",
         content_mode="unselected",
     )
@@ -907,6 +917,8 @@ def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
         roleplay_configuration="male",
         roleplay_character="",
         roleplay_fetishes=(),
+        roleplay_preferences="",
+        roleplay_boundaries="",
         delta_appearance="",
         content_mode="unselected",
     )

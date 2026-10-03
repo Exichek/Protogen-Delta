@@ -1478,7 +1478,11 @@ def test_response_engine_fully_resets_user() -> None:
     state.mood = "angry"
     state.reply_count = 4
     state.roleplay_active = True
+    state.roleplay_configuration = "female"
+    state.roleplay_character = "лиса"
     state.roleplay_fetishes = ("bondage",)
+    state.roleplay_preferences = "медленно"
+    state.roleplay_boundaries = "без унижения"
 
     state.history.append(
         ConversationTurn(
@@ -1507,7 +1511,11 @@ def test_response_engine_fully_resets_user() -> None:
     assert state.reply_count == 0
     assert list(state.history) == []
     assert state.roleplay_active is False
+    assert state.roleplay_configuration == "male"
+    assert state.roleplay_character == ""
     assert state.roleplay_fetishes == ()
+    assert state.roleplay_preferences == ""
+    assert state.roleplay_boundaries == ""
 
     assert state.emotions.warmth == 0.0
     assert state.emotions.irritation == 0.0
@@ -1744,6 +1752,10 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
         )
     )
 
+    state = engine._user_states.get(TEST_USER_ID)
+    state.roleplay_preferences = "медленная сцена и больше инициативы"
+    state.roleplay_boundaries = "без унижения"
+
     second_result = asyncio.run(
         engine.respond(
             TEST_USER_ID,
@@ -1753,8 +1765,6 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
 
     assert first_result == "RP ответ"
     assert second_result == "Продолжение RP"
-
-    state = engine._user_states.get(TEST_USER_ID)
 
     assert state.roleplay_active is True
 
@@ -1777,6 +1787,8 @@ def test_response_engine_keeps_roleplay_active_for_follow_up() -> None:
     assert "нейтральные описания молча" in second_call.kwargs["system_prompt"]
     assert "Не повторяй декоративные реакции" in second_call.kwargs["system_prompt"]
     assert "принадлежностью частей тела" in second_call.kwargs["system_prompt"]
+    assert "медленная сцена и больше инициативы" in second_call.kwargs["system_prompt"]
+    assert "без унижения" in second_call.kwargs["system_prompt"]
 
     assert second_call.kwargs["history"] == (
         ConversationTurn(
@@ -1853,6 +1865,8 @@ def test_response_engine_disables_only_roleplay() -> None:
     state.mood = "sweet"
     state.reply_count = 3
     state.roleplay_active = True
+    state.roleplay_configuration = "female"
+    state.roleplay_character = "лиса"
     state.roleplay_fetishes = ("bondage",)
 
     state.history.append(
@@ -1881,6 +1895,8 @@ def test_response_engine_disables_only_roleplay() -> None:
 
     assert was_active is True
     assert state.roleplay_active is False
+    assert state.roleplay_configuration == "female"
+    assert state.roleplay_character == "лиса"
     assert state.roleplay_fetishes == ()
 
     assert state.mood == "sweet"
@@ -2001,8 +2017,8 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     state.history.append(ConversationTurn("*подхожу*", "*подняла голову*"))
     asyncio.run(engine.respond(TEST_USER_ID, "Стоп RP, объясни *TCP*"))
     assert state.roleplay_active is False
-    assert state.roleplay_configuration == "male"
-    assert state.roleplay_character == ""
+    assert state.roleplay_configuration == "female"
+    assert state.roleplay_character == "человек"
     assert state.roleplay_fetishes == ()
     assert state.emotions.arousal == 0.0
     assert state.relationship.trust == pytest.approx(0.7)
@@ -2037,8 +2053,8 @@ def test_scene_configuration_survives_history_window_and_is_isolated() -> None:
         assert "человек в пальто" not in other.kwargs["system_prompt"]
         await engine.disable_roleplay(TEST_USER_ID)
         state = engine._user_states.get(TEST_USER_ID)
-        assert state.roleplay_configuration == "male"
-        assert state.roleplay_character == ""
+        assert state.roleplay_configuration == "female"
+        assert state.roleplay_character == "человек в пальто"
 
     asyncio.run(run())
 

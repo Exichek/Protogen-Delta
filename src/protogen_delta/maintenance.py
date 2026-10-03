@@ -8,12 +8,14 @@ from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from protogen_delta.repositories.stickers import StickersRepository
+
 
 def copy_snapshot(source: Path, destination: Path) -> None:
     """Проверить SQLite/JSON и создать отдельную копию для backup или restore.
 
     Бот должен быть остановлен: SQLite backup согласован сам по себе,
-    но общей транзакции между SQLite и двумя JSON-файлами нет.
+    но общей транзакции между SQLite и JSON-файлами нет.
     """
     source = source.resolve(strict=True)
     destination = destination.absolute()
@@ -48,6 +50,10 @@ def copy_snapshot(source: Path, destination: Path) -> None:
         if not isinstance(chats, list) or not all(type(x) is int for x in chats):
             raise ValueError("Некорректный формат art_sources.json")
         payloads[art_sources.name] = payload
+    stickers = source / "stickers.json"
+    if stickers.exists():
+        StickersRepository(source).get_all()
+        payloads[stickers.name] = stickers.read_bytes()
     destination.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".delta-snapshot-", dir=destination.parent) as temp:
         staging = Path(temp) / "data"
