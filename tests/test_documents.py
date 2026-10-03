@@ -2,16 +2,20 @@
 
 import io
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from docx import Document
 from openpyxl import Workbook
+from PIL import Image
 
 import protogen_delta.services.documents as documents_module
 from protogen_delta.services.documents import (
     DocumentReadError,
     DocumentTooLargeError,
+    ExtractedImage,
     UnsupportedDocumentError,
+    _limited,
     extract_document,
 )
 
@@ -125,6 +129,88 @@ def test_extracts_pdf_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.kind == "PDF"
     assert "[Страница 1]\nПервая" in result.text
     assert "[Страница 2]\nВторая" in result.text
+
+
+def test_extracts_scanned_pdf_page_as_normalized_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Страница без текстового слоя должна передаваться vision как JPEG."""
+    scan = Image.new("RGB", (800, 600), "white")
+    page = SimpleNamespace(
+        extract_text=lambda: "",
+        images=[SimpleNamespace(image=scan)],
+    )
+    reader = SimpleNamespace(is_encrypted=False, pages=[page])
+    monkeypatch.setattr(documents_module, "PdfReader", lambda stream: reader)
+
+    result = extract_document(b"%PDF", "scan.pdf", "application/pdf")
+
+    assert result.kind == "PDF (скан)"
+    assert "сканированных страниц" in result.text
+    assert len(result.images) == 1
+    assert result.images[0].mime_type == "image/jpeg"
+    assert result.images[0].data.startswith(b"\xff\xd8\xff")
+
+
+def test_scan_only_document_gets_instruction_when_marker_is_empty() -> None:
+    image = ExtractedImage(b"jpeg", "image/jpeg", "страница")
+
+    result = _limited("", "PDF (скан)", images=(image,))
+
+    assert "сканированных страниц" in result.text
+    assert result.images == (image,)
+
+
+def test_pdf_scan_normalizes_transparency_and_ignores_broken_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transparent = Image.new("RGBA", (64, 64), (255, 0, 0, 120))
+    broken = SimpleNamespace(width="broken", height=1)
+    pages = [
+        SimpleNamespace(
+            extract_text=lambda: "",
+            images=[SimpleNamespace(image=transparent)],
+        ),
+        SimpleNamespace(
+            extract_text=lambda: "",
+            images=[SimpleNamespace(image=broken)],
+        ),
+    ]
+    reader = SimpleNamespace(is_encrypted=False, pages=pages)
+    monkeypatch.setattr(documents_module, "PdfReader", lambda stream: reader)
+
+    result = extract_document(b"%PDF", "scan.pdf", "application/pdf")
+
+    assert len(result.images) == 1
+
+
+def test_pdf_stops_after_text_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    pages = [
+        SimpleNamespace(extract_text=lambda: "длинная страница"),
+        SimpleNamespace(extract_text=lambda: "не должна читаться"),
+    ]
+    reader = SimpleNamespace(is_encrypted=False, pages=pages)
+    monkeypatch.setattr(documents_module, "PdfReader", lambda stream: reader)
+    monkeypatch.setattr(documents_module, "MAX_DOCUMENT_CHARS", 5)
+
+    result = extract_document(b"%PDF", "book.pdf", "application/pdf")
+
+    assert result.truncated is True
+    assert result.text == "[Стра"
+
+
+def test_pdf_ignores_unusable_scan_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слишком большое изображение не должно раздувать vision-запрос."""
+    huge = Mock(width=100_000, height=100_000)
+    page = SimpleNamespace(
+        extract_text=lambda: "",
+        images=[SimpleNamespace(image=huge)],
+    )
+    reader = SimpleNamespace(is_encrypted=False, pages=[page])
+    monkeypatch.setattr(documents_module, "PdfReader", lambda stream: reader)
+
+    with pytest.raises(DocumentReadError, match="не найден"):
+        extract_document(b"%PDF", "scan.pdf", "application/pdf")
 
 
 def test_rejects_password_protected_pdf(monkeypatch: pytest.MonkeyPatch) -> None:

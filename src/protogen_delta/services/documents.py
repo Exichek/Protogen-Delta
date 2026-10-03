@@ -7,10 +7,14 @@ from typing import Any
 
 from docx import Document
 from openpyxl import load_workbook
+from PIL import Image
 from pypdf import PdfReader
 
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_DOCUMENT_CHARS = 60_000
+MAX_PDF_SCAN_PAGES = 4
+MAX_PDF_IMAGE_PIXELS = 40_000_000
+MAX_PDF_IMAGE_DIMENSION = 2048
 
 _TEXT_EXTENSIONS = frozenset(
     {
@@ -65,25 +69,46 @@ class DocumentReadError(DocumentError):
 
 
 @dataclass(frozen=True, slots=True)
+class ExtractedImage:
+    """Нормализованное изображение страницы документа для vision-модели."""
+
+    data: bytes
+    mime_type: str
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractedDocument:
     """Текст документа и сведения о применённом ограничении."""
 
     text: str
     kind: str
     truncated: bool = False
+    images: tuple[ExtractedImage, ...] = ()
 
 
-def _limited(text: str, kind: str) -> ExtractedDocument:
+def _limited(
+    text: str,
+    kind: str,
+    *,
+    images: tuple[ExtractedImage, ...] = (),
+) -> ExtractedDocument:
     """Ограничить объём текста, передаваемого в единственный LLM-запрос."""
     normalized = text.strip()
-    if not normalized:
+    if not normalized and not images:
         raise DocumentReadError("В документе не найден читаемый текст")
+    if not normalized:
+        normalized = (
+            "PDF состоит из сканированных страниц. Прочитай текст и основные "
+            "детали с приложенных изображений страниц."
+        )
     if len(normalized) <= MAX_DOCUMENT_CHARS:
-        return ExtractedDocument(normalized, kind)
+        return ExtractedDocument(normalized, kind, images=images)
     return ExtractedDocument(
         normalized[:MAX_DOCUMENT_CHARS],
         kind,
         truncated=True,
+        images=images,
     )
 
 
@@ -104,12 +129,13 @@ def _decode_text(data: bytes) -> str:
 
 
 def _extract_pdf(data: bytes) -> ExtractedDocument:
-    """Извлечь текстовый слой PDF по страницам."""
+    """Извлечь текстовый слой и изображения сканированных страниц PDF."""
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted and reader.decrypt("") == 0:
             raise DocumentReadError("PDF защищён паролем")
         parts: list[str] = []
+        images: list[ExtractedImage] = []
         size = 0
         for number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
@@ -117,13 +143,63 @@ def _extract_pdf(data: bytes) -> ExtractedDocument:
                 part = f"[Страница {number}]\n{text.strip()}"
                 parts.append(part)
                 size += len(part)
+            elif len(images) < MAX_PDF_SCAN_PAGES:
+                image = _extract_scanned_page(page, number)
+                if image is not None:
+                    images.append(image)
+                    parts.append(f"[Страница {number}: передана как скан] ")
             if size >= MAX_DOCUMENT_CHARS:
                 break
     except DocumentReadError:
         raise
     except Exception as error:
         raise DocumentReadError("Не удалось прочитать PDF") from error
-    return _limited("\n\n".join(parts), "PDF")
+    if images and not size:
+        parts.insert(
+            0,
+            "PDF состоит из сканированных страниц. Прочитай текст и основные "
+            "детали с приложенных изображений страниц.",
+        )
+    kind = "PDF (скан)" if images and not size else "PDF"
+    return _limited("\n\n".join(parts), kind, images=tuple(images))
+
+
+def _extract_scanned_page(page: Any, number: int) -> ExtractedImage | None:
+    """Выбрать крупнейшее растровое изображение страницы и сжать для vision."""
+    try:
+        candidates = [
+            item.image
+            for item in getattr(page, "images", ())
+            if getattr(item, "image", None) is not None
+        ]
+        candidates = [
+            image
+            for image in candidates
+            if image.width * image.height <= MAX_PDF_IMAGE_PIXELS
+        ]
+        if not candidates:
+            return None
+        image = max(candidates, key=lambda item: item.width * item.height).copy()
+        image.thumbnail(
+            (MAX_PDF_IMAGE_DIMENSION, MAX_PDF_IMAGE_DIMENSION),
+            Image.Resampling.LANCZOS,
+        )
+        if image.mode in {"RGBA", "LA"} or "transparency" in image.info:
+            rgba = image.convert("RGBA")
+            background = Image.new("RGB", rgba.size, "white")
+            background.paste(rgba, mask=rgba.getchannel("A"))
+            image = background
+        else:
+            image = image.convert("RGB")
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=85, optimize=True)
+        return ExtractedImage(
+            data=output.getvalue(),
+            mime_type="image/jpeg",
+            label=f"скан страницы {number} PDF",
+        )
+    except AttributeError, OSError, TypeError, ValueError:
+        return None
 
 
 def _extract_docx(data: bytes) -> ExtractedDocument:

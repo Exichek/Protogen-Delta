@@ -19,7 +19,11 @@ from protogen_delta.handlers.documents import (
     create_document_router,
 )
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
-from protogen_delta.services.documents import MAX_DOCUMENT_BYTES, ExtractedDocument
+from protogen_delta.services.documents import (
+    MAX_DOCUMENT_BYTES,
+    ExtractedDocument,
+    ExtractedImage,
+)
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 
 TEST_USER_ID = 123456
@@ -231,3 +235,32 @@ def test_truncated_document_is_marked_for_model(
     call = engine.respond_and_deliver.await_args
     assert call is not None
     assert "обрезан" in call.kwargs["attachment_text"]
+
+
+def test_scanned_pdf_images_are_passed_to_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Извлечённая страница скана должна попасть в общий vision-запрос."""
+    router, engine, _ = _router(b"pdf")
+    monkeypatch.setattr(
+        "protogen_delta.handlers.documents.extract_document",
+        lambda *args: ExtractedDocument(
+            "Прочитай скан",
+            "PDF (скан)",
+            images=(ExtractedImage(b"jpeg", "image/jpeg", "скан страницы 1 PDF"),),
+        ),
+    )
+    document = SimpleNamespace(
+        file_id="pdf-id",
+        file_size=4,
+        file_name="scan.pdf",
+        mime_type="application/pdf",
+    )
+    message, _ = _message(document, "Что написано?")
+
+    asyncio.run(router.message.handlers[0].callback(message))
+
+    call_args = engine.respond_and_deliver.await_args
+    assert call_args is not None
+    assert call_args.kwargs["images"][0].data == b"jpeg"
+    assert call_args.kwargs["images"][0].label == "скан страницы 1 PDF"
