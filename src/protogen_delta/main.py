@@ -6,6 +6,7 @@ from typing import cast
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramAPIError
 
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
@@ -24,16 +25,21 @@ from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.media import create_media_router
+from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.start import create_start_router
+from protogen_delta.handlers.stickers import create_sticker_admin_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.handlers.unknown_command import create_unknown_command_router
+from protogen_delta.handlers.utilities import create_utilities_router
 from protogen_delta.handlers.voice import create_voice_router
+from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.deepseek import DeepSeekService
@@ -45,6 +51,8 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
+from protogen_delta.services.sticker_pack import StickerPackImporter
+from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 
 logger = logging.getLogger(__name__)
@@ -105,6 +113,7 @@ async def main() -> None:
     deepseek: DeepSeekService | None = None
     proactive_messenger: ProactiveMessenger | None = None
     proactive_task: asyncio.Task[None] | None = None
+    mini_app_server: MiniAppServer | None = None
 
     try:
         dispatcher = Dispatcher()
@@ -114,6 +123,7 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
         memories_repository = MemoriesRepository(settings.data_dir)
+        stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
         memory = MemoryService(memories_repository)
 
@@ -164,9 +174,10 @@ async def main() -> None:
         )
 
         deepseek = DeepSeekService(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-            model=settings.deepseek_model,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            disable_thinking=settings.llm_disable_thinking,
             tools=ToolExecutor(
                 default_registry(
                     proxy_url=settings.telegram_proxy_url,
@@ -208,6 +219,30 @@ async def main() -> None:
             memory=memory,
             creator_id=settings.creator_id,
         )
+        sticker_service = ContextualStickerService(
+            bot,
+            stickers_repository,
+            user_states,
+            chance=settings.sticker_reaction_chance,
+            cooldown_seconds=settings.sticker_cooldown_seconds,
+            min_replies=settings.sticker_min_replies,
+        )
+        sticker_importer = StickerPackImporter(bot, stickers_repository)
+        if settings.sticker_pack_enabled:
+            try:
+                async with asyncio.timeout(15):
+                    imported = await sticker_importer.sync()
+                logger.info(
+                    "Sticker pack matched=%d added=%d unknown=%d",
+                    imported.matched,
+                    imported.added,
+                    imported.unknown,
+                )
+            except (TelegramAPIError, TimeoutError) as error:
+                logger.warning(
+                    "Не удалось обновить стикерпак (%s); использую локальную разметку",
+                    type(error).__name__,
+                )
 
         start_router = create_start_router(
             users_repository=users_repository,
@@ -217,6 +252,8 @@ async def main() -> None:
             repeat_start_prompt=repeat_start_prompt,
         )
         help_router = create_help_router()
+        menu_router = create_menu_router(settings.mini_app_url)
+        utilities_router = create_utilities_router(bot)
 
         art_router = create_art_router(
             images_repository=images_repository,
@@ -225,18 +262,21 @@ async def main() -> None:
             sources=ArtSourcesRepository(settings.data_dir, settings.art_chat_id),
         )
 
+        effective_admin_ids = settings.admin_ids | (
+            frozenset({settings.creator_id})
+            if settings.creator_id is not None
+            else frozenset()
+        )
         admin_router = create_admin_router(
             images_repository=images_repository,
             users_repository=users_repository,
             bot_state=bot_state,
-            admin_ids=(
-                settings.admin_ids
-                | (
-                    frozenset({settings.creator_id})
-                    if settings.creator_id is not None
-                    else frozenset()
-                )
-            ),
+            admin_ids=effective_admin_ids,
+        )
+        sticker_admin_router = create_sticker_admin_router(
+            stickers_repository,
+            effective_admin_ids,
+            sticker_importer,
         )
 
         creator_router = create_creator_router(
@@ -277,16 +317,19 @@ async def main() -> None:
             response_engine,
             rate_limiter=rate_limiter,
             bot=bot,
+            sticker_service=sticker_service,
         )
         media_router = create_media_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
         document_router = create_document_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
         voice_router = create_voice_router(
             response_engine,
@@ -297,12 +340,16 @@ async def main() -> None:
                 compute_type=settings.whisper_compute_type,
             ),
             rate_limiter=rate_limiter,
+            sticker_service=sticker_service,
         )
 
         dispatcher.include_router(start_router)
+        dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
+        dispatcher.include_router(utilities_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
+        dispatcher.include_router(sticker_admin_router)
         dispatcher.include_router(creator_router)
         dispatcher.include_router(adult_router)
         dispatcher.include_router(e621_router)
@@ -317,11 +364,21 @@ async def main() -> None:
         await bot.delete_webhook(
             drop_pending_updates=True,
         )
-        await set_commands(bot)
+        await set_commands(bot, settings.mini_app_url)
 
         # Команда /proactive временно скрыта: на время этого режима фоновые
         # сообщения включаются всем, включая ранее отключившие их в тестах.
         await memories_repository.enable_proactive_for_all()
+
+        if settings.mini_app_server_enabled:
+            mini_app_server = MiniAppServer(
+                settings.telegram_token,
+                user_states,
+                host=settings.mini_app_host,
+                port=settings.mini_app_port,
+                auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
+            )
+            await mini_app_server.start()
 
         logger.info("Бот запущен")
 
@@ -348,6 +405,8 @@ async def main() -> None:
             except Exception:
                 logger.exception("Фоновая задача завершилась с ошибкой")
         try:
+            if mini_app_server is not None:
+                await mini_app_server.close()
             if deepseek is not None:
                 await deepseek.close()
         finally:

@@ -51,6 +51,8 @@ class UserStateRepository:
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
         roleplay_fetishes: tuple[str, ...] = (),
+        roleplay_preferences: str = "",
+        roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
     ) -> None:
@@ -65,6 +67,8 @@ class UserStateRepository:
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
             roleplay_fetishes=roleplay_fetishes,
+            roleplay_preferences=roleplay_preferences,
+            roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             content_mode=content_mode,
         )
@@ -102,6 +106,8 @@ class UserStateRepository:
                         roleplay_configuration,
                         roleplay_character,
                         roleplay_fetishes,
+                        roleplay_preferences,
+                        roleplay_boundaries,
                         delta_appearance,
                         content_mode
                     FROM user_states
@@ -131,6 +137,8 @@ class UserStateRepository:
             roleplay_configuration,
             roleplay_character,
             roleplay_fetishes,
+            roleplay_preferences,
+            roleplay_boundaries,
             delta_appearance,
             content_mode,
         ) = row
@@ -153,6 +161,8 @@ class UserStateRepository:
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
             roleplay_fetishes=self._decode_fetishes(roleplay_fetishes),
+            roleplay_preferences=roleplay_preferences,
+            roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             content_mode=self._decode_content_mode(content_mode),
         )
@@ -168,6 +178,8 @@ class UserStateRepository:
         roleplay_configuration: str = "male",
         roleplay_character: str = "",
         roleplay_fetishes: tuple[str, ...] = (),
+        roleplay_preferences: str = "",
+        roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
     ) -> None:
@@ -191,10 +203,12 @@ class UserStateRepository:
                         roleplay_configuration,
                         roleplay_character,
                         roleplay_fetishes,
+                        roleplay_preferences,
+                        roleplay_boundaries,
                         delta_appearance,
                         content_mode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -209,6 +223,8 @@ class UserStateRepository:
                         roleplay_configuration = excluded.roleplay_configuration,
                         roleplay_character = excluded.roleplay_character,
                         roleplay_fetishes = excluded.roleplay_fetishes,
+                        roleplay_preferences = excluded.roleplay_preferences,
+                        roleplay_boundaries = excluded.roleplay_boundaries,
                         delta_appearance = excluded.delta_appearance,
                         content_mode = excluded.content_mode
                     """,
@@ -227,6 +243,8 @@ class UserStateRepository:
                         roleplay_configuration,
                         roleplay_character,
                         json.dumps(roleplay_fetishes, ensure_ascii=False),
+                        roleplay_preferences,
+                        roleplay_boundaries,
                         delta_appearance,
                         content_mode,
                     ),
@@ -274,6 +292,8 @@ class UserStateRepository:
                     roleplay_configuration TEXT NOT NULL DEFAULT 'male',
                     roleplay_character TEXT NOT NULL DEFAULT '',
                     roleplay_fetishes TEXT NOT NULL DEFAULT '[]',
+                    roleplay_preferences TEXT NOT NULL DEFAULT '',
+                    roleplay_boundaries TEXT NOT NULL DEFAULT '',
                     delta_appearance TEXT NOT NULL DEFAULT '',
                     content_mode TEXT NOT NULL DEFAULT 'unselected'
                 )
@@ -317,6 +337,18 @@ class UserStateRepository:
                 connection.execute("""
                     ALTER TABLE user_states
                     ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'unselected'
+                    """)
+
+            if "roleplay_preferences" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_preferences TEXT NOT NULL DEFAULT ''
+                    """)
+
+            if "roleplay_boundaries" not in columns:
+                connection.execute("""
+                    ALTER TABLE user_states
+                    ADD COLUMN roleplay_boundaries TEXT NOT NULL DEFAULT ''
                     """)
 
             if "delta_appearance" not in columns:

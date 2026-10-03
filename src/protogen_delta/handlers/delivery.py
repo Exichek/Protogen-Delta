@@ -2,7 +2,7 @@
 
 import logging
 from asyncio import CancelledError, Event, create_task, sleep, wait_for
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from time import perf_counter
 
@@ -13,6 +13,7 @@ from aiogram.types import Message
 
 from protogen_delta.core.message_utils import reply_delay_seconds, split_reply
 from protogen_delta.services.response_engine import ReplyDelivery
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,14 @@ async def show_typing(
         await task
 
 
-def create_reply_delivery(message: Message, bot: Bot | None) -> ReplyDelivery:
+def create_reply_delivery(
+    message: Message,
+    bot: Bot | None,
+    sticker_service: ContextualStickerService | None = None,
+    *,
+    user_id: int | None = None,
+    context_tags: Collection[str] = (),
+) -> ReplyDelivery:
     """Создать отправку ответа частями со статусом набора и паузами."""
 
     async def deliver(reply: str) -> None:
@@ -87,6 +95,16 @@ def create_reply_delivery(message: Message, bot: Bot | None) -> ReplyDelivery:
                     await sleep(reply_delay_seconds(chunk))
                 await message.answer(chunk)
                 sent += 1
+            if sticker_service is not None and user_id is not None:
+                try:
+                    await sticker_service.maybe_send(
+                        chat_id=message.chat.id,
+                        user_id=user_id,
+                        context_tags=context_tags,
+                        context_text=message.text or message.caption or "",
+                    )
+                except Exception:
+                    logger.exception("Не удалось обработать контекстный стикер")
             outcome = "sent"
         except CancelledError:
             outcome = "cancelled"

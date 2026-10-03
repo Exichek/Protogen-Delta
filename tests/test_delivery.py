@@ -12,13 +12,16 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 import protogen_delta.handlers.delivery as delivery_module
-from protogen_delta.handlers.delivery import show_typing
+from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
+from protogen_delta.services.stickers import ContextualStickerService
 
 
 def _message() -> Message:
     """Создать сообщение с идентификатором чата."""
     message = Mock(spec=Message)
     message.chat = Mock(id=321)
+    message.text = None
+    message.caption = None
     return cast(Message, message)
 
 
@@ -104,3 +107,28 @@ def test_show_typing_ignores_telegram_error(
     asyncio.run(scenario())
 
     bot.send_chat_action.assert_awaited_once()
+
+
+def test_reply_delivery_triggers_optional_contextual_sticker() -> None:
+    """После успешного текста можно добавить редкую реакцию без участия LLM."""
+    message = _message()
+    answer = AsyncMock()
+    cast(Any, message).answer = answer
+    sticker_service = AsyncMock(spec=ContextualStickerService)
+    deliver = create_reply_delivery(
+        message,
+        None,
+        cast(ContextualStickerService, sticker_service),
+        user_id=42,
+        context_tags=("media",),
+    )
+
+    asyncio.run(deliver("Готово."))
+
+    answer.assert_awaited_once_with("Готово.")
+    sticker_service.maybe_send.assert_awaited_once_with(
+        chat_id=321,
+        user_id=42,
+        context_tags=("media",),
+        context_text="",
+    )

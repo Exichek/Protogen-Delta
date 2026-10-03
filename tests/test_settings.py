@@ -29,6 +29,20 @@ def test_load_settings_with_defaults(
 
     monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_DISABLE_THINKING", raising=False)
+    monkeypatch.delenv("MINI_APP_URL", raising=False)
+    monkeypatch.delenv("MINI_APP_SERVER_ENABLED", raising=False)
+    monkeypatch.delenv("MINI_APP_HOST", raising=False)
+    monkeypatch.delenv("MINI_APP_PORT", raising=False)
+    monkeypatch.delenv("MINI_APP_AUTH_MAX_AGE_SECONDS", raising=False)
+    monkeypatch.delenv("STICKER_REACTION_CHANCE", raising=False)
+    monkeypatch.delenv("STICKER_COOLDOWN_SECONDS", raising=False)
+    monkeypatch.delenv("STICKER_MIN_REPLIES", raising=False)
+    monkeypatch.delenv("STICKER_PACK_ENABLED", raising=False)
     monkeypatch.delenv("LOG_LEVEL", raising=False)
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("ADMIN_IDS", raising=False)
@@ -67,6 +81,17 @@ def test_load_settings_with_defaults(
     assert settings.art_chat_id == -100123456
     assert settings.deepseek_base_url == "https://api.deepseek.com"
     assert settings.deepseek_model == "deepseek-flash"
+    assert settings.llm_provider == "deepseek"
+    assert settings.llm_disable_thinking is True
+    assert settings.mini_app_url is None
+    assert settings.mini_app_server_enabled is False
+    assert settings.mini_app_host == "127.0.0.1"
+    assert settings.mini_app_port == 8080
+    assert settings.mini_app_auth_max_age_seconds == 3600
+    assert settings.sticker_reaction_chance == 0.15
+    assert settings.sticker_cooldown_seconds == 900.0
+    assert settings.sticker_min_replies == 4
+    assert settings.sticker_pack_enabled is True
     assert settings.telegram_proxy_url is None
     assert settings.log_level == "INFO"
     assert settings.data_dir == Path("data")
@@ -121,6 +146,15 @@ def test_load_settings_with_custom_values(
     monkeypatch.setenv("WHISPER_MODEL_SIZE", "base")
     monkeypatch.setenv("WHISPER_DEVICE", "cuda")
     monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "float16")
+    monkeypatch.setenv("STICKER_REACTION_CHANCE", "0.25")
+    monkeypatch.setenv("STICKER_COOLDOWN_SECONDS", "120")
+    monkeypatch.setenv("STICKER_MIN_REPLIES", "2")
+    monkeypatch.setenv("STICKER_PACK_ENABLED", "false")
+    monkeypatch.setenv("MINI_APP_URL", "https://delta.example/app")
+    monkeypatch.setenv("MINI_APP_SERVER_ENABLED", "true")
+    monkeypatch.setenv("MINI_APP_HOST", "0.0.0.0")
+    monkeypatch.setenv("MINI_APP_PORT", "9000")
+    monkeypatch.setenv("MINI_APP_AUTH_MAX_AGE_SECONDS", "600")
 
     monkeypatch.setenv(
         "RATE_LIMIT_SECONDS",
@@ -168,6 +202,14 @@ def test_load_settings_with_custom_values(
     assert settings.whisper_model_size == "base"
     assert settings.whisper_device == "cuda"
     assert settings.whisper_compute_type == "float16"
+    assert settings.sticker_reaction_chance == 0.25
+    assert settings.sticker_cooldown_seconds == 120.0
+    assert settings.sticker_min_replies == 2
+    assert settings.sticker_pack_enabled is False
+    assert settings.mini_app_server_enabled is True
+    assert settings.mini_app_host == "0.0.0.0"
+    assert settings.mini_app_port == 9000
+    assert settings.mini_app_auth_max_age_seconds == 600
 
 
 def test_load_settings_without_telegram_token(
@@ -193,6 +235,99 @@ def test_load_settings_without_telegram_token(
         RuntimeError,
         match="TELEGRAM_TOKEN",
     ):
+        load_settings()
+
+
+def test_load_settings_with_openai_compatible_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Нейтральные LLM_* должны полностью настроить совместимый провайдер."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("LLM_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("LLM_API_KEY", "generic-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "vision-model")
+    monkeypatch.setenv("MINI_APP_URL", "https://delta.example/app")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    settings = load_settings()
+
+    assert settings.llm_provider == "openai-compatible"
+    assert settings.llm_api_key == "generic-key"
+    assert settings.llm_base_url == "https://llm.example/v1"
+    assert settings.llm_model == "vision-model"
+    assert settings.llm_disable_thinking is False
+    assert settings.mini_app_url == "https://delta.example/app"
+
+
+def test_load_settings_requires_generic_endpoint_and_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Совместимый провайдер без endpoint не должен тихо уйти на DeepSeek."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("LLM_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("LLM_API_KEY", "generic-key")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="LLM_BASE_URL"):
+        load_settings()
+
+
+def test_load_settings_rejects_unknown_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Опечатка в имени провайдера должна завершать запуск с ошибкой."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER", "mystery")
+
+    with pytest.raises(ValueError, match="LLM_PROVIDER"):
+        load_settings()
+
+
+def test_load_settings_rejects_invalid_thinking_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Булева LLM-настройка не должна принимать произвольный текст."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("LLM_DISABLE_THINKING", "perhaps")
+
+    with pytest.raises(ValueError, match="LLM_DISABLE_THINKING"):
+        load_settings()
+
+
+def test_load_settings_rejects_non_https_mini_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Telegram Mini App должна иметь HTTPS URL."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("MINI_APP_URL", "http://delta.example/app")
+
+    with pytest.raises(ValueError, match="MINI_APP_URL"):
+        load_settings()
+
+
+def test_load_settings_requires_url_for_embedded_mini_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Встроенный сервер без публичного URL не должен создавать мёртвую панель."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "telegram")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("MINI_APP_SERVER_ENABLED", "true")
+    monkeypatch.delenv("MINI_APP_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="MINI_APP_URL"):
         load_settings()
 
 
@@ -296,6 +431,8 @@ def test_load_settings_with_invalid_admin_ids(
         ("USER_STATE_RETENTION_SECONDS", "abc"),
         ("E621_REQUEST_INTERVAL_SECONDS", "-1"),
         ("E621_REQUEST_INTERVAL_SECONDS", "nan"),
+        ("STICKER_REACTION_CHANCE", "-1"),
+        ("STICKER_COOLDOWN_SECONDS", "-1"),
     ],
 )
 def test_load_settings_rejects_invalid_float_values(
@@ -367,6 +504,20 @@ def test_load_settings_rejects_invalid_history_limit(
         ValueError,
         match="CONVERSATION_HISTORY_LIMIT",
     ):
+        load_settings()
+
+
+def test_load_settings_rejects_sticker_chance_above_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Вероятность стикера должна оставаться в диапазоне 0..1."""
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-100123")
+    monkeypatch.setenv("STICKER_REACTION_CHANCE", "1.1")
+
+    with pytest.raises(ValueError, match="STICKER_REACTION_CHANCE"):
         load_settings()
 
 

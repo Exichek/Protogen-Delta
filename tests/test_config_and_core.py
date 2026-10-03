@@ -263,23 +263,29 @@ def test_set_commands_configures_telegram_menu() -> None:
 
     assert [command.command for command in commands] == [
         "start",
+        "menu",
         "randomart",
         "e6",
         "rp",
         "adult",
+        "id",
         "reset",
         "help",
     ]
 
     assert [command.description for command in commands] == [
         "🚀 Запустить бота",
+        "⚙️ Панель возможностей",
         "🎨 Случайный арт",
         "🔎 Поиск артов e621 по тегам",
         "🎭 Управление RP — /rp off",
         "🔞 Выбрать возрастной режим",
+        "🪪 Узнать Telegram ID",
         "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]
+
+    bot_mock.set_chat_menu_button.assert_awaited_once()
 
 
 def test_body_prompt_keeps_user_anatomy_separate_from_delta() -> None:

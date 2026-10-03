@@ -1,7 +1,7 @@
 [project]
 name = "protogen-delta"
 version = "0.1.0"
-description = "Telegram bot powered by DeepSeek API"
+description = "Telegram AI assistant with RP, memory, tools, and OpenAI-compatible LLM support"
 authors = [
     { name = "Exi", email = "rey93sinkler@gmail.com" }
 ]
@@ -47,6 +47,7 @@ include = [
     "src/protogen_delta/config/data/*.json",
     "src/protogen_delta/config/prompts/*.txt",
     "src/protogen_delta/config/prompts/personality/*.txt",
+    "src/protogen_delta/miniapp/static/*.html",
 ]
 
 

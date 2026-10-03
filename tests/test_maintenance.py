@@ -13,6 +13,7 @@ from protogen_delta.maintenance import copy_snapshot, main
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.users import UsersRepository
 
@@ -22,6 +23,9 @@ def seed(path: Path) -> None:
     ImagesRepository(path).add("test-image")
     states = UserStateStore(persistence=UserStateRepository(path))
     memories = MemoriesRepository(path)
+    StickersRepository(path).upsert(
+        StickerEntry("sticker-file", "sticker-unique", ("playful",))
+    )
 
     async def save() -> None:
         await memories.remember(123, "funny", "старый мем", 10.0)
@@ -45,6 +49,7 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     assert UsersRepository(restored).get_all() == [123]
     assert ImagesRepository(restored).get_all() == ["test-image"]
     assert ArtSourcesRepository(restored, -999).get_all() == [-100, -200]
+    assert StickersRepository(restored).get_all()[0].file_unique_id == "sticker-unique"
     assert asyncio.run(MemoriesRepository(restored).recent(123))[0].text == "старый мем"
 
     async def check() -> None:

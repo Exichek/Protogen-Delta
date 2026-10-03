@@ -2,9 +2,11 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, call
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
 
 import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
@@ -40,13 +42,16 @@ def test_require_string_dict_rejects_invalid_value() -> None:
         )
 
 
+@pytest.mark.parametrize("pack_available", [None, True, False])
 def test_main_builds_application_and_starts_polling(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    pack_available: bool | None,
 ) -> None:
     """main должен собрать приложение и запустить polling."""
     settings = Settings(
         telegram_token="telegram-token",
+        sticker_pack_enabled=pack_available is not None,
         deepseek_api_key="deepseek-key",
         art_chat_id=-1001234567890,
         deepseek_base_url="https://api.test.local",
@@ -66,6 +71,20 @@ def test_main_builds_application_and_starts_polling(
 
     bot_mock = Mock()
     bot_mock.delete_webhook = AsyncMock()
+    bot_mock.get_sticker_set = AsyncMock(
+        return_value=SimpleNamespace(
+            name="delta_sticksss",
+            stickers=[
+                SimpleNamespace(
+                    file_unique_id="AgAD_qUAAi5dCUo", file_id="greeting", emoji="👋"
+                )
+            ],
+        )
+    )
+    if pack_available is False:
+        bot_mock.get_sticker_set.side_effect = TelegramBadRequest(
+            method=Mock(), message="unavailable"
+        )
     bot_mock.session = Mock()
     bot_mock.session.close = AsyncMock()
 
@@ -141,6 +160,12 @@ def test_main_builds_application_and_starts_polling(
     help_router = Mock(
         name="help_router",
     )
+    menu_router = Mock(
+        name="menu_router",
+    )
+    utilities_router = Mock(
+        name="utilities_router",
+    )
     art_router = Mock(
         name="art_router",
     )
@@ -168,6 +193,12 @@ def test_main_builds_application_and_starts_polling(
     )
     create_help_router_mock = Mock(
         return_value=help_router,
+    )
+    create_menu_router_mock = Mock(
+        return_value=menu_router,
+    )
+    create_utilities_router_mock = Mock(
+        return_value=utilities_router,
     )
     create_art_router_mock = Mock(
         return_value=art_router,
@@ -270,6 +301,16 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "create_menu_router",
+        create_menu_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_utilities_router",
+        create_utilities_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "create_art_router",
         create_art_router_mock,
     )
@@ -339,6 +380,15 @@ def test_main_builds_application_and_starts_polling(
         main_module.main(),
     )
 
+    if pack_available is None:
+        bot_mock.get_sticker_set.assert_not_awaited()
+    else:
+        bot_mock.get_sticker_set.assert_awaited_once_with("delta_sticksss")
+    if pack_available is True:
+        assert len(main_module.StickersRepository(tmp_path).get_all()) == 1
+    else:
+        assert main_module.StickersRepository(tmp_path).get_all() == []
+
     load_settings_mock.assert_called_once_with()
 
     assert load_prompt_mock.call_args_list == [
@@ -379,6 +429,7 @@ def test_main_builds_application_and_starts_polling(
         api_key="deepseek-key",
         base_url="https://api.test.local",
         model="test-model",
+        disable_thinking=True,
         tools=ANY,
     )
 
@@ -388,6 +439,7 @@ def test_main_builds_application_and_starts_polling(
         ANY,
         rate_limiter=ANY,
         bot=bot_mock,
+        sticker_service=ANY,
     )
 
     start_router_call = create_start_router_mock.call_args
@@ -430,13 +482,19 @@ def test_main_builds_application_and_starts_polling(
 
     create_adult_router_mock.assert_called_once_with(user_states)
 
-    assert dispatcher_mock.include_router.call_count == 14
+    assert dispatcher_mock.include_router.call_count == 17
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         help_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        menu_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        utilities_router,
     )
     dispatcher_mock.include_router.assert_any_call(
         art_router,
@@ -473,11 +531,13 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
         bot_mock,
         rate_limiter=ANY,
+        sticker_service=ANY,
     )
     create_document_router_mock.assert_called_once_with(
         reset_response_engine,
         bot_mock,
         rate_limiter=ANY,
+        sticker_service=ANY,
     )
     speech_transcriber_constructor_mock.assert_called_once_with(
         model_size="small",
@@ -489,15 +549,16 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         speech_transcriber,
         rate_limiter=ANY,
+        sticker_service=ANY,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
         drop_pending_updates=True,
     )
 
-    set_commands_mock.assert_awaited_once_with(
-        bot_mock,
-    )
+    create_menu_router_mock.assert_called_once_with(None)
+    create_utilities_router_mock.assert_called_once_with(bot_mock)
+    set_commands_mock.assert_awaited_once_with(bot_mock, None)
 
     dispatcher_mock.start_polling.assert_awaited_once_with(
         bot_mock,

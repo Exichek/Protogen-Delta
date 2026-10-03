@@ -304,6 +304,33 @@ def test_deepseek_chat_returns_empty_string_for_none(
     assert result == ""
 
 
+def test_compatible_provider_can_omit_deepseek_thinking_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Чужому OpenAI-совместимому API не следует слать расширение DeepSeek."""
+    create_mock = AsyncMock(return_value=_create_response("Ответ"))
+    client_mock = Mock()
+    client_mock.chat.completions.create = create_mock
+    monkeypatch.setattr(
+        deepseek_module,
+        "AsyncOpenAI",
+        Mock(return_value=client_mock),
+    )
+    service = DeepSeekService(
+        api_key="key",
+        base_url="https://llm.example/v1",
+        model="model",
+        disable_thinking=False,
+    )
+
+    result = asyncio.run(service.chat("SYSTEM", "Привет"))
+
+    assert result == "Ответ"
+    call = create_mock.await_args
+    assert call is not None
+    assert "extra_body" not in call.kwargs
+
+
 def test_deepseek_classify_normalizes_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
