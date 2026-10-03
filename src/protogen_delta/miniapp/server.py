@@ -1,11 +1,11 @@
 """Встроенный HTTP-сервер панели настроек Telegram Mini App."""
 
 from importlib.resources import files
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import web
 
-from protogen_delta.core.user_state import UserState, UserStateStore
+from protogen_delta.core.user_state import ContentMode, UserState, UserStateStore
 from protogen_delta.miniapp.auth import (
     MiniAppAuthError,
     MiniAppUser,
@@ -157,13 +157,18 @@ class MiniAppServer:
         if set(payload) - allowed:
             raise web.HTTPBadRequest(text="Переданы неизвестные настройки")
         content_mode = payload.get("content_mode")
-        if content_mode is not None and content_mode not in {"soft", "adult"}:
+        if content_mode is not None and (
+            not isinstance(content_mode, str) or content_mode not in {"soft", "adult"}
+        ):
             raise web.HTTPBadRequest(text="Некорректный возрастной режим")
         roleplay_active = payload.get("roleplay_active")
         if roleplay_active is not None and type(roleplay_active) is not bool:
             raise web.HTTPBadRequest(text="Некорректный RP-режим")
         configuration = payload.get("roleplay_configuration")
-        if configuration is not None and configuration not in {"male", "female"}:
+        if configuration is not None and (
+            not isinstance(configuration, str)
+            or configuration not in {"male", "female"}
+        ):
             raise web.HTTPBadRequest(text="Некорректная конфигурация Дельты")
         character = payload.get("roleplay_character")
         if character is not None and (
@@ -185,7 +190,7 @@ class MiniAppServer:
 
         async with self._user_states.use(user.id) as state:
             if content_mode is not None:
-                state.content_mode = content_mode
+                state.content_mode = cast(ContentMode, content_mode)
             if roleplay_active is not None:
                 state.roleplay_active = roleplay_active
             if configuration is not None:

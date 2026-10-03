@@ -38,7 +38,7 @@ def validate_init_data(
     received_hash = values.pop("hash", "")
     if not received_hash:
         raise MiniAppAuthError("hash отсутствует")
-    values.pop("signature", None)
+    # HMAC включает signature; её исключают только при Ed25519-проверке.
     data_check_string = "\n".join(
         f"{key}={value}" for key, value in sorted(values.items())
     )

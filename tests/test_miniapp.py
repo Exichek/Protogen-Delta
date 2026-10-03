@@ -24,6 +24,7 @@ def _signed_init_data(
     user_id: int = 42,
     auth_date: int | None = None,
     first_name: str = "Тест",
+    signature: str | None = None,
 ) -> str:
     values = {
         "auth_date": str(int(time()) if auth_date is None else auth_date),
@@ -34,6 +35,8 @@ def _signed_init_data(
             separators=(",", ":"),
         ),
     }
+    if signature is not None:
+        values["signature"] = signature
     check = "\n".join(f"{key}={value}" for key, value in sorted(values.items()))
     secret = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
     values["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
@@ -61,6 +64,14 @@ def test_validate_init_data_rejects_tampering_and_expiration() -> None:
             max_age_seconds=60,
             now=1000,
         )
+
+
+def test_validate_init_data_includes_telegram_signature_in_hmac() -> None:
+    """Современный initData содержит signature, которая также защищена HMAC."""
+    signed = _signed_init_data(signature="telegram-signature")
+    assert validate_init_data(signed, TOKEN).id == 42
+    with pytest.raises(MiniAppAuthError, match="подпись"):
+        validate_init_data(signed.replace("telegram-signature", "changed"), TOKEN)
 
 
 def test_validate_init_data_rejects_missing_fields() -> None:
@@ -195,6 +206,13 @@ def test_miniapp_profile_api_rejects_unknown_or_invalid_settings() -> None:
                 json={"roleplay_configuration": "robot"},
             )
             assert invalid_configuration.status == 400
+            wrong_values: tuple[object, ...] = ([], {})
+            for field in ("content_mode", "roleplay_configuration"):
+                for value in wrong_values:
+                    wrong_type = await client.patch(
+                        "/api/profile", headers=headers, json={field: value}
+                    )
+                    assert wrong_type.status == 400
             invalid_body = await client.patch(
                 "/api/profile",
                 headers={**headers, "Content-Type": "application/json"},
