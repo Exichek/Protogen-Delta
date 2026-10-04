@@ -425,6 +425,7 @@ async def main() -> None:
                 host=settings.mini_app_host,
                 port=settings.mini_app_port,
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
+                response_engine=response_engine,
             )
             await mini_app_server.start()
 

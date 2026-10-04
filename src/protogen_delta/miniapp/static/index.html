@@ -23,6 +23,13 @@
     button { margin-top:16px; padding:13px; font-weight:700; color:var(--tg-theme-button-text-color,#fff); background:var(--tg-theme-button-color,#6c5ce7); cursor:pointer; }
     button.secondary { color:#ffb2b9; background:#ff556622; outline:1px solid #ff718044; }
     button:disabled { opacity:.55; cursor:wait; } #status { min-height:22px; margin:12px 2px; font-size:14px; }
+    .appearance-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .appearance-actions button { margin-top:12px; }
+    .appearance-preview { display:block; width:100%; max-height:260px; object-fit:contain; margin-top:14px; border-radius:12px; background:var(--tg-theme-bg-color,#0c1420); }
+    .appearance-preview[hidden] { display:none; }
+    #appearance { white-space:pre-wrap; overflow-wrap:anywhere; }
+    #appearance-status { margin-top:12px; min-height:20px; font-size:14px; }
+    #appearance-file-name { overflow-wrap:anywhere; font-size:13px; }
     .error { color:#ff7d88; } .ok { color:#62dca4; }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
   </style>
@@ -50,13 +57,28 @@
     <button class="secondary" id="clear-rp">Очистить RP-профиль</button>
     <div id="status"></div>
   </section>
-  <section class="card"><b>Текущий облик Дельты</b><p class="muted" id="appearance">Базовый облик</p></section>
+  <section class="card" aria-labelledby="appearance-title">
+    <b id="appearance-title">Текущий облик Дельты</b>
+    <p class="muted" id="appearance">Базовый облик</p>
+    <p class="muted">Загрузи арт персонажа — я разберу внешность и приму этот облик.</p>
+    <p class="muted">JPEG, PNG или WebP до 20 МБ. Меняется только внешность.</p>
+    <input id="appearance-file" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
+    <img id="appearance-preview" class="appearance-preview" alt="Выбранный арт для облика" hidden>
+    <p id="appearance-file-name" class="muted"></p>
+    <div class="appearance-actions">
+      <button id="choose-appearance" type="button" disabled>Выбрать картинку</button>
+      <button id="apply-appearance" type="button" disabled>Применить облик</button>
+    </div>
+    <button id="reset-appearance" class="secondary" type="button" disabled>Вернуть базовый облик</button>
+    <div id="appearance-status" role="status" aria-live="polite"></div>
+  </section>
 </main>
 <script>
   const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
   const initData = tg?.initData || ""; const status = document.querySelector("#status");
   const api = async (method="GET", body=null, path="/api/profile") => {
-    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":"application/json"}, body:body?JSON.stringify(body):null});
+    const file = body instanceof File;
+    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":file ? (body.type || "application/octet-stream") : "application/json"}, body:file ? body : body?JSON.stringify(body):null});
     if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`); return response.json();
   };
   const render = p => {
@@ -69,8 +91,60 @@
     document.querySelector("#fetishes").textContent = `Распознанные темы: ${p.roleplay_fetishes.length ? p.roleplay_fetishes.join(", ") : "пока нет"}`;
     document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
     document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
-    document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+    renderAppearance(p);
   };
+  const appearanceStatus = document.querySelector("#appearance-status");
+  const fileInput = document.querySelector("#appearance-file");
+  const preview = document.querySelector("#appearance-preview");
+  let appearanceBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null;
+  const updateAppearanceButtons = () => {
+    document.querySelector("#choose-appearance").disabled = appearanceBusy || !appearanceEnabled;
+    document.querySelector("#apply-appearance").disabled = appearanceBusy || !appearanceEnabled || !selectedFile;
+    document.querySelector("#reset-appearance").disabled = appearanceBusy || !customAppearance;
+    fileInput.disabled = appearanceBusy || !appearanceEnabled;
+  };
+  const renderAppearance = p => {
+    customAppearance = Boolean(p.delta_appearance);
+    appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
+    document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+    updateAppearanceButtons();
+  };
+  const clearSelection = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null; selectedFile = null; fileInput.value = "";
+    preview.removeAttribute("src"); preview.hidden = true;
+    document.querySelector("#appearance-file-name").textContent = "";
+  };
+  const appearanceFail = error => { appearanceStatus.className="error"; appearanceStatus.textContent = initData ? `Ошибка: ${error.message}` : "Открой панель кнопкой внутри Telegram."; };
+  document.querySelector("#choose-appearance").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0]; if (!file) return;
+    clearSelection(); appearanceStatus.textContent="";
+    if (file.size > 20 * 1024 * 1024) { appearanceFail(new Error("Картинка должна быть до 20 МБ.")); updateAppearanceButtons(); return; }
+    selectedFile = file; previewUrl = URL.createObjectURL(file); preview.src = previewUrl; preview.hidden = false;
+    document.querySelector("#appearance-file-name").textContent = file.name;
+    updateAppearanceButtons();
+  });
+  document.querySelector("#apply-appearance").addEventListener("click", async () => {
+    if (!selectedFile || appearanceBusy) return;
+    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Разбираю внешность…";
+    try {
+      const profile = await api("POST", selectedFile, "/api/profile/appearance");
+      renderAppearance(profile); clearSelection(); appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
+      tg?.HapticFeedback?.notificationOccurred("success");
+    } catch(error) { appearanceFail(error); }
+    finally { appearanceBusy=false; updateAppearanceButtons(); }
+  });
+  document.querySelector("#reset-appearance").addEventListener("click", async () => {
+    if (appearanceBusy) return;
+    appearanceBusy=true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Возвращаю базовый облик…";
+    try {
+      const profile = await api("DELETE", null, "/api/profile/appearance");
+      renderAppearance(profile); clearSelection(); appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
+      tg?.HapticFeedback?.notificationOccurred("success");
+    } catch(error) { appearanceFail(error); }
+    finally { appearanceBusy=false; updateAppearanceButtons(); }
+  });
   const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
   api().then(render).catch(fail);
   document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
