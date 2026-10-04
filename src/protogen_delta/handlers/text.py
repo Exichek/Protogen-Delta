@@ -1,5 +1,7 @@
 """Обработчик обычных текстовых сообщений."""
 
+from typing import TypedDict
+
 from aiogram import Bot, F, Router
 from aiogram.types import Message
 
@@ -15,6 +17,10 @@ from protogen_delta.services.stickers import ContextualStickerService
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
 BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщение. Подожди немного."
+
+
+class _InputContext(TypedDict, total=False):
+    trusted_input_context: str
 
 
 def create_text_router(
@@ -58,6 +64,11 @@ def create_text_router(
             return
 
         try:
+            input_context: _InputContext = {}
+            if sticker_service is not None:
+                input_context["trusted_input_context"] = (
+                    sticker_service.capabilities_context(user_id)
+                )
             async with show_typing(message, bot):
                 await response_engine.respond_and_deliver(
                     user_id,
@@ -68,6 +79,7 @@ def create_text_router(
                         sticker_service,
                         user_id=user_id,
                     ),
+                    **input_context,
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)
