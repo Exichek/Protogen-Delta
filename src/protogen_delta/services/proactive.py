@@ -9,7 +9,7 @@ from datetime import datetime
 from time import time
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
@@ -142,8 +142,17 @@ class ProactiveMessenger:
                     continue
                 await self._bot.send_message(candidate.user_id, text)
             except TelegramForbiddenError:
-                logger.info("Пользователь %s заблокировал бота", candidate.user_id)
-                await self._repository.set_proactive(candidate.user_id, False, now)
+                logger.info("Proactive delivery outcome=unreachable reason=forbidden")
+                await self._repository.suspend_proactive_delivery(candidate.user_id)
+                continue
+            except TelegramBadRequest as error:
+                if "chat not found" in error.message.casefold():
+                    await self._repository.suspend_proactive_delivery(candidate.user_id)
+                    logger.info(
+                        "Proactive delivery outcome=unreachable reason=chat_not_found"
+                    )
+                else:
+                    logger.warning("Proactive delivery outcome=bad_request")
                 continue
             except DeepSeekError:
                 logger.warning(

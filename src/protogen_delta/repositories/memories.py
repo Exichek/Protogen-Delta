@@ -60,6 +60,17 @@ class MemoriesRepository:
         """Вернуть текущую настройку; для нового пользователя она включена."""
         return await asyncio.to_thread(self._proactive_enabled_sync, user_id)
 
+    async def suspend_proactive_delivery(self, user_id: int) -> None:
+        """Приостановить недоступный чат до новой активности, сохранив настройку."""
+        await asyncio.to_thread(self._suspend_proactive_delivery_sync, user_id)
+
+    def _suspend_proactive_delivery_sync(self, user_id: int) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE engagement SET delivery_suspended = 1 WHERE user_id = ?",
+                (user_id,),
+            )
+
     async def enable_proactive_for_all(self) -> None:
         """Включить фоновые сообщения всем известным пользователям."""
         await asyncio.to_thread(self._enable_proactive_for_all_sync)
@@ -146,7 +157,8 @@ class MemoriesRepository:
                 VALUES (?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     last_user_message_at = excluded.last_user_message_at,
-                    unanswered_count = 0
+                    unanswered_count = 0,
+                    delivery_suspended = 0
                 """,
                 (user_id, at),
             )
@@ -157,7 +169,10 @@ class MemoriesRepository:
                 """
                 INSERT INTO engagement(user_id, proactive_enabled, last_user_message_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET proactive_enabled = excluded.proactive_enabled
+                ON CONFLICT(user_id) DO UPDATE SET
+                    proactive_enabled = excluded.proactive_enabled,
+                    delivery_suspended = CASE WHEN excluded.proactive_enabled = 1
+                        THEN 0 ELSE engagement.delivery_suspended END
                 """,
                 (user_id, int(enabled), at),
             )
@@ -187,6 +202,7 @@ class MemoriesRepository:
                 """
                 SELECT user_id, unanswered_count FROM engagement
                 WHERE proactive_enabled = 1
+                  AND delivery_suspended = 0
                   AND (? IS NULL OR user_id = ?)
                   AND last_user_message_at > 0
                   AND ? - last_user_message_at >= ?
@@ -225,9 +241,17 @@ class MemoriesRepository:
                     proactive_enabled INTEGER NOT NULL DEFAULT 1,
                     last_user_message_at REAL NOT NULL DEFAULT 0,
                     last_proactive_at REAL,
-                    unanswered_count INTEGER NOT NULL DEFAULT 0
+                    unanswered_count INTEGER NOT NULL DEFAULT 0,
+                    delivery_suspended INTEGER NOT NULL DEFAULT 0
                 )
                 """)
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(engagement)")
+            }
+            if "delivery_suspended" not in columns:
+                connection.execute(
+                    "ALTER TABLE engagement ADD COLUMN delivery_suspended INTEGER NOT NULL DEFAULT 0"
+                )
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
