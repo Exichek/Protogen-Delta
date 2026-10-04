@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from protogen_delta.services.tools.http import fetch_provider, fetch_public_page
+from protogen_delta.services.tools.youtube import read_youtube_video, youtube_video_id
 
 _BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 _FRESHNESS = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
@@ -109,6 +110,9 @@ async def fetch_web_page(
     args: dict[str, str], *, proxy_url: str | None = None
 ) -> dict[str, Any]:
     """Прочитать ограниченный объём текста публичной страницы."""
+    video_id = youtube_video_id(args["url"])
+    if video_id:
+        return await read_youtube_video(video_id, proxy_url=proxy_url)
     raw, final_url, content_type = await fetch_public_page(
         args["url"], proxy_url=proxy_url
     )

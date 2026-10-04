@@ -77,7 +77,11 @@ def create_art_router(
         images = images_repository.get_all()
 
         if not images:
-            await message.answer("База пустая 😢 сначала добавь арты.")
+            await message.answer(
+                "В локальной коллекции /randomart пока нет артов. "
+                "Администратор может добавить фото командой /addimage в ответ "
+                "на него. Для поиска на e621 используй /e6 — это отдельный источник."
+            )
             return
 
         file_id = random.choice(images)

@@ -52,10 +52,10 @@ def test_extract_animation_frames_returns_ordered_png_sequence() -> None:
     assert all(frame.mime_type == "image/png" for frame in frames)
     assert all(frame.data.startswith(b"\x89PNG\r\n\x1a\n") for frame in frames)
     assert [frame.label for frame in frames] == [
-        "видео, кадр 1 из последовательности",
-        "видео, кадр 2 из последовательности",
-        "видео, кадр 3 из последовательности",
-        "видео, кадр 4 из последовательности",
+        "видео, кадр 1 из последовательности, время 0.00 с",
+        "видео, кадр 2 из последовательности, время 0.50 с",
+        "видео, кадр 3 из последовательности, время 1.00 с",
+        "видео, кадр 4 из последовательности, время 1.50 с",
     ]
 
 

@@ -1,5 +1,7 @@
 """Обработчик обычных текстовых сообщений."""
 
+from typing import TypedDict
+
 from aiogram import Bot, F, Router
 from aiogram.types import Message
 
@@ -11,10 +13,17 @@ from protogen_delta.handlers.rp import (
     is_roleplay_stop_message,
 )
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
-from protogen_delta.services.stickers import ContextualStickerService
+from protogen_delta.services.stickers import (
+    ContextualStickerService,
+    has_sticker_request,
+)
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
 BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщение. Подожди немного."
+
+
+class _InputContext(TypedDict, total=False):
+    trusted_input_context: str
 
 
 def create_text_router(
@@ -57,7 +66,28 @@ def create_text_router(
             await message.answer(RATE_LIMIT_REPLY)
             return
 
+        if sticker_service is not None and has_sticker_request(message.text):
+            if not sticker_service.is_available(user_id):
+                await message.answer(
+                    "Стикеры сейчас отключены или нет доступных реакций."
+                )
+            elif not await sticker_service.maybe_send(
+                chat_id=message.chat.id,
+                user_id=user_id,
+                context_text=message.text,
+            ):
+                await message.answer(
+                    "Сейчас не получилось отправить стикер. Подожди немного "
+                    "и попробуй ещё раз."
+                )
+            return
+
         try:
+            input_context: _InputContext = {}
+            if sticker_service is not None:
+                input_context["trusted_input_context"] = (
+                    sticker_service.capabilities_context(user_id)
+                )
             async with show_typing(message, bot):
                 await response_engine.respond_and_deliver(
                     user_id,
@@ -68,6 +98,7 @@ def create_text_router(
                         sticker_service,
                         user_id=user_id,
                     ),
+                    **input_context,
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)

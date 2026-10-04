@@ -521,7 +521,9 @@ def test_random_art_reports_empty_database() -> None:
     )
 
     answer_mock.assert_awaited_once_with(
-        "База пустая 😢 сначала добавь арты.",
+        "В локальной коллекции /randomart пока нет артов. "
+        "Администратор может добавить фото командой /addimage в ответ "
+        "на него. Для поиска на e621 используй /e6 — это отдельный источник.",
     )
     answer_photo_mock.assert_not_awaited()
 

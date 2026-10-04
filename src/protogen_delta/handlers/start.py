@@ -15,6 +15,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekError,
     DeepSeekService,
 )
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ def create_start_router(
     first_start_prompt: str,
     repeat_start_prompt: str | None = None,
     user_states: UserStateStore | None = None,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер команды /start."""
     router = Router(name=__name__)
@@ -169,6 +171,17 @@ def create_start_router(
 
             for chunk in split_message(reply):
                 await message.answer(chunk)
+
+        if sticker_service is not None:
+            try:
+                await sticker_service.maybe_send(
+                    chat_id=message.chat.id,
+                    user_id=user_id,
+                    context_text="привет",
+                    reply_text=reply,
+                )
+            except Exception:
+                logger.exception("Не удалось обработать приветственный стикер")
 
         if content_mode == "unselected":
             await send_age_prompt(message, user_id)

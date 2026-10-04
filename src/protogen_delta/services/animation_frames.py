@@ -16,7 +16,7 @@ def extract_animation_frames(
     label: str,
     max_frames: int = 4,
 ) -> tuple[ImageInput, ...]:
-    """Декодировать начало, середину и конец ролика в PNG-кадры."""
+    """Выбрать до четырёх кадров по временной шкале и обозначить время."""
     if max_frames <= 0:
         raise ValueError("max_frames должен быть больше нуля")
     try:
@@ -43,7 +43,14 @@ def extract_animation_frames(
                     ImageInput(
                         data=_encode_png(frame),
                         mime_type="image/png",
-                        label=f"{label}, кадр {len(selected) + 1} из последовательности",
+                        label=(
+                            f"{label}, кадр {len(selected) + 1} из последовательности"
+                            + (
+                                f", время {frame.time:.2f} с"
+                                if frame.time is not None
+                                else ""
+                            )
+                        ),
                     )
                 )
                 next_target += 1

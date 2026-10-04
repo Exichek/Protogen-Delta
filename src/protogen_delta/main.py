@@ -285,6 +285,7 @@ async def main() -> None:
         start_router = create_start_router(
             users_repository=users_repository,
             user_states=user_states,
+            sticker_service=sticker_service,
             deepseek=deepseek,
             first_start_prompt=first_start_prompt,
             repeat_start_prompt=repeat_start_prompt,

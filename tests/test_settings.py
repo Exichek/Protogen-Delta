@@ -123,9 +123,9 @@ def test_load_settings_with_defaults(
     assert settings.mini_app_host == "127.0.0.1"
     assert settings.mini_app_port == 8080
     assert settings.mini_app_auth_max_age_seconds == 3600
-    assert settings.sticker_reaction_chance == 0.15
-    assert settings.sticker_cooldown_seconds == 900.0
-    assert settings.sticker_min_replies == 4
+    assert settings.sticker_reaction_chance == 0.35
+    assert settings.sticker_cooldown_seconds == 180.0
+    assert settings.sticker_min_replies == 3
     assert settings.sticker_pack_enabled is True
     assert settings.telegram_proxy_url is None
     assert settings.log_level == "INFO"

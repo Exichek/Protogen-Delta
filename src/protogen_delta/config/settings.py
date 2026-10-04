@@ -28,9 +28,9 @@ class Settings:
     mini_app_host: str = "127.0.0.1"
     mini_app_port: int = 8080
     mini_app_auth_max_age_seconds: int = 3600
-    sticker_reaction_chance: float = 0.15
-    sticker_cooldown_seconds: float = 900.0
-    sticker_min_replies: int = 4
+    sticker_reaction_chance: float = 0.35
+    sticker_cooldown_seconds: float = 180.0
+    sticker_min_replies: int = 3
     sticker_pack_enabled: bool = True
     pdf_ocr_enabled: bool = False
     audio_understanding_enabled: bool = False
@@ -274,17 +274,17 @@ def load_settings() -> Settings:
         "E621_REQUEST_INTERVAL_SECONDS",
     )
     sticker_reaction_chance = _parse_non_negative_float(
-        os.getenv("STICKER_REACTION_CHANCE", "0.15"),
+        os.getenv("STICKER_REACTION_CHANCE", "0.35"),
         "STICKER_REACTION_CHANCE",
     )
     if sticker_reaction_chance > 1:
         raise ValueError("STICKER_REACTION_CHANCE не может быть больше 1")
     sticker_cooldown_seconds = _parse_non_negative_float(
-        os.getenv("STICKER_COOLDOWN_SECONDS", "900"),
+        os.getenv("STICKER_COOLDOWN_SECONDS", "180"),
         "STICKER_COOLDOWN_SECONDS",
     )
     sticker_min_replies = _parse_positive_int(
-        os.getenv("STICKER_MIN_REPLIES", "4"),
+        os.getenv("STICKER_MIN_REPLIES", "3"),
         "STICKER_MIN_REPLIES",
     )
     mini_app_url = os.getenv("MINI_APP_URL", "").strip()

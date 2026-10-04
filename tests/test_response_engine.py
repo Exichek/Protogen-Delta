@@ -283,6 +283,9 @@ def test_response_engine_treats_sticker_as_short_contextual_reaction() -> None:
     assert "одной короткой естественной реакцией" in prompt
     assert "впиши смысл стикера в текущую сцену" in prompt
     assert "последовательность кадров" in prompt
+    assert "Эмодзи и надпись поверх видео" in prompt
+    assert "Звук здесь не передан" in prompt
+    assert "между кадрами есть пропуски" in prompt
     assert "ровно 2 визуальных элементов" in prompt
 
 

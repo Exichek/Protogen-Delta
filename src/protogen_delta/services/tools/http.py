@@ -11,6 +11,7 @@ from aiohttp import ClientSession, ClientTimeout
 from aiohttp_socks import ProxyConnector
 
 _MAX_BODY_BYTES = 1_048_576
+_MAX_PUBLIC_BODY_BYTES = 3 * _MAX_BODY_BYTES
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
@@ -47,8 +48,14 @@ async def fetch_public_page(
     *,
     proxy_url: str | None = None,
     max_redirects: int = 3,
+    max_bytes: int = _MAX_BODY_BYTES,
+    content_types: frozenset[str] = frozenset(
+        {"text/html", "application/xhtml+xml", "text/plain"}
+    ),
 ) -> tuple[bytes, str, str]:
     """Загрузить публичную HTML/text-страницу с проверкой каждого redirect."""
+    if not 0 < max_bytes <= _MAX_PUBLIC_BODY_BYTES:
+        raise ValueError("Некорректный лимит страницы")
     current = url.strip()
     async with _session(proxy_url) as session:
         for redirect in range(max_redirects + 1):
@@ -69,22 +76,18 @@ async def fetch_public_page(
                 if response.status != 200:
                     raise ValueError("Страница вернула ошибку")
                 content_type = response.headers.get("Content-Type", "").split(";", 1)[0]
-                if content_type not in {
-                    "text/html",
-                    "application/xhtml+xml",
-                    "text/plain",
-                }:
+                if content_type not in content_types:
                     raise ValueError("Неподдерживаемый тип страницы")
-                return await _read_limited(response), current, content_type
+                return await _read_limited(response, max_bytes), current, content_type
     raise ValueError("Не удалось загрузить страницу")
 
 
-async def _read_limited(response: Any) -> bytes:
+async def _read_limited(response: Any, max_bytes: int = _MAX_BODY_BYTES) -> bytes:
     """Прочитать HTTP-ответ, не позволяя источнику превысить лимит."""
     data = bytearray()
     async for chunk in response.content.iter_chunked(65536):
         data.extend(chunk)
-        if len(data) > _MAX_BODY_BYTES:
+        if len(data) > max_bytes:
             raise ValueError("Ответ слишком большой")
     return bytes(data)
 
