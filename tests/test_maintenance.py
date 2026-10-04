@@ -11,6 +11,7 @@ import pytest
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.maintenance import copy_snapshot, main
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
@@ -42,6 +43,7 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     source, backup, restored = (tmp_path / name for name in ("data", "backup", "new"))
     seed(source)
     ArtSourcesRepository(source, -100).change(-200, add=True)
+    asyncio.run(E621HistoryRepository(source).mark_seen(123, 456, 20.0))
     copy_snapshot(source, backup)
     UsersRepository(source).remove(123)
     asyncio.run(UserStateRepository(source).delete(123))
@@ -50,6 +52,7 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     assert ImagesRepository(restored).get_all() == ["test-image"]
     assert ArtSourcesRepository(restored, -999).get_all() == [-100, -200]
     assert StickersRepository(restored).get_all()[0].file_unique_id == "sticker-unique"
+    assert asyncio.run(E621HistoryRepository(restored).seen_ids(123)) == {456}
     assert asyncio.run(MemoriesRepository(restored).recent(123))[0].text == "старый мем"
 
     async def check() -> None:
@@ -93,6 +96,15 @@ def test_corrupt_database_does_not_create_destination(tmp_path: Path) -> None:
     source, destination = tmp_path / "source", tmp_path / "destination"
     seed(source)
     (source / "user_states.db").write_bytes(b"not sqlite")
+    with pytest.raises(sqlite3.DatabaseError):
+        copy_snapshot(source, destination)
+    assert not destination.exists()
+
+
+def test_corrupt_art_history_does_not_create_destination(tmp_path: Path) -> None:
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    seed(source)
+    (source / "e621.db").write_bytes(b"not sqlite")
     with pytest.raises(sqlite3.DatabaseError):
         copy_snapshot(source, destination)
     assert not destination.exists()
