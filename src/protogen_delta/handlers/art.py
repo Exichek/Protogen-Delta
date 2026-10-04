@@ -185,4 +185,16 @@ def create_art_router(
             f"Добавлено артов: {added}. Уже были: {len(set(ids)) - added}."
         )
 
+    def archive_without_command(message: Message) -> bool:
+        chats = sources.get_all() if sources is not None else [art_chat_id]
+        return message.chat.id in chats and not (message.text or "").startswith("/")
+
+    @router.channel_post(archive_without_command)
+    @router.message(archive_without_command)
+    async def ignore_archive_content(message: Message) -> None:
+        """Остановить разговорные роутеры для остальных сообщений источника."""
+        # Фото и документы уже сохранены выше. Видео, GIF, подписи и обычный
+        # текст в архиве не должны запускать анализ, скачивание или ответы.
+        del message
+
     return router
