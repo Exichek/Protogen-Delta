@@ -22,6 +22,7 @@ from openai import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import ToolExecutor, get_current_time
 
 logger = logging.getLogger(__name__)
@@ -29,10 +30,10 @@ logger = logging.getLogger(__name__)
 _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
 _WEB_REQUEST_RE = re.compile(
-    r"(?:(?:найди|поищи|посмотри|проверь|загугли|search|look\s+up|find)"
+    r"(?:(?:найди|поищи|посмотри|проверь|глянь|глянуть|загугли|search|look\s+up|find)"
     r".{0,80}(?:в\s+интернете|в\s+сети|онлайн|web|internet)|"
     r"(?:в\s+интернете|в\s+сети|онлайн|web|internet).{0,80}"
-    r"(?:найди|поищи|посмотри|проверь|загугли|search|look\s+up|find))",
+    r"(?:найди|поищи|посмотри|проверь|глянь|глянуть|загугли|search|look\s+up|find))",
     re.IGNORECASE | re.DOTALL,
 )
 _WEB_NEGATION_RE = re.compile(
@@ -93,9 +94,25 @@ def _forced_web_tool(user_message: str, available: set[str]) -> str | None:
     """Выбрать обязательный web-инструмент для явной просьбы пользователя."""
     if _WEB_NEGATION_RE.search(user_message):
         return None
+    if "get_weather" in available and (
+        re.search(r"\bпогод\w*.{0,60}\bв\b", user_message, re.I)
+        or (
+            available == {"get_weather"}
+            and re.fullmatch(r"\s*\d+[\s,.!]*", user_message)
+        )
+    ):
+        return "get_weather"
     if "fetch_web_page" in available and _URL_RE.search(user_message):
         return "fetch_web_page"
-    if "web_search" in available and _WEB_REQUEST_RE.search(user_message):
+    if "web_search" in available and (
+        _WEB_REQUEST_RE.search(user_message)
+        or (
+            "web_search" in PromptComposer.select_tools(user_message)
+            and not re.search(
+                r"(?:есть|доступ|умеешь).{0,30}интернет", user_message, re.I
+            )
+        )
+    ):
         return "web_search"
     return None
 
@@ -268,6 +285,21 @@ class DeepSeekService:
                 "content": system_prompt,
             }
         ]
+        if self._tools is not None:
+            inventory = ", ".join(self._tools.registry.tools)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"Подключённые инструменты приложения: {inventory}. "
+                        "Их схемы выбираются по теме сообщения. Не утверждай, что у "
+                        "тебя вообще нет интернета или инструментов, из-за отсутствия "
+                        "схемы в отдельном ходе. При этом не выдумывай выполненные "
+                        "проверки: результат поиска/погоды можно сообщать только после "
+                        "реального успешного вызова соответствующего инструмента."
+                    ),
+                }
+            )
 
         for turn in history:
             messages.append(
@@ -375,10 +407,16 @@ class DeepSeekService:
             "событий используй поиск, а не память модели. В финальном ответе давай "
             "прямые URL использованных источников и дату проверки."
             if "web_search" in available_tools
-            else "Поиск по интернету не настроен или не нужен этому запросу. "
-            "Не утверждай, что искал что-либо в сети."
+            else (
+                "Схема поиска не выбрана для этого запроса. "
+                if "web_search" in self._tools.registry.tools
+                else "Поиск по интернету не настроен. "
+            )
+            + "Не утверждай, что искал что-либо в сети."
         )
         capabilities: list[str] = []
+        if "web_search" in available_tools:
+            capabilities.append("поиск в интернете")
         if "get_current_time" in available_tools:
             capabilities.append("точное текущее время")
         if "get_exchange_rate" in available_tools:

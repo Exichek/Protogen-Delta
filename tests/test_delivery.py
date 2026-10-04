@@ -22,6 +22,7 @@ def _message() -> Message:
     message.chat = Mock(id=321)
     message.text = None
     message.caption = None
+    message.sticker = None
     return cast(Message, message)
 
 
@@ -131,4 +132,5 @@ def test_reply_delivery_triggers_optional_contextual_sticker() -> None:
         user_id=42,
         context_tags=("media",),
         context_text="",
+        reply_text="Готово.",
     )

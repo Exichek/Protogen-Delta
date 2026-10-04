@@ -76,13 +76,42 @@ async def get_weather(
     ).get("results", [])
     region = args.get("region", "").strip().casefold()
     if region:
-        locations = [
+        chosen = [
             place
             for place in locations
             if str(place.get("admin1", "")).casefold() == region
         ]
+        if not chosen:
+            # Модель может указать английское имя региона, а русская выдача
+            # содержит «Миссури». Сопоставляем по ID, не угадывая регион.
+            english = json.loads(
+                await fetch_provider(
+                    "https://geocoding-api.open-meteo.com/v1/search",
+                    {**query, "language": "en"},
+                    proxy_url=proxy_url,
+                )
+            ).get("results", [])
+            matching_ids = {
+                place.get("id")
+                for place in english
+                if place.get("id") is not None
+                and str(place.get("admin1", "")).casefold() == region
+            }
+            chosen = [place for place in locations if place.get("id") in matching_ids]
+        locations = chosen
     if not locations:
         return {"status": "not_found", "city": city}
+    if country and not region and len(locations) > 1:
+        first_population = int(locations[0].get("population", 0) or 0)
+        other_population = max(
+            int(place.get("population", 0) or 0) for place in locations[1:]
+        )
+        # Явная страна и мегаполис среди крошечных тёзок: Москва, Россия
+        # не требует выбора между столицей и селом. Springfield остаётся неоднозначным.
+        if first_population >= 500000 and first_population > 100 * max(
+            1, other_population
+        ):
+            locations = locations[:1]
     if len(locations) > 1:
         return {
             "status": "ambiguous",

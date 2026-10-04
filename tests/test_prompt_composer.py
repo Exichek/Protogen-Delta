@@ -87,6 +87,11 @@ def test_prompt_composer_adds_all_physical_sections_for_roleplay() -> None:
         ("Курс доллара к рублю", frozenset({"get_exchange_rate"})),
         ("Сколько времени в Москве?", frozenset({"get_current_time"})),
         ("Найди последнюю версию Python", frozenset({"web_search"})),
+        (
+            "А можешь глянуть в интернете в каком году вышел крепкий орешек 2",
+            frozenset({"web_search"}),
+        ),
+        ("А сколько цветов энергетиков у марки Burn?", frozenset({"web_search"})),
         ("Прочитай https://example.com/page", frozenset({"fetch_web_page"})),
     ],
 )
@@ -117,3 +122,40 @@ def test_prompt_composer_summarizes_old_history_and_keeps_recent_turns() -> None
 
     with pytest.raises(ValueError, match="больше нуля"):
         _composer().compact_history(history, live_turns=0)
+
+
+def test_tools_remain_available_for_weather_clarification_only() -> None:
+    from protogen_delta.core.user_state import ConversationTurn
+
+    history = [
+        ConversationTurn(
+            "Погода в Springfield", "Какой вариант? 1 — Миссури, 2 — Иллинойс."
+        )
+    ]
+    assert _composer().select_tools("1", history) == {"get_weather"}
+    assert _composer().select_tools("Миссури", history) == {"get_weather"}
+    assert _composer().select_tools("Спасибо", history) == frozenset()
+    assert _composer().select_tools("Как дела?", history) == frozenset()
+    assert _composer().select_tools("Объясни DNS", history) == frozenset()
+    assert (
+        _composer().select_tools("Да, лучше расскажи про DNS", history) == frozenset()
+    )
+    history.append(
+        ConversationTurn(
+            "Москва — город, Springfield — Миссури", "Подтверди первый вариант."
+        )
+    )
+    assert _composer().select_tools("Да", history) == {"get_weather"}
+
+
+def test_temporary_appearance_does_not_load_conflicting_base_body() -> None:
+    assert (
+        _composer().compose("*подхожу*", is_roleplay=True, has_custom_appearance=True)
+        == "CORE\n\nRP"
+    )
+    assert (
+        _composer().compose(
+            "Как ты выглядишь?", is_roleplay=False, has_custom_appearance=True
+        )
+        == "CORE"
+    )

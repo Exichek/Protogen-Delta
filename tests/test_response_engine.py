@@ -224,6 +224,25 @@ def test_response_engine_saves_delta_appearance_from_image() -> None:
     main_prompt = deepseek_mock.chat.await_args_list[1].kwargs["system_prompt"]
     assert "Текущий облик Дельты" in main_prompt
     assert "назначил этот облик" in main_prompt
+    assert (
+        "Не называй персонажа мускулистым"
+        in deepseek_mock.chat.await_args_list[0].kwargs["system_prompt"]
+    )
+    assert "не отвергай его" in main_prompt
+
+
+def test_response_engine_describes_application_capabilities() -> None:
+    from dataclasses import replace
+
+    engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._config = replace(
+        engine._config,
+        capabilities_context="Читаю PDF, DOCX, XLSX. Видео разбираю по кадрам.",
+    )
+    asyncio.run(engine.respond(TEST_USER_ID, "Какие форматы поддерживаешь?"))
+    assert (
+        "Читаю PDF, DOCX, XLSX" in deepseek_mock.chat.await_args.kwargs["system_prompt"]
+    )
 
 
 def test_response_engine_reuses_and_clears_saved_delta_appearance() -> None:

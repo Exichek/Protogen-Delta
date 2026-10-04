@@ -156,3 +156,94 @@ def test_id_command_uses_replied_sender() -> None:
     assert call is not None
     assert "Автор сообщения" in call.args[0]
     assert "ID: 88" in call.args[0]
+
+
+def test_id_picker_has_no_premium_or_membership_restrictions() -> None:
+    from protogen_delta.handlers.utilities import _id_keyboard
+
+    buttons = [button for row in _id_keyboard().keyboard for button in row]
+    for button in buttons:
+        if button.request_users:
+            assert button.request_users.user_is_premium is None
+        if button.request_chat:
+            assert button.request_chat.bot_is_member is None
+            assert button.request_chat.bot_administrator_rights is None
+            if button.text == "👥 Группа":
+                assert button.request_chat.chat_is_forum is None
+
+
+def test_id_shared_user_does_not_need_get_chat() -> None:
+    from aiogram.types import SharedUser, UsersShared
+
+    from protogen_delta.handlers.utilities import _USER_REQUEST
+
+    bot = AsyncMock(spec=Bot)
+    router = create_utilities_router(cast(Bot, bot))
+    message, answer = _message("")
+    message.users_shared = UsersShared(
+        request_id=_USER_REQUEST, users=[SharedUser(user_id=123, first_name="Тест")]
+    )
+    asyncio.run(router.message.handlers[1].callback(message))
+    assert answer.await_args is not None
+    assert "ID: 123" in answer.await_args.args[0]
+    bot.get_chat.assert_not_awaited()
+
+
+def test_id_shared_chat_does_not_need_get_chat() -> None:
+    from aiogram.types import ChatShared
+
+    from protogen_delta.handlers.utilities import _CHANNEL_REQUEST
+
+    bot = AsyncMock(spec=Bot)
+    router = create_utilities_router(cast(Bot, bot))
+    message, answer = _message("")
+    message.chat_shared = ChatShared(
+        request_id=_CHANNEL_REQUEST, chat_id=-100123, title="Тест"
+    )
+    asyncio.run(router.message.handlers[2].callback(message))
+    assert answer.await_args is not None
+    assert "ID: -100123" in answer.await_args.args[0]
+    bot.get_chat.assert_not_awaited()
+
+
+def test_id_normalizes_public_link() -> None:
+    bot = AsyncMock(spec=Bot)
+    bot.get_chat.return_value = Chat(id=-100123, type="channel", title="Тест")
+    router = create_utilities_router(cast(Bot, bot))
+    message, _ = _message("/id https://t.me/delta_news")
+    asyncio.run(_call_message(router, message))
+    bot.get_chat.assert_awaited_once_with("@delta_news")
+
+
+def test_id_picker_can_be_closed() -> None:
+    from protogen_delta.handlers.utilities import _CLOSE_ID
+
+    router = create_utilities_router(cast(Bot, AsyncMock(spec=Bot)))
+    message, answer = _message(_CLOSE_ID)
+    asyncio.run(router.message.handlers[3].callback(message))
+    assert answer.await_args is not None
+    assert answer.await_args.kwargs["reply_markup"].remove_keyboard is True
+
+
+def test_id_private_chat_offers_selection_buttons() -> None:
+    router = create_utilities_router(cast(Bot, AsyncMock(spec=Bot)))
+    message, answer = _message("/id")
+    message.chat = Chat(
+        id=42, type="private", first_name="Тест", last_name="Пользователь"
+    )
+    asyncio.run(_call_message(router, message))
+    assert answer.await_args is not None
+    assert "Тест Пользователь" in answer.await_args.args[0]
+    assert answer.await_args.kwargs["reply_markup"].keyboard
+
+
+def test_id_ignores_unrelated_shared_requests() -> None:
+    from aiogram.types import ChatShared, UsersShared
+
+    router = create_utilities_router(cast(Bot, AsyncMock(spec=Bot)))
+    message, answer = _message("")
+    message.users_shared = UsersShared(request_id=999, users=[])
+    message.chat_shared = ChatShared(request_id=999, chat_id=-100123)
+    asyncio.run(router.message.handlers[1].callback(message))
+    asyncio.run(router.message.handlers[2].callback(message))
+    answer.assert_not_awaited()

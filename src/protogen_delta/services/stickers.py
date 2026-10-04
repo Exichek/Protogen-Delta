@@ -23,7 +23,7 @@ _CONTEXT_PATTERNS = {
     "food": r"\b(?:ед[ау]|поесть|перекус\w*|кушать|food)\b",
     "sushi": r"\b(?:суши|роллы|sushi)\b",
     "toaster": r"\b(?:тостер\w*|toaster|тост[аы]?|хлеб\w*)\b",
-    "laugh": r"\b(?:ахах\w*|хаха\w*|лол|ржу\w*|смешн\w*|lol|rofl)\b",
+    "laugh": r"\b(?:ахах\w*|хаха\w*|лол|ржу\w*|смешн\w*|lol|rofl)\b|[:;=]-?[dDДд]+|[😂🤣]",
     "oops": r"\b(?:упс|ой|неловк\w*|oops)\b",
     "okay": r"^\s*(?:окей|ок|понял\w*|согласен|okay|ok)\b",
     "oral": r"\b(?:минет\w*|отсос\w*|сос[аёе]\w*|oral)\b",
@@ -31,7 +31,22 @@ _CONTEXT_PATTERNS = {
     "dominance": r"\b(?:доминир\w*|подчини\w*|dominance)\b",
     "humiliation": r"\b(?:униж\w*|humiliation)\b",
     "cuddle": r"\b(?:обним\w*|обня\w*|прижм\w*|cuddle)\b",
+    "happy": r"\b(?:спасибо|благодарю|круто|отлично|ништяк|ура|радуюсь)\b|[😊😄🥳]",
+    "love": r"[❤💜💕]",
 }
+
+
+def sticker_reply_tags(text: str) -> set[str]:
+    """Учитывать эмоцию Дельты в ремарках, а не темы справочного ответа."""
+    actions = " ".join(re.findall(r"\*([^*\n]+)\*", text))
+    patterns = {
+        "laugh": r"\b(?:рассмеял\w*|засмеял\w*|хохот\w*|сме[яё]\w*)\b",
+        "happy": r"\b(?:улыбнул\w*|заулыбал\w*|обрадовал\w*)\b",
+        "oops": r"\b(?:смутил\w*|покраснел\w*)\b",
+    }
+    return {
+        tag for tag, pattern in patterns.items() if re.search(pattern, actions, re.I)
+    }
 
 
 def sticker_context_tags(text: str) -> set[str]:
@@ -90,6 +105,7 @@ class ContextualStickerService:
         user_id: int,
         context_tags: Collection[str] = (),
         context_text: str = "",
+        reply_text: str = "",
     ) -> bool:
         """Иногда отправить подходящий стикер и сообщить об успехе."""
         reaction = self._reactions.setdefault(user_id, _ReactionState())
@@ -103,12 +119,13 @@ class ContextualStickerService:
             and now - reaction.last_sent_at < self._cooldown_seconds
         ):
             return False
-        if self._random_value() >= self._chance:
+        if self._chance == 0:
             return False
 
         state = self._user_states.get(user_id)
         tags = {tag.strip().lower() for tag in context_tags if tag.strip()}
         semantic_tags = sticker_context_tags(context_text)
+        semantic_tags.update(sticker_reply_tags(reply_text))
         tags.update(semantic_tags)
         tags.add(state.mood)
         if state.roleplay_active:
@@ -122,6 +139,15 @@ class ContextualStickerService:
             and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
         ]
         if not entries:
+            logger.debug("Sticker reaction outcome=no_match")
+            return False
+
+        # Явный повод не теряется за случайным фильтром; интервалы остаются общими.
+        explicit_match = any(
+            semantic_tags.intersection(entry.tags) for entry in entries
+        )
+        if not explicit_match and self._random_value() >= self._chance:
+            logger.debug("Sticker reaction outcome=probability")
             return False
 
         def score(entry: StickerEntry) -> int:
@@ -147,4 +173,9 @@ class ContextualStickerService:
         reaction.replies_since_sticker = 0
         reaction.last_sent_at = now
         reaction.last_file_unique_id = selected.file_unique_id
+        logger.info(
+            "Sticker reaction outcome=sent explicit=%s rating=%s",
+            explicit_match,
+            selected.rating,
+        )
         return True
