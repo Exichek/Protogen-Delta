@@ -1,10 +1,12 @@
 """Альбомы и индивидуальная панель поиска e621/e926."""
 
 import asyncio
+import calendar
 import logging
 import re
 import secrets
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 from time import monotonic, time
 from typing import cast
@@ -29,6 +31,7 @@ from protogen_delta.repositories.e621_history import (
     E621HistoryRepository,
     E621Preferences,
     MediaFilter,
+    PopularPeriod,
     SearchOrder,
 )
 from protogen_delta.services.e621 import (
@@ -49,7 +52,8 @@ E621_USAGE = (
     "/e6 dragon order:favcount count:10 — до 10 постов альбомом\n"
     "/e6 dragon -male — исключить тег\n"
     "В панели выбери арты, видео/GIF или всё; настройки сохраняются. "
-    "Популярные посты одинаковы для всех, история просмотренного индивидуальна. "
+    "🔥 Popular — подборки за день, неделю или месяц по оценке поста. "
+    "Топ одинаков для всех, история просмотренного индивидуальна. "
     "Для разнообразия выбери «Случайно». /adult задаёт доступный рейтинг."
 )
 _NO_RESULTS = "По этим тегам свежих результатов не нашлось. Попробуй изменить запрос."
@@ -77,6 +81,26 @@ class _SearchSession:
     results: list[E621Post] = field(default_factory=list)
     progress: str = ""
     progress_at: float = 0
+    popular_menu: bool = False
+    anchor: date = field(default_factory=lambda: datetime.now(timezone.utc).date())
+
+
+def _popular_dates(period: PopularPeriod, anchor: date) -> tuple[date, date]:
+    if period == "week":
+        start = anchor - timedelta(days=anchor.weekday())
+        return start, start + timedelta(days=6)
+    if period == "month":
+        return anchor.replace(day=1), anchor.replace(
+            day=calendar.monthrange(anchor.year, anchor.month)[1]
+        )
+    return anchor, anchor
+
+
+def _shift_period(period: PopularPeriod, anchor: date, delta: int) -> date:
+    if period == "month":
+        year, month = divmod(anchor.year * 12 + anchor.month - 1 + delta, 12)
+        return date(year, month + 1, 1)
+    return anchor + timedelta(days=delta * (7 if period == "week" else 1))
 
 
 def _split_count(raw: str) -> tuple[str, int]:
@@ -99,9 +123,21 @@ def _split_count(raw: str) -> tuple[str, int]:
 
 
 def _query(
-    raw: str, preferences: E621Preferences, content_mode: ContentMode
+    raw: str,
+    preferences: E621Preferences,
+    content_mode: ContentMode,
+    anchor: date | None = None,
 ) -> E621Query:
     tokens = raw.split()
+    if preferences.period != "all":
+        anchor = anchor or datetime.now(timezone.utc).date()
+        start, end = _popular_dates(preferences.period, anchor)
+        tokens = [t for t in tokens if not t.casefold().startswith(("order:", "date:"))]
+        # API сравнивает время с полуночью: включаем начало и исключаем следующий день.
+        stop = end + timedelta(days=1)
+        tokens.extend(
+            [f"date:>={start.isoformat()}", f"date:<{stop.isoformat()}", "order:score"]
+        )
     positive_types = {
         t.casefold().split(":", 1)[1]
         for t in tokens
@@ -157,6 +193,14 @@ def _keyboard(user_id: int, session: _SearchSession) -> InlineKeyboardMarkup:
         )
 
     pref = session.preferences
+    effective_order = next(
+        (
+            t.split(":", 1)[1]
+            for t in session.raw.split()
+            if t.casefold().startswith("order:")
+        ),
+        pref.order,
+    )
     rows = [
         [
             button("Арты", "images", pref.media_filter == "images"),
@@ -168,9 +212,21 @@ def _keyboard(user_id: int, session: _SearchSession) -> InlineKeyboardMarkup:
         rows.extend(
             [
                 [
-                    button("Новые", "site", pref.order == "site"),
-                    button("Популярные", "favcount", pref.order == "favcount"),
-                    button("Случайно", "random", pref.order == "random"),
+                    button(
+                        "Новые",
+                        "site",
+                        effective_order == "site" and pref.period == "all",
+                    ),
+                    button(
+                        "Топ избранного",
+                        "favcount",
+                        effective_order == "favcount" and pref.period == "all",
+                    ),
+                    button(
+                        "Случайно",
+                        "random",
+                        effective_order == "random" and pref.period == "all",
+                    ),
                 ],
                 [
                     button(str(count), f"count{count}", session.count == count)
@@ -178,6 +234,26 @@ def _keyboard(user_id: int, session: _SearchSession) -> InlineKeyboardMarkup:
                 ],
             ]
         )
+    rows.append([button("🔥 Popular", "popular", pref.period != "all")])
+    if session.popular_menu or pref.period != "all":
+        rows.append(
+            [
+                button(label, period, pref.period == period)
+                for label, period in (
+                    ("День", "day"),
+                    ("Неделя", "week"),
+                    ("Месяц", "month"),
+                )
+            ]
+        )
+        if pref.period != "all":
+            rows.append(
+                [
+                    button("← Период", "prevperiod"),
+                    button("Текущий", "nowperiod"),
+                    button("Период →", "nextperiod"),
+                ]
+            )
     rows.append([button("🔄 Ещё", "next"), button("⚙️ Настройки", "settings")])
     rows.append(
         [
@@ -197,14 +273,19 @@ def _panel_text(session: _SearchSession) -> str:
         "videos": "только видео/GIF",
     }
     text = "🎨 e621 · " + modes[session.preferences.media_filter]
-    if session.raw:
+    if session.raw or session.preferences.period != "all":
         text += (
             "\nПоиск: "
-            + escape(session.raw)
+            + escape(session.raw or "все теги")
             + f"\nДо {session.count} результатов за раз."
         )
     else:
         text += "\n" + escape(E621_USAGE)
+    if session.preferences.period != "all":
+        start, end = _popular_dates(session.preferences.period, session.anchor)
+        text += (
+            f"\n🔥 Popular: {start:%d.%m.%Y} — {end:%d.%m.%Y} (UTC). По оценке поста."
+        )
     if session.progress:
         text += "\n\n" + escape(session.progress)
     if session.results:
@@ -270,7 +351,9 @@ def create_e621_router(
     ) -> tuple[E621Query, bool]:
         async with user_states.use(user_id) as state:
             return (
-                _query(session.raw, session.preferences, state.content_mode),
+                _query(
+                    session.raw, session.preferences, state.content_mode, session.anchor
+                ),
                 state.content_mode == "adult",
             )
 
@@ -452,7 +535,25 @@ def create_e621_router(
         except asyncio.CancelledError:
             session.progress = f"Поиск остановлен. Отправлено: {len(session.results)}."
         except (E621Error, TelegramBadRequest) as error:
-            logger.info("E621 delivery outcome=failed type=%s", type(error).__name__)
+            reason = (
+                "photo_dimensions"
+                if isinstance(error, TelegramBadRequest)
+                and any(
+                    t in error.message.casefold()
+                    for t in (
+                        "photo_invalid_dimensions",
+                        "image_process_failed",
+                        "photo_invalid",
+                        "file is too big",
+                    )
+                )
+                else "other"
+            )
+            logger.info(
+                "E621 delivery outcome=failed type=%s reason=%s",
+                type(error).__name__,
+                reason,
+            )
             session.progress = (
                 str(error)
                 if isinstance(error, E621Error)
@@ -482,6 +583,8 @@ def create_e621_router(
         try:
             preferences = await history.preferences(user_id)
             tags, count = _split_count(raw)
+            if any(t.casefold().startswith(("order:", "date:")) for t in tags.split()):
+                preferences = replace(preferences, period="all")
             explicit_count = any(
                 t.casefold().startswith("count:") for t in raw.split()
             ) or tags != " ".join(raw.split())
@@ -504,12 +607,23 @@ def create_e621_router(
             await run_query(message, parts[1])
         elif message.from_user:
             user_id = message.from_user.id
-            preferences = await history.preferences(user_id)
-            session = sessions.setdefault(
-                user_id, _SearchSession("", preferences, preferences.count)
-            )
-            session.closed, session.expanded = False, True
-            await update_panel(message, user_id, session)
+            lock = locks.setdefault(user_id, asyncio.Lock())
+            if lock.locked():
+                await message.answer(
+                    "Подборка ещё готовится. Дождись её или нажми «Стоп»."
+                )
+                return
+            async with lock:
+                preferences = await history.preferences(user_id)
+                session = sessions.setdefault(
+                    user_id, _SearchSession("", preferences, preferences.count)
+                )
+                await discard_panel(session)
+                session.token = secrets.token_hex(4)
+                session.closed, session.expanded = False, True
+                session.progress = ""
+                session.results.clear()
+                await update_panel(message, user_id, session)
 
     @router.message(F.text.func(looks_like_e621_query))
     async def e621_direct_query(message: Message) -> None:
@@ -557,7 +671,7 @@ def create_e621_router(
             return
         await callback.answer()
         if action == "next":
-            if not session.raw:
+            if not session.raw and session.preferences.period == "all":
                 session.progress = "Укажи запрос: /e6 dragon"
                 await update_panel(callback.message, user_id, session)
                 return
@@ -569,13 +683,51 @@ def create_e621_router(
             return
         if action == "settings":
             session.expanded = not session.expanded
+        elif action == "popular":
+            session.popular_menu = not session.popular_menu
+        elif action in {
+            "day",
+            "week",
+            "month",
+            "prevperiod",
+            "nextperiod",
+            "nowperiod",
+        }:
+            lock = locks.setdefault(user_id, asyncio.Lock())
+            if lock.locked():
+                return
+            async with lock:
+                if action in {"day", "week", "month"}:
+                    session.preferences = replace(
+                        session.preferences, period=cast(PopularPeriod, action)
+                    )
+                    session.anchor = datetime.now(timezone.utc).date()
+                elif session.preferences.period == "all":
+                    return
+                elif action == "nowperiod":
+                    session.anchor = datetime.now(timezone.utc).date()
+                else:
+                    session.anchor = _shift_period(
+                        session.preferences.period,
+                        session.anchor,
+                        -1 if action == "prevperiod" else 1,
+                    )
+                session.raw = " ".join(
+                    t
+                    for t in session.raw.split()
+                    if not t.casefold().startswith(("order:", "date:"))
+                )
+                session.query = None
+                await history.save_preferences(user_id, session.preferences)
+                await send_batch(callback.message, user_id, session)
+            return
         elif action in {"all", "images", "videos"}:
             session.preferences = replace(
                 session.preferences, media_filter=cast(MediaFilter, action)
             )
         elif action in {"site", "favcount", "random"}:
             session.preferences = replace(
-                session.preferences, order=cast(SearchOrder, action)
+                session.preferences, order=cast(SearchOrder, action), period="all"
             )
             session.raw = " ".join(
                 t for t in session.raw.split() if not t.casefold().startswith("order:")

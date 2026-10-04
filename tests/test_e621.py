@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiogram import Router
 from aiogram.types import CallbackQuery, Message
+from PIL import Image
 
 import protogen_delta.handlers.e621 as handler_module
 from protogen_delta.core.user_state import UserStateStore
@@ -28,6 +30,10 @@ from protogen_delta.services.e621 import (
     normalize_e621_query,
 )
 from protogen_delta.services.telegram_video import TelegramVideoConverter
+
+_image_buffer = BytesIO()
+Image.new("RGB", (64, 48), "purple").save(_image_buffer, "JPEG")
+_JPEG = _image_buffer.getvalue()
 
 
 def _post(post_id: int = 42, ext: str = "jpg") -> E621Post:
@@ -292,7 +298,7 @@ class _Client:
 
     async def download(self, url: str, *, max_bytes: int) -> bytes:
         del url, max_bytes
-        return b"image"
+        return _JPEG
 
 
 class _ErrorClient(_Client):

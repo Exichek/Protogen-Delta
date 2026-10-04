@@ -11,7 +11,15 @@ import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import SendMediaGroup
 from aiogram.types import CallbackQuery, Message
-from test_e621 import _call_message, _Client, _message, _post, _Response, _Session
+from test_e621 import (
+    _JPEG,
+    _call_message,
+    _Client,
+    _message,
+    _post,
+    _Response,
+    _Session,
+)
 
 import protogen_delta.handlers.e621 as handler
 from protogen_delta.core.user_state import UserStateStore
@@ -134,7 +142,7 @@ def test_mixed_album_has_one_panel_and_reuses_files_between_accounts(
 ) -> None:
     async def scenario() -> None:
         client = cast(Mock, _Client([_post(1), _post(2, "mp4"), _post(3)]))
-        client.download = AsyncMock(return_value=b"data")
+        client.download = AsyncMock(return_value=_JPEG)
         history = E621HistoryRepository(tmp_path)
         router = handler.create_e621_router(
             cast(E621Client, client), history, UserStateStore(), bot_id=100
@@ -309,7 +317,7 @@ def test_age_change_during_preparation_prevents_upload(
         self: E621MediaService, post: object, **kwargs: object
     ) -> PreparedMedia:
         states.get(7).content_mode = "soft"
-        return PreparedMedia(replace(_post(), rating="e"), "key", "jpg", b"data")
+        return PreparedMedia(replace(_post(), rating="e"), "key", "jpg", _JPEG)
 
     monkeypatch.setattr(E621MediaService, "prepare", prepare)
     history = E621HistoryRepository(tmp_path)
@@ -326,7 +334,7 @@ def test_age_change_during_preparation_prevents_upload(
 def test_invalid_cached_file_is_downloaded_again_once(tmp_path: Path) -> None:
     async def scenario() -> None:
         client = cast(Mock, _Client([_post(1), _post(2)]))
-        client.download = AsyncMock(return_value=b"data")
+        client.download = AsyncMock(return_value=_JPEG)
         history = E621HistoryRepository(tmp_path)
         service = E621MediaService(cast(E621Client, client), history, 100)
         for post in client.posts:
@@ -374,7 +382,7 @@ def test_timeout_sends_prepared_part_and_allows_continuation(
         ) -> PreparedMedia:
             if post.post_id == 2:
                 await asyncio.sleep(1)
-            return PreparedMedia(post, "key", "jpg", b"data")
+            return PreparedMedia(post, "key", "jpg", _JPEG)
 
         monkeypatch.setattr(E621MediaService, "prepare", prepare)
         monkeypatch.setattr(handler, "_BATCH_SECONDS", 0.1)
@@ -413,7 +421,7 @@ def test_media_preparation_deduplicates_concurrent_work_and_uses_cache(
 ) -> None:
     async def scenario() -> None:
         client = cast(Mock, _Client([]))
-        client.download = AsyncMock(return_value=b"data")
+        client.download = AsyncMock(return_value=_JPEG)
         history = E621HistoryRepository(tmp_path)
         service = E621MediaService(cast(E621Client, client), history, 100)
         first, second = await asyncio.gather(
@@ -435,7 +443,7 @@ def test_cache_extracts_actual_telegram_file_id(tmp_path: Path, kind: str) -> No
     async def scenario() -> None:
         history = E621HistoryRepository(tmp_path)
         service = E621MediaService(cast(E621Client, _Client([])), history, 1)
-        prepared = PreparedMedia(_post(), "asset", "mp4", b"data")
+        prepared = PreparedMedia(_post(), "asset", "mp4", _JPEG)
         await service.remember(prepared, _delivery(kind))
         cached = await history.cached_media(1, "asset")
         assert (cached.file_id if cached else None) == (
@@ -454,7 +462,7 @@ def test_album_fallback_is_explicit_and_not_cached_forever(
         client = cast(Mock, _Client([]))
         client.download = AsyncMock(
             side_effect=lambda url, **kwargs: (
-                b"data"
+                _JPEG
                 if "sample-" in url
                 else (_ for _ in ()).throw(E621Error("unavailable"))
             )
@@ -465,7 +473,7 @@ def test_album_fallback_is_explicit_and_not_cached_forever(
         post = _post(ext="gif")
         if failure == "conversion":
             client.download.side_effect = None
-            client.download.return_value = b"data"
+            client.download.return_value = _JPEG
             setattr(
                 service.converter,
                 "convert",
@@ -507,7 +515,7 @@ def test_missing_file_does_not_discard_other_prepared_posts(
     ) -> PreparedMedia:
         if post.post_id == 2:
             raise E621Error("no file")
-        return PreparedMedia(post, str(post.post_id), "jpg", b"data")
+        return PreparedMedia(post, str(post.post_id), "jpg", _JPEG)
 
     monkeypatch.setattr(E621MediaService, "prepare", prepare)
     history = E621HistoryRepository(tmp_path)
@@ -527,17 +535,17 @@ def test_ram_cache_is_bounded_and_evicted_asset_downloads_again(
 ) -> None:
     import protogen_delta.services.e621_media as media_module
 
-    monkeypatch.setattr(media_module, "_RAM_BYTES", 8)
+    monkeypatch.setattr(media_module, "_RAM_BYTES", 2 * len(_JPEG) - 1)
 
     async def scenario() -> None:
         client = cast(Mock, _Client([]))
-        client.download = AsyncMock(return_value=b"12345")
+        client.download = AsyncMock(return_value=_JPEG)
         service = E621MediaService(
             cast(E621Client, client), E621HistoryRepository(tmp_path)
         )
         for post in (_post(1), _post(2), _post(1)):
             await service.prepare(post, album=True)
-            assert sum(p.size for p in service._ready.values()) <= 8
+            assert sum(p.size for p in service._ready.values()) <= 2 * len(_JPEG) - 1
         assert client.download.await_count == 3
 
     asyncio.run(scenario())
@@ -605,7 +613,7 @@ def test_timeout_with_partial_upload_failure_is_reported(
         ) -> PreparedMedia:
             if post.post_id == 2 or not fail_upload:
                 raise TimeoutError
-            return PreparedMedia(post, "key", "jpg", b"data")
+            return PreparedMedia(post, "key", "jpg", _JPEG)
 
         monkeypatch.setattr(E621MediaService, "prepare", prepare)
         history = E621HistoryRepository(tmp_path)

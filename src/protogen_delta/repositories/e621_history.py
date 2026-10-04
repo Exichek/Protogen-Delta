@@ -9,6 +9,7 @@ from typing import Literal, cast
 
 MediaFilter = Literal["all", "images", "videos"]
 SearchOrder = Literal["site", "favcount", "random"]
+PopularPeriod = Literal["all", "day", "week", "month"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,7 @@ class E621Preferences:
     media_filter: MediaFilter = "all"
     order: SearchOrder = "site"
     count: int = 1
+    period: PopularPeriod = "all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,14 @@ class E621HistoryRepository:
                 file_id TEXT NOT NULL, kind TEXT NOT NULL, notice TEXT NOT NULL,
                 updated_at REAL NOT NULL, PRIMARY KEY(bot_id, asset_key)
                 )""")
+            columns = {
+                r[1]
+                for r in connection.execute("PRAGMA table_info(search_preferences)")
+            }
+            if "popular_period" not in columns:
+                connection.execute(
+                    "ALTER TABLE search_preferences ADD COLUMN popular_period TEXT NOT NULL DEFAULT 'all'"
+                )
 
     async def preferences(self, user_id: int) -> E621Preferences:
         return await asyncio.to_thread(self._preferences_sync, user_id)
@@ -62,12 +72,16 @@ class E621HistoryRepository:
     def _preferences_sync(self, user_id: int) -> E621Preferences:
         with closing(sqlite3.connect(self._path)) as connection:
             row = connection.execute(
-                "SELECT media_filter, search_order, result_count FROM search_preferences WHERE user_id = ?",
+                "SELECT media_filter, search_order, result_count, popular_period "
+                "FROM search_preferences WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
         return (
             E621Preferences(
-                cast(MediaFilter, row[0]), cast(SearchOrder, row[1]), row[2]
+                cast(MediaFilter, row[0]),
+                cast(SearchOrder, row[1]),
+                row[2],
+                cast(PopularPeriod, row[3]),
             )
             if row
             else E621Preferences()
@@ -80,6 +94,7 @@ class E621HistoryRepository:
             raise ValueError("Неизвестный тип медиа")
         if (
             preferences.order not in {"site", "favcount", "random"}
+            or preferences.period not in {"all", "day", "week", "month"}
             or not 1 <= preferences.count <= 10
         ):
             raise ValueError("Некорректная сортировка или количество")
@@ -90,12 +105,13 @@ class E621HistoryRepository:
     ) -> None:
         with closing(sqlite3.connect(self._path)) as connection, connection:
             connection.execute(
-                "INSERT OR REPLACE INTO search_preferences VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO search_preferences VALUES (?, ?, ?, ?, ?)",
                 (
                     user_id,
                     preferences.media_filter,
                     preferences.order,
                     preferences.count,
+                    preferences.period,
                 ),
             )
 

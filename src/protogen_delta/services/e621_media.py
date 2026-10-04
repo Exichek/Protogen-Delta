@@ -18,6 +18,7 @@ from protogen_delta.services.e621 import (
     E621Error,
     E621Post,
 )
+from protogen_delta.services.telegram_photo import prepare_photo
 from protogen_delta.services.telegram_video import TelegramVideoConverter
 
 _RAM_BYTES = 64 * 1024 * 1024
@@ -60,16 +61,17 @@ class E621MediaService:
         self._ready: OrderedDict[str, PreparedMedia] = OrderedDict()
 
     async def prepare(self, post: E621Post, *, album: bool) -> PreparedMedia:
-        signature = repr(
-            (
-                post.post_id,
-                post.file_url,
-                post.file_size,
-                post.mp4_urls,
-                post.webm_urls,
-                album and post.file_ext == "gif",
-            )
+        signature_parts = (
+            post.post_id,
+            post.file_url,
+            post.file_size,
+            post.mp4_urls,
+            post.webm_urls,
+            album and post.file_ext == "gif",
         )
+        signature = repr(signature_parts)
+        if post.file_ext in {"jpg", "jpeg", "png", "webp"}:
+            signature += "telegram-photo-v2"
         key = hashlib.sha256(signature.encode()).hexdigest()
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
@@ -113,10 +115,11 @@ class E621MediaService:
             self._ready.pop(prepared.key, None)
 
     async def _preview(self, post: E621Post, key: str, notice: str) -> PreparedMedia:
-        url = post.preview_url or post.sample_url
+        url = post.sample_url or post.preview_url
         if not url:
             raise E621Error("У поста нет доступного превью.")
         data = await self.client.download(url, max_bytes=MAX_IMAGE_BYTES)
+        data = await asyncio.to_thread(prepare_photo, data)
         return PreparedMedia(post, key, "jpg", data, notice)
 
     async def _download(self, post: E621Post, key: str, album: bool) -> PreparedMedia:
@@ -165,5 +168,13 @@ class E621MediaService:
                     ext,
                     data,
                     "⚠️ Не удалось подготовить MP4; отправляю исходный WebM файлом.",
+                )
+        if ext in {"jpg", "jpeg", "png", "webp"}:
+            try:
+                data = await asyncio.to_thread(prepare_photo, data)
+                ext = "jpg"
+            except E621Error:
+                return await self._preview(
+                    post, key, "⚠️ Версия для Telegram. Оригинал — по ссылке."
                 )
         return PreparedMedia(post, key, ext, data)
