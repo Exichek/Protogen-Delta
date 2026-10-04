@@ -5,9 +5,10 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /app/data
-      MINI_APP_URL: https://${MINI_APP_DOMAIN:?Укажи MINI_APP_DOMAIN в .env}
+      MINI_APP_URL: https://${MINI_APP_DOMAIN:?Укажи MINI_APP_DOMAIN в .env}:${MINI_APP_HTTPS_PORT:-443}
       MINI_APP_SERVER_ENABLED: "true"
       MINI_APP_HOST: 0.0.0.0
+      MINI_APP_PORT: "8080"
       PDF_OCR_ENABLED: "true"
     volumes:
       - delta_data:/app/data
@@ -23,9 +24,10 @@ services:
     restart: unless-stopped
     environment:
       MINI_APP_DOMAIN: ${MINI_APP_DOMAIN}
+      MINI_APP_HTTPS_PORT: ${MINI_APP_HTTPS_PORT:-443}
     ports:
       - "80:80"
-      - "443:443"
+      - "${MINI_APP_HTTPS_PORT:-443}:${MINI_APP_HTTPS_PORT:-443}"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
