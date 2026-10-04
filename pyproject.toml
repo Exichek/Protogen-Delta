@@ -1,7 +1,7 @@
 [project]
 name = "protogen-delta"
 version = "0.1.0"
-description = "Telegram AI assistant with RP, memory, tools, and OpenAI-compatible LLM support"
+description = "AI assistant Protogen Delta with personality, memory, roleplay and tools"
 authors = [
     { name = "Exi", email = "rey93sinkler@gmail.com" }
 ]
