@@ -7,8 +7,8 @@ from aiogram.types import Message
 from protogen_delta.core.message_utils import split_message
 
 HELP_TEXT = (
-    "📖 Команды бота:\n\n"
-    "/start – 🚀 Запустить бота\n"
+    "📖 ИИ-ассистент Протоген Дельта — помощь и команды:\n\n"
+    "/start – 🚀 Познакомиться с Дельтой\n"
     "/menu – ⚙️ Открыть панель возможностей\n"
     "/randomart – 🎨 Случайный арт\n"
     "/e6 <теги> – 🔎 Поиск артов e621/e926 без повторов\n"

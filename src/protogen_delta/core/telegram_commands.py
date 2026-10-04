@@ -12,7 +12,7 @@ from aiogram.types import (
 async def set_commands(bot: Bot, mini_app_url: str | None = None) -> None:
     """Установить команды, отображаемые в меню Telegram."""
     commands = [
-        BotCommand(command="start", description="🚀 Запустить бота"),
+        BotCommand(command="start", description="🚀 Познакомиться с Дельтой"),
         BotCommand(command="menu", description="⚙️ Панель возможностей"),
         BotCommand(command="randomart", description="🎨 Случайный арт"),
         BotCommand(command="e6", description="🔎 Поиск артов e621 по тегам"),

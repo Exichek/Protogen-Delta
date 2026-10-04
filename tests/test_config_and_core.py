@@ -276,7 +276,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     ]
 
     assert [command.description for command in commands] == [
-        "🚀 Запустить бота",
+        "🚀 Познакомиться с Дельтой",
         "⚙️ Панель возможностей",
         "🎨 Случайный арт",
         "🔎 Поиск артов e621 по тегам",

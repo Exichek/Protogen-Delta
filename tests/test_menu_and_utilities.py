@@ -37,7 +37,7 @@ def test_menu_shows_sections_and_optional_mini_app() -> None:
 
     call = answer.await_args
     assert call is not None
-    assert "Панель Дельты" in call.args[0]
+    assert "ИИ-ассистент Протоген Дельта" in call.args[0]
     buttons = [
         button for row in call.kwargs["reply_markup"].inline_keyboard for button in row
     ]
