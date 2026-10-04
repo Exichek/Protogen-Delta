@@ -6,10 +6,35 @@ from pathlib import Path
 import av
 import numpy as np
 import pytest
+from PIL import Image
 
 from protogen_delta.services.e621 import E621Error
 from protogen_delta.services.telegram_video import TelegramVideoConverter
 from protogen_delta.services.telegram_video_worker import transcode
+
+
+def test_real_gif_becomes_playable_mp4_for_album(tmp_path: Path) -> None:
+    source = tmp_path / "source.gif"
+    Image.new("RGB", (64, 48), "red").save(
+        source,
+        save_all=True,
+        append_images=[Image.new("RGB", (64, 48), "blue")],
+        duration=250,
+        loop=0,
+    )
+    result = tmp_path / "converted.mp4"
+    result.write_bytes(
+        asyncio.run(TelegramVideoConverter().convert(source.read_bytes()))
+    )
+    with av.open(str(result)) as video:
+        assert video.streams.video[0].codec_context.name == "h264"
+        frames = list(video.decode(video=0))
+        assert len(frames) >= 2
+        assert frames[0].to_ndarray(format="rgb24")[0, 0, 0] > 200
+        assert frames[-1].to_ndarray(format="rgb24")[0, 0, 2] > 200
+        assert (
+            video.duration is not None and 0.45 <= video.duration / av.time_base <= 0.55
+        )
 
 
 def _webm(path: Path, sound: bool) -> None:
