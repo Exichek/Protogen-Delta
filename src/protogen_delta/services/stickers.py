@@ -23,7 +23,7 @@ _CONTEXT_PATTERNS = {
     "food": r"\b(?:ед[ау]|поесть|перекус\w*|кушать|food)\b",
     "sushi": r"\b(?:суши|роллы|sushi)\b",
     "toaster": r"\b(?:тостер\w*|toaster|тост[аы]?|хлеб\w*)\b",
-    "laugh": r"\b(?:ахах\w*|хаха\w*|лол|ржу\w*|смешн\w*|lol|rofl)\b|[:;=]-?[dDДд]+|[😂🤣]",
+    "laugh": r"\b(?:ахах\w*|хаха\w*|лол|ржу\w*|смешн\w*|lol|rofl|[xх][dд]+)\b|[:;=]-?[dDДд]+|[😂🤣]",
     "oops": r"\b(?:упс|ой|неловк\w*|oops)\b",
     "okay": r"^\s*(?:окей|ок|понял\w*|согласен|okay|ok)\b",
     "oral": r"\b(?:минет\w*|отсос\w*|сос[аёе]\w*|oral)\b",
@@ -31,7 +31,11 @@ _CONTEXT_PATTERNS = {
     "dominance": r"\b(?:доминир\w*|подчини\w*|dominance)\b",
     "humiliation": r"\b(?:униж\w*|humiliation)\b",
     "cuddle": r"\b(?:обним\w*|обня\w*|прижм\w*|cuddle)\b",
-    "happy": r"\b(?:спасибо|благодарю|круто|отлично|ништяк|ура|радуюсь)\b|[😊😄🥳]",
+    "happy": (
+        r"\b(?:спасибо|благодарю|круто|отлично|ништяк|ура|радуюсь)\b|[😊😄🥳]|"
+        r"[:=]-?\)+|(?:[а-яё]|\s|^)\){2,}(?=\s|$)"
+    ),
+    "playful": r"[:;]-?[pр3]|;-?\)|\b(?:uwu|owo)\b|[😜😝]",
     "love": r"[❤💜💕]",
 }
 
@@ -51,6 +55,7 @@ def sticker_reply_tags(text: str) -> set[str]:
 
 def sticker_context_tags(text: str) -> set[str]:
     """Найти конкретный повод для реакции без нового запроса к модели."""
+    text = re.sub(r"```[\s\S]*?```|`[^`]*`|https?://\S+", "", text)
     return {
         tag
         for tag, pattern in _CONTEXT_PATTERNS.items()

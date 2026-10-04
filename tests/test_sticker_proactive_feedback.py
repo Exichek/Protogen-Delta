@@ -24,9 +24,31 @@ from protogen_delta.services.stickers import (
 )
 
 
-@pytest.mark.parametrize("text", ["Класс :D", "😂", "🤣", "лол", "Спасибо :Д"])
+@pytest.mark.parametrize(
+    "text", ["Класс :D", "😂", "🤣", "лол", "Спасибо :Д", "xD", "Хд"]
+)
 def test_laughter_markers_match(text: str) -> None:
     assert "laugh" in sticker_context_tags(text)
+
+
+@pytest.mark.parametrize("text", [":)", ":-)", "😊", ")))", "ясно)))"])
+def test_smiles_match_happy(text: str) -> None:
+    assert "happy" in sticker_context_tags(text)
+
+
+@pytest.mark.parametrize("text", [";)", ":3", "UwU", "OwO", "😜"])
+def test_playful_faces_do_not_imply_intimate_context(text: str) -> None:
+    tags = sticker_context_tags(text)
+    assert "playful" in tags
+    assert not {"horny", "oral", "rimming", "rp"}.intersection(tags)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["`:D`", "```python\nprint(':)')\n```", "https://example.com/:D", "print(foo())"],
+)
+def test_code_and_urls_do_not_become_reactions(text: str) -> None:
+    assert sticker_context_tags(text) == set()
 
 
 def test_reply_reaction_ignores_quoted_topics() -> None:
