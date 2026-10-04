@@ -13,7 +13,10 @@ from protogen_delta.handlers.rp import (
     is_roleplay_stop_message,
 )
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
-from protogen_delta.services.stickers import ContextualStickerService
+from protogen_delta.services.stickers import (
+    ContextualStickerService,
+    has_sticker_request,
+)
 
 RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару секунд."
 BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщение. Подожди немного."
@@ -61,6 +64,22 @@ def create_text_router(
 
         if not limiter.allow(user_id):
             await message.answer(RATE_LIMIT_REPLY)
+            return
+
+        if sticker_service is not None and has_sticker_request(message.text):
+            if not sticker_service.is_available(user_id):
+                await message.answer(
+                    "Стикеры сейчас отключены или нет доступных реакций."
+                )
+            elif not await sticker_service.maybe_send(
+                chat_id=message.chat.id,
+                user_id=user_id,
+                context_text=message.text,
+            ):
+                await message.answer(
+                    "Сейчас не получилось отправить стикер. Подожди немного "
+                    "и попробуй ещё раз."
+                )
             return
 
         try:

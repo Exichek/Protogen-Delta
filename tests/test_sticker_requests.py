@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,8 +11,11 @@ from aiogram import Bot
 from aiogram.types import Message
 
 from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
+from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.response_engine import ResponseEngine
 from protogen_delta.services.stickers import (
     ContextualStickerService,
@@ -103,7 +106,7 @@ def test_disabled_or_empty_pack_reports_unavailability(
     bot.send_sticker.assert_not_awaited()
 
 
-def test_text_handler_supplies_capability_and_delivers_requested_sticker(
+def test_text_handler_delivers_requested_sticker_without_llm(
     tmp_path: Path,
 ) -> None:
     service, bot = _service(tmp_path)
@@ -117,13 +120,102 @@ def test_text_handler_supplies_capability_and_delivers_requested_sticker(
         answer=AsyncMock(),
     )
 
-    async def respond(user_id: int, text: str, deliver: Any, **kwargs: Any) -> None:
-        assert "доступны 2" in kwargs["trusted_input_context"]
-        assert "Не отрицай" in kwargs["trusted_input_context"]
-        await deliver("Да, есть реакции из моего пака.")
+    router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
+    asyncio.run(router.message.handlers[0].callback(cast(Message, message)))
+    message.answer.assert_not_awaited()
+    engine.respond_and_deliver.assert_not_awaited()
+    bot.send_sticker.assert_awaited_once()
 
-    engine.respond_and_deliver.side_effect = respond
+
+@pytest.mark.parametrize("disabled", [False, True])
+def test_text_request_reports_unavailable_or_cooldown(
+    tmp_path: Path, disabled: bool
+) -> None:
+    service, bot = _service(tmp_path)
+    if disabled:
+        service._chance = 0
+    else:
+        asyncio.run(
+            service.maybe_send(chat_id=7, user_id=42, context_text="Покажи стикер")
+        )
+    engine = AsyncMock(spec=ResponseEngine)
+    message = SimpleNamespace(
+        text="Покажи стикер",
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=7),
+        answer=AsyncMock(),
+    )
     router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
     asyncio.run(router.message.handlers[0].callback(cast(Message, message)))
     message.answer.assert_awaited_once()
-    bot.send_sticker.assert_awaited_once()
+    engine.respond_and_deliver.assert_not_awaited()
+
+
+def test_regular_text_supplies_actual_capabilities(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    engine = AsyncMock(spec=ResponseEngine)
+    message = SimpleNamespace(text="Как дела?", from_user=SimpleNamespace(id=42))
+    router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
+    asyncio.run(router.message.handlers[0].callback(cast(Message, message)))
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert "доступны 2" in call.kwargs["trusted_input_context"]
+    assert "Не отрицай" in call.kwargs["trusted_input_context"]
+
+
+def test_first_greeting_selects_hello_and_respects_cooldown(tmp_path: Path) -> None:
+    service, bot = _service(tmp_path)
+    service._repository.upsert(StickerEntry("hello", "hello", ("greeting",)))
+    service._random_value = lambda: 1.0
+    now = [100.0]
+    service._clock = lambda: now[0]
+
+    async def scenario() -> None:
+        assert await service.maybe_send(
+            chat_id=7, user_id=42, context_text="Привет, хочу кофе"
+        )
+        assert not await service.maybe_send(
+            chat_id=7, user_id=42, context_text="Привет"
+        )
+        now[0] += 181
+        assert await service.maybe_send(chat_id=7, user_id=42, context_text="Привет")
+
+    asyncio.run(scenario())
+    assert all(c.kwargs["sticker"] == "hello" for c in bot.send_sticker.await_args_list)
+    assert bot.send_sticker.await_count == 2
+
+
+@pytest.mark.parametrize("repeat", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+def test_start_sends_sticker_after_greeting_and_keeps_age_prompt(
+    tmp_path: Path, repeat: bool, failure: bool
+) -> None:
+    users = UsersRepository(tmp_path)
+    if repeat:
+        users.add(42)
+    model = AsyncMock(spec=DeepSeekService)
+    model.chat.return_value = "Живое приветствие"
+    service, bot = _service(tmp_path)
+    service._repository.upsert(StickerEntry("hello", "hello", ("greeting",)))
+    events: list[str] = []
+
+    async def send_sticker(**kwargs: object) -> None:
+        events.append("sticker")
+        assert kwargs["sticker"] == "hello"
+        if failure:
+            raise RuntimeError("sticker unavailable")
+
+    async def answer(text: str, **kwargs: object) -> None:
+        events.append("text")
+
+    bot.send_sticker.side_effect = send_sticker
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=7),
+        answer=AsyncMock(side_effect=answer),
+    )
+    router = create_start_router(
+        users, cast(DeepSeekService, model), "prompt", sticker_service=service
+    )
+    asyncio.run(router.message.handlers[0].callback(cast(Message, message)))
+    assert events == ["text", "sticker", "text"]

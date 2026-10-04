@@ -142,6 +142,14 @@ class ContextualStickerService:
             "Не утверждай, что стикер уже отправлен, до фактической отправки."
         )
 
+    def is_available(self, user_id: int) -> bool:
+        """Проверить, включены ли реакции и доступны ли стикеры по возрастному режиму."""
+        state = self._user_states.get(user_id)
+        return self._chance > 0 and any(
+            state.content_mode == "adult" or entry.rating == "safe"
+            for entry in self._repository.get_all()
+        )
+
     async def maybe_send(
         self,
         *,
@@ -155,7 +163,13 @@ class ContextualStickerService:
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
         requested = has_sticker_request(context_text)
-        if not requested and reaction.replies_since_sticker < self._min_replies:
+        semantic_tags = sticker_context_tags(context_text)
+        greeting = "greeting" in semantic_tags
+        if (
+            not requested
+            and not greeting
+            and reaction.replies_since_sticker < self._min_replies
+        ):
             logger.debug("Sticker reaction outcome=gap")
             return False
 
@@ -170,7 +184,6 @@ class ContextualStickerService:
 
         state = self._user_states.get(user_id)
         tags = {tag.strip().lower() for tag in context_tags if tag.strip()}
-        semantic_tags = sticker_context_tags(context_text)
         semantic_tags.update(sticker_reply_tags(reply_text))
         tags.update(semantic_tags)
         tags.add(state.mood)
@@ -187,6 +200,10 @@ class ContextualStickerService:
         if not entries:
             logger.debug("Sticker reaction outcome=no_match")
             return False
+
+        if greeting and not requested:
+            greeting_entries = [entry for entry in entries if "greeting" in entry.tags]
+            entries = greeting_entries or entries
 
         # Явный повод не теряется за случайным фильтром; интервалы остаются общими.
         explicit_match = any(
