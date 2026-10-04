@@ -31,10 +31,20 @@ def create_art_router(
         chats = sources.get_all() if sources is not None else [art_chat_id]
         return message.chat.id in chats and is_admin(message)
 
+    def allowed_channel(message: Message) -> bool:
+        # У поста канала обычно нет from_user. Доверяем только источнику,
+        # который явно подключил администратор приложения.
+        chats = sources.get_all() if sources is not None else [art_chat_id]
+        return (
+            getattr(message.chat, "type", None) == "channel"
+            and message.chat.id in chats
+        )
+
+    @router.channel_post(F.photo, allowed_channel)
     @router.message(F.photo, allowed)
     async def save_photo(message: Message) -> None:
-        """Сохранить арт, присланный в разрешённую группу."""
-        if not allowed(message):
+        """Сохранить арт из разрешённой группы или канала."""
+        if not (allowed(message) or allowed_channel(message)):
             return
 
         if not message.photo:
@@ -45,10 +55,11 @@ def create_art_router(
         if images_repository.add(file_id):
             logger.info("Сохранён новый арт: %s", file_id)
 
+    @router.channel_post(F.document.mime_type.startswith("image/"), allowed_channel)
     @router.message(F.document.mime_type.startswith("image/"), allowed)
     async def save_document(message: Message) -> None:
-        """Сохранить изображение из разрешённой группы."""
-        if not allowed(message):
+        """Сохранить изображение-документ из разрешённой группы или канала."""
+        if not (allowed(message) or allowed_channel(message)):
             return
 
         document = message.document
@@ -122,7 +133,9 @@ def create_art_router(
         parts = (message.text or "").split()
         if len(parts) == 1 or parts[1] == "list":
             await message.answer(
-                "Группы артов: " + ", ".join(map(str, sources.get_all()))
+                "Источники артов (группы и каналы): "
+                + ", ".join(map(str, sources.get_all()))
+                + f"\nВ коллекции: {images_repository.count()} артов."
             )
             return
         try:
@@ -136,7 +149,9 @@ def create_art_router(
             )
             return
         await message.answer(
-            "Список групп обновлён." if changed else "Список уже в таком состоянии."
+            "Список источников обновлён. Сохранённые арты остаются в коллекции."
+            if changed
+            else "Список уже в таком состоянии."
         )
 
     @router.message(Command("addimage"))

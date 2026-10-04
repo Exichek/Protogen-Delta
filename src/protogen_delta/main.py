@@ -410,7 +410,7 @@ async def main() -> None:
         dispatcher.include_router(text_router)
 
         await bot.delete_webhook(
-            drop_pending_updates=True,
+            drop_pending_updates=False,
         )
         await set_commands(bot, settings.mini_app_url)
 
