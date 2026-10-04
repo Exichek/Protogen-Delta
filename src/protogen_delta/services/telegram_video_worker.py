@@ -14,7 +14,8 @@ def transcode(source: Path, target: Path) -> None:
     if not 0 < source.stat().st_size <= MAX_VIDEO_BYTES:
         raise ValueError("input_size")
     with source.open("rb") as header:
-        if header.read(4) != b"\x1a\x45\xdf\xa3":
+        signature = header.read(4)
+        if signature not in {b"\x1a\x45\xdf\xa3", b"GIF8"}:
             raise ValueError("input_format")
     with av.open(str(source), options={"protocol_whitelist": "file"}) as incoming:
         video = incoming.streams.video[0]
@@ -41,6 +42,8 @@ def transcode(source: Path, target: Path) -> None:
                 output_audio.bit_rate = 128000
             resampler = av.AudioResampler(format="fltp", layout="stereo", rate=48000)
             last_time = -1.0
+            last_gif_frame: av.VideoFrame | None = None
+            gif_end = 0.0
             decoded = 0
             for packet in incoming.demux([video] + ([audio] if audio else [])):
                 for frame in packet.decode():
@@ -58,6 +61,16 @@ def transcode(source: Path, target: Path) -> None:
                         if timestamp - last_time < 1 / 30 - 0.001:
                             continue
                         last_time = timestamp
+                        if signature == b"GIF8":
+                            last_gif_frame = frame
+                            gif_end = min(
+                                600.0,
+                                timestamp
+                                + float(
+                                    frame.duration
+                                    * (frame.time_base or Fraction(1, 100))
+                                ),
+                            )
                         converted = frame.reformat(
                             width=width, height=height, format="yuv420p"
                         )
@@ -71,6 +84,14 @@ def transcode(source: Path, target: Path) -> None:
                                 outgoing.mux(encoded)
                 if target.exists() and target.stat().st_size > MAX_VIDEO_BYTES:
                     raise ValueError("output_size")
+            if last_gif_frame is not None and gif_end - last_time > 1 / 30:
+                held = last_gif_frame.reformat(
+                    width=width, height=height, format="yuv420p"
+                )
+                held.pts = round((gif_end - 1 / 30) * 90000)
+                held.time_base = Fraction(1, 90000)
+                for encoded in output_video.encode(held):
+                    outgoing.mux(encoded)
             if output_audio:
                 for converted_audio in resampler.resample(None):
                     for encoded in output_audio.encode(converted_audio):

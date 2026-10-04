@@ -220,6 +220,9 @@ class E621Client:
                 ) as response:
                     if response.status != 200:
                         raise E621Error(f"Файл e621 вернул HTTP {response.status}.")
+                    size = getattr(response, "headers", {}).get("Content-Length")
+                    if size and str(size).isdigit() and int(size) > max_bytes:
+                        raise E621Error("Файл превышает лимит загрузки.")
                     return await _read_limited(response.content, max_bytes)
         except E621Error:
             raise

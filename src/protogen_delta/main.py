@@ -332,6 +332,7 @@ async def main() -> None:
             ),
             e621_history,
             user_states,
+            bot_id=bot.id,
         )
 
         rate_limiter = UserRateLimiter(

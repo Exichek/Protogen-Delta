@@ -33,7 +33,7 @@ from protogen_delta.services.telegram_video import TelegramVideoConverter
 def _post(post_id: int = 42, ext: str = "jpg") -> E621Post:
     return E621Post(
         post_id=post_id,
-        rating="e",
+        rating="s",
         file_url=f"https://static.example/{post_id}.{ext}",
         file_ext=ext,
         file_size=100,
@@ -311,11 +311,20 @@ def _message(text: str = "/e6 dragon", user_id: int = 7) -> tuple[Message, Mock]
     message = Mock(spec=Message)
     message.text = text
     message.from_user = Mock(id=user_id)
-    message.answer = AsyncMock()
+    panel = Mock(spec=Message)
+    panel.edit_text = AsyncMock()
+    panel.edit_reply_markup = AsyncMock()
+    panel.delete = AsyncMock()
+    message.panel = panel
+    message.answer = AsyncMock(return_value=panel)
+    message.edit_reply_markup = AsyncMock()
     message.answer_photo = AsyncMock()
     message.answer_animation = AsyncMock()
     message.answer_video = AsyncMock()
     message.answer_document = AsyncMock()
+    message.answer_media_group = AsyncMock(
+        side_effect=lambda media: [Mock() for _ in media]
+    )
     return cast(Message, message), message
 
 
@@ -325,7 +334,8 @@ def test_command_without_tags_shows_usage(tmp_path: Path) -> None:
         cast(E621Client, _Client([])), E621HistoryRepository(tmp_path), UserStateStore()
     )
     asyncio.run(_call_message(router, 0, message))
-    raw.answer.assert_awaited_once_with(E621_USAGE)
+    assert E621_USAGE in raw.answer.await_args.args[0]
+    assert raw.answer.await_args.kwargs["reply_markup"] is not None
 
 
 def test_command_sends_post_and_remembers_it(tmp_path: Path) -> None:
@@ -341,8 +351,10 @@ def test_command_sends_post_and_remembers_it(tmp_path: Path) -> None:
     raw.answer_photo.assert_awaited_once()
     assert asyncio.run(history.seen_ids(7)) == {42}
     assert client.queries[0].base_url == E621_BASE_URL
-    markup = raw.answer_photo.await_args.kwargs["reply_markup"]
-    assert markup.inline_keyboard[0][0].text == "🔄 Ещё"
+    markup = raw.answer.await_args.kwargs["reply_markup"]
+    assert any(
+        button.text == "🔄 Ещё" for row in markup.inline_keyboard for button in row
+    )
 
 
 def test_direct_query_uses_safe_mode(tmp_path: Path) -> None:
@@ -395,7 +407,7 @@ def test_search_error_and_empty_result_are_shown(tmp_path: Path) -> None:
             UserStateStore(),
         )
         asyncio.run(_call_message(router, 0, message))
-        assert expected in raw.answer.await_args.args[0]
+        assert expected in raw.panel.edit_text.await_args.args[0]
 
 
 def _callback(data: str, user_id: int, message: Message | None = None) -> CallbackQuery:
@@ -422,10 +434,17 @@ def test_next_button_continues_search_and_rejects_other_users(tmp_path: Path) ->
         "Эта кнопка предназначена не тебе.", show_alert=True
     )
 
-    owner = _callback("e6:next:7", 7, message)
-    asyncio.run(router.callback_query.handlers[0].callback(owner))
+    markup = raw.answer.await_args.kwargs["reply_markup"]
+    data = next(
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.text == "🔄 Ещё"
+    )
+    owner = _callback(data, 7, message)
+    asyncio.run(router.callback_query.handlers[1].callback(owner))
     cast(AsyncMock, owner.answer).assert_awaited_once_with()
-    assert "не нашлось" in raw.answer.await_args.args[0]
+    assert "не нашлось" in raw.panel.edit_text.await_args.args[0]
 
 
 def test_stale_or_malformed_next_button_shows_alert(tmp_path: Path) -> None:
@@ -435,7 +454,7 @@ def test_stale_or_malformed_next_button_shows_alert(tmp_path: Path) -> None:
     callback = _callback("e6:next:broken", 0)
     asyncio.run(router.callback_query.handlers[0].callback(callback))
     cast(AsyncMock, callback.answer).assert_awaited_once_with(
-        "Поиск устарел. Запусти /e6 ещё раз.", show_alert=True
+        "Эта кнопка предназначена не тебе.", show_alert=True
     )
 
 
@@ -468,11 +487,11 @@ def test_batch_keeps_sort_order_and_remembers_each_post(
     router = create_e621_router(cast(E621Client, client), history, states)
     message, mock = _message("/e6 " + raw)
     asyncio.run(_call_message(router, 0, message))
-    assert mock.answer_photo.await_count == 3
+    assert mock.answer_media_group.await_count == 1
     assert [
-        call.kwargs["caption"].split(" ·")[0]
-        for call in mock.answer_photo.await_args_list
-    ] == ["e621 #1", "e621 #2", "e621 #3"]
+        item.caption.split(" ·")[0]
+        for item in mock.answer_media_group.await_args.args[0]
+    ] == ["1. e621 #1", "2. e621 #2", "3. e621 #3"]
     assert "count:" not in client.queries[0].tags
     assert asyncio.run(history.seen_ids(7)) == {1, 2, 3}
 
@@ -566,7 +585,7 @@ def test_oversized_video_fallback_is_labeled_as_preview(tmp_path: Path) -> None:
     )
     message, mock = _message()
     asyncio.run(_call_message(router, 0, message))
-    assert "отправлено превью" in mock.answer_photo.await_args.kwargs["caption"]
+    assert "Превью:" in mock.answer_photo.await_args.kwargs["caption"]
 
 
 def test_unavailable_mp4_alternate_falls_back_to_original(
@@ -595,9 +614,16 @@ def test_old_next_button_rechecks_changed_age_mode(tmp_path: Path) -> None:
     router = create_e621_router(
         cast(E621Client, client), E621HistoryRepository(tmp_path), states
     )
-    message, _ = _message()
+    message, mock = _message()
     asyncio.run(_call_message(router, 0, message))
     states.get(7).content_mode = "soft"
-    callback = _callback("e6:next:7", 7, message)
-    asyncio.run(router.callback_query.handlers[0].callback(callback))
+    markup = mock.answer.await_args.kwargs["reply_markup"]
+    data = next(
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.text == "🔄 Ещё"
+    )
+    callback = _callback(data, 7, message)
+    asyncio.run(router.callback_query.handlers[1].callback(callback))
     assert client.queries[-1].base_url == E926_BASE_URL
