@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.methods import SendMessage
 from aiogram.types import Message
 
 from protogen_delta.core.user_state import UserStateStore
@@ -247,3 +249,74 @@ def test_proactive_does_not_send_after_state_changes(
 
     asyncio.run(scenario())
     bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize("reason", ["missing", "blocked", "other"])
+def test_unreachable_proactive_recipient_does_not_repeat_generation(
+    tmp_path: Path, reason: str
+) -> None:
+    repository = MemoriesRepository(tmp_path)
+    bot = AsyncMock(spec=Bot)
+    model = AsyncMock(spec=DeepSeekService)
+    model.chat.return_value = "Привет!"
+    method = SendMessage(chat_id=7, text="hello")
+    bot.send_message.side_effect = (
+        TelegramForbiddenError(method, "bot was blocked")
+        if reason == "blocked"
+        else TelegramBadRequest(
+            method,
+            "Bad Request: chat not found" if reason == "missing" else "invalid markup",
+        )
+    )
+
+    async def scenario() -> None:
+        await repository.note_user_activity(7, 10)
+        messenger = _messenger(repository, bot, model)
+        assert await messenger.run_once() == 0
+        assert await repository.proactive_enabled(7)
+        assert await messenger.run_once() == 0
+        assert model.chat.await_count == (2 if reason == "other" else 1)
+        await repository.note_user_activity(7, 15)
+        bot.send_message.side_effect = None
+        assert await messenger.run_once() == 1
+        await repository.set_proactive(7, False, 15)
+        await repository.suspend_proactive_delivery(7)
+        await repository.note_user_activity(7, 15)
+        assert not await repository.proactive_enabled(7)
+        assert await messenger.run_once() == 0
+
+    asyncio.run(scenario())
+
+
+def test_old_engagement_schema_migrates_without_losing_preferences(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(tmp_path / "memories.db")) as connection, connection:
+        connection.execute(
+            "CREATE TABLE engagement (user_id INTEGER PRIMARY KEY, "
+            "proactive_enabled INTEGER NOT NULL DEFAULT 1, "
+            "last_user_message_at REAL NOT NULL DEFAULT 0, "
+            "last_proactive_at REAL, unanswered_count INTEGER NOT NULL DEFAULT 0)"
+        )
+        connection.execute("INSERT INTO engagement VALUES (7, 0, 10, NULL, 0)")
+
+    async def scenario() -> None:
+        repository = MemoriesRepository(tmp_path)
+        assert not await repository.proactive_enabled(7)
+        await repository.suspend_proactive_delivery(7)
+        await repository.set_proactive(7, True, 15)
+        fresh = MemoriesRepository(tmp_path)
+        assert await fresh.proactive_enabled(7)
+        assert (
+            len(
+                await fresh.due_candidates(
+                    now=40, idle_seconds=20, cooldown_seconds=100, limit=10
+                )
+            )
+            == 1
+        )
+
+    asyncio.run(scenario())
