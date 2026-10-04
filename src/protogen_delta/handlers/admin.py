@@ -225,7 +225,7 @@ def create_admin_router(
         help_text = (
             "📖 Админские команды:\n\n"
             "/addimage — добавить фото ответом или по file_id\n"
-            "/artchat list|add|remove — группы-источники артов\n"
+            "/artchat list|add|remove — группы и каналы с артами\n"
             "/listimages <N> — показать последние N артов\n"
             "/removeimage <id1,id2,...> — удалить арты по ID\n"
             "/artcount — показать количество артов\n"

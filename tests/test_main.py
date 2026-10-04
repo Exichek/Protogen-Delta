@@ -555,7 +555,7 @@ def test_main_builds_application_and_starts_polling(
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
-        drop_pending_updates=True,
+        drop_pending_updates=False,
     )
 
     create_menu_router_mock.assert_called_once_with(None)

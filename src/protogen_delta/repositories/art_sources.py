@@ -1,4 +1,4 @@
-"""Сохраняемый список групп для загрузки артов."""
+"""Сохраняемый список групп и каналов для загрузки артов."""
 
 from pathlib import Path
 from typing import Any
@@ -15,12 +15,12 @@ class ArtSourcesRepository:
     def get_all(self) -> list[int]:
         values = self._storage.load().get("CHATS")
         if not isinstance(values, list) or not all(type(x) is int for x in values):
-            raise ValueError("Некорректный список групп артов")
+            raise ValueError("Некорректный список источников артов")
         return values
 
     def change(self, chat_id: int, *, add: bool) -> bool:
         if chat_id >= 0:
-            raise ValueError("Нужен отрицательный ID группы")
+            raise ValueError("Нужен отрицательный ID группы или канала")
 
         def update(data: dict[str, Any]) -> bool:
             chats = data["CHATS"]
