@@ -269,6 +269,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "rp",
         "adult",
         "id",
+        "download",
+        "source",
         "reset",
         "help",
     ]
@@ -281,6 +283,8 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🎭 Управление RP — /rp off",
         "🔞 Выбрать возрастной режим",
         "🪪 Узнать Telegram ID",
+        "📥 Скачать видео по ссылке",
+        "🔎 Найти источник арта (ответом)",
         "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]

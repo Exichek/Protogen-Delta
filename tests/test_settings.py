@@ -17,6 +17,41 @@ def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_optional_media_providers_and_brave_key_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-1001")
+    monkeypatch.setenv("AUDIO_UNDERSTANDING_ENABLED", "true")
+    monkeypatch.setenv("AUDIO_API_KEY", "audio-test-key")
+    monkeypatch.setenv("AUDIO_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("AUDIO_MODEL", "omni-test")
+    monkeypatch.setenv("PDF_OCR_ENABLED", "true")
+    monkeypatch.setenv("SAUCENAO_API_KEY", "source-test-key")
+    path = tmp_path / "brave-key"
+    path.write_text("new-test-key\n", "utf-8")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY_FILE", str(path))
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "old-test-key")
+    settings = load_settings()
+    assert settings.brave_search_api_key == "new-test-key"
+    assert settings.pdf_ocr_enabled and settings.audio_understanding_enabled
+    assert settings.audio_model == "omni-test"
+    assert settings.saucenao_api_key == "source-test-key"
+    for key in ("", "two words", "x" * 4097):
+        path.write_text(key, "utf-8")
+        with pytest.raises(RuntimeError, match="BRAVE_SEARCH_API_KEY_FILE"):
+            load_settings()
+    path.unlink()
+    with pytest.raises(RuntimeError, match="BRAVE_SEARCH_API_KEY_FILE"):
+        load_settings()
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY_FILE")
+    monkeypatch.setenv("AUDIO_BASE_URL", "http://example.com/v1")
+    with pytest.raises(RuntimeError, match="AUDIO"):
+        load_settings()
+
+
 def test_load_settings_with_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

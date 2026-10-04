@@ -1,0 +1,14 @@
+https://{$MINI_APP_DOMAIN}:{$MINI_APP_HTTPS_PORT:443} {
+	# HTTP-01 works on port 80 even when another service owns port 443.
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+	reverse_proxy delta:8080
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}

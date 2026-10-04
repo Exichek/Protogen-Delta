@@ -43,6 +43,9 @@ def copy_snapshot(source: Path, destination: Path) -> None:
     memories_database = source / "memories.db"
     if memories_database.exists():
         databases.append((memories_database, "memories"))
+    e621_database = source / "e621.db"
+    if e621_database.exists():
+        databases.append((e621_database, "shown_posts"))
     art_sources = source / "art_sources.json"
     if art_sources.exists():
         payload = art_sources.read_bytes()

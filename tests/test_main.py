@@ -482,7 +482,7 @@ def test_main_builds_application_and_starts_polling(
 
     create_adult_router_mock.assert_called_once_with(user_states)
 
-    assert dispatcher_mock.include_router.call_count == 17
+    assert dispatcher_mock.include_router.call_count == 19
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -538,6 +538,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        ocr_enabled=False,
     )
     speech_transcriber_constructor_mock.assert_called_once_with(
         model_size="small",
@@ -550,6 +551,7 @@ def test_main_builds_application_and_starts_polling(
         speech_transcriber,
         rate_limiter=ANY,
         sticker_service=ANY,
+        audio_understanding=None,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
