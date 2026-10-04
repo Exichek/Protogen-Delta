@@ -80,6 +80,15 @@ class MemoriesRepository:
         """Зафиксировать доставленное проактивное сообщение."""
         await asyncio.to_thread(self._note_proactive_sent_sync, user_id, at)
 
+    async def is_due(
+        self, user_id: int, *, now: float, idle_seconds: float, cooldown_seconds: float
+    ) -> bool:
+        """Проверить активность и настройку ещё раз после генерации сообщения."""
+        candidates = await asyncio.to_thread(
+            self._due_candidates_sync, now, idle_seconds, cooldown_seconds, 1, user_id
+        )
+        return bool(candidates)
+
     async def delete_user(self, user_id: int) -> None:
         """Удалить всю дополнительную память пользователя."""
         await asyncio.to_thread(self._delete_user_sync, user_id)
@@ -166,13 +175,19 @@ class MemoriesRepository:
             connection.execute("UPDATE engagement SET proactive_enabled = 1")
 
     def _due_candidates_sync(
-        self, now: float, idle_seconds: float, cooldown_seconds: float, limit: int
+        self,
+        now: float,
+        idle_seconds: float,
+        cooldown_seconds: float,
+        limit: int,
+        user_id: int | None = None,
     ) -> list[ProactiveCandidate]:
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT user_id, unanswered_count FROM engagement
                 WHERE proactive_enabled = 1
+                  AND (? IS NULL OR user_id = ?)
                   AND last_user_message_at > 0
                   AND ? - last_user_message_at >= ?
                   AND (last_proactive_at IS NULL OR
@@ -180,7 +195,7 @@ class MemoriesRepository:
                 ORDER BY COALESCE(last_proactive_at, 0), last_user_message_at
                 LIMIT ?
                 """,
-                (now, idle_seconds, now, cooldown_seconds, limit),
+                (user_id, user_id, now, idle_seconds, now, cooldown_seconds, limit),
             ).fetchall()
         return [
             ProactiveCandidate(user_id=row[0], unanswered_count=row[1]) for row in rows

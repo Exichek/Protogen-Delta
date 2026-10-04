@@ -97,11 +97,17 @@ def create_reply_delivery(
                 sent += 1
             if sticker_service is not None and user_id is not None:
                 try:
+                    context_text = message.text or message.caption or ""
+                    if message.sticker is not None:
+                        emoji = message.sticker.emoji
+                        if isinstance(emoji, str):
+                            context_text += " " + emoji
                     await sticker_service.maybe_send(
                         chat_id=message.chat.id,
                         user_id=user_id,
                         context_tags=context_tags,
-                        context_text=message.text or message.caption or "",
+                        context_text=context_text,
+                        reply_text=reply,
                     )
                 except Exception:
                     logger.exception("Не удалось обработать контекстный стикер")
