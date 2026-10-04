@@ -1,9 +1,75 @@
 """Небольшие Telegram-утилиты, доступные прямо из бота."""
 
-from aiogram import Bot, Router
+import re
+
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
-from aiogram.types import Chat, Message, User
+from aiogram.types import (
+    Chat,
+    KeyboardButton,
+    KeyboardButtonRequestChat,
+    KeyboardButtonRequestUsers,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    User,
+)
+
+_USER_REQUEST = 6101
+_BOT_REQUEST = 6102
+_GROUP_REQUEST = 6103
+_CHANNEL_REQUEST = 6104
+_FORUM_REQUEST = 6105
+_CLOSE_ID = "✖ Закрыть выбор ID"
+
+
+def _id_keyboard() -> ReplyKeyboardMarkup:
+    """Запросить ID без ограничений по Premium и без добавления бота в чат."""
+
+    def person(text: str, request_id: int, is_bot: bool) -> KeyboardButton:
+        return KeyboardButton(
+            text=text,
+            request_users=KeyboardButtonRequestUsers(
+                request_id=request_id,
+                user_is_bot=is_bot,
+                max_quantity=1,
+                request_name=True,
+                request_username=True,
+            ),
+        )
+
+    def chat(
+        text: str, request_id: int, channel: bool, forum: bool | None = None
+    ) -> KeyboardButton:
+        return KeyboardButton(
+            text=text,
+            request_chat=KeyboardButtonRequestChat(
+                request_id=request_id,
+                chat_is_channel=channel,
+                chat_is_forum=forum,
+                request_title=True,
+                request_username=True,
+            ),
+        )
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                person("👤 Пользователь", _USER_REQUEST, False),
+                person("🤖 Бот", _BOT_REQUEST, True),
+            ],
+            [
+                chat("👥 Группа", _GROUP_REQUEST, False),
+                chat("📣 Канал", _CHANNEL_REQUEST, True),
+            ],
+            [chat("💬 Форум", _FORUM_REQUEST, False, True)],
+            [KeyboardButton(text=_CLOSE_ID)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="Выбери пользователя или чат для получения ID",
+    )
 
 
 def _display_name(chat: Chat) -> str | None:
@@ -59,13 +125,22 @@ def create_utilities_router(bot: Bot) -> Router:
         """Показать ID текущего или указанного Telegram-объекта."""
         query = _argument(message)
         if query:
+            query = query.strip("[] ")
+            match = re.fullmatch(
+                r"https?://(?:t\.me|telegram\.me)/([\w]+)(?:/)?", query, re.I
+            )
+            if match:
+                query = "@" + match[1]
+            elif re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", query):
+                query = "@" + query
             lookup: str | int = int(query) if query.lstrip("-").isdigit() else query
             try:
                 chat = await bot.get_chat(lookup)
             except TelegramAPIError:
                 await message.answer(
                     "Не смог получить этот объект. Для публичной группы или канала "
-                    "укажи @username; приватный чат должен быть доступен боту."
+                    "укажи @username. ID пользователя по его нику Telegram боту "
+                    "не выдаёт: отправь /id и нажми «Пользователь»."
                 )
                 return
             await message.answer("\n".join(_chat_lines(chat, "🔎 Найдено")))
@@ -94,8 +169,50 @@ def create_utilities_router(bot: Bot) -> Router:
                 "",
                 "Для публичной группы или канала: /id @username",
                 "Для автора сообщения: ответь на него командой /id",
+                "В личном чате можно выбрать пользователя, бота, группу или канал кнопкой ниже.",
             ]
         )
-        await message.answer("\n".join(blocks))
+        await message.answer(
+            "\n".join(blocks),
+            reply_markup=(_id_keyboard() if message.chat.type == "private" else None),
+        )
+
+    @router.message(F.users_shared)
+    async def shared_users(message: Message) -> None:
+        """Показать предоставленные Telegram ID, даже без доступа getChat."""
+        shared = message.users_shared
+        if shared is None or shared.request_id not in {_USER_REQUEST, _BOT_REQUEST}:
+            return
+        lines = ["🪪 Выбранные пользователи"]
+        for user in shared.users:
+            name = " ".join(part for part in (user.first_name, user.last_name) if part)
+            if name:
+                lines.append(f"Имя: {name}")
+            if user.username:
+                lines.append(f"Username: @{user.username}")
+            lines.append(f"ID: {user.user_id}")
+        await message.answer("\n".join(lines), reply_markup=ReplyKeyboardRemove())
+
+    @router.message(F.chat_shared)
+    async def shared_chat(message: Message) -> None:
+        """Показать выбранный чат без запроса членства или прав администратора."""
+        shared = message.chat_shared
+        if shared is None or shared.request_id not in {
+            _GROUP_REQUEST,
+            _CHANNEL_REQUEST,
+            _FORUM_REQUEST,
+        }:
+            return
+        lines = ["🪪 Выбранный чат"]
+        if shared.title:
+            lines.append(f"Название: {shared.title}")
+        if shared.username:
+            lines.append(f"Username: @{shared.username}")
+        lines.append(f"ID: {shared.chat_id}")
+        await message.answer("\n".join(lines), reply_markup=ReplyKeyboardRemove())
+
+    @router.message(F.text == _CLOSE_ID)
+    async def close_picker(message: Message) -> None:
+        await message.answer("Выбор ID закрыт.", reply_markup=ReplyKeyboardRemove())
 
     return router

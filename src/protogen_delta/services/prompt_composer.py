@@ -22,9 +22,19 @@ _BODY_PATTERN = re.compile(
 )
 _URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 _WEB_PATTERN = re.compile(
-    r"\b(?:найди|поищи|проверь|посмотри)\b.{0,45}\b(?:интернет|сет[ьи]|web|сайт)|"
+    r"\b(?:интернет\w*|онлайн|загугл\w*|погугл\w*|web|internet|search)\b|"
+    r"\b(?:найди|поищи|проверь|посмотри|глянь|глянуть)\b.{0,80}\b(?:сет[ьи]|сайт)|"
+    r"\b(?:сколько|какие)\b.{0,80}\b(?:марки|бренд\w*|энергетик\w*|вкус\w*)\b|"
     r"\b(?:актуальн\w*|последн\w*|свеж\w*|новост\w*|релиз\w*|цена\w*)\b",
     re.IGNORECASE | re.DOTALL,
+)
+_CLARIFICATION_PATTERN = re.compile(
+    r"уточн|подтверди|какой|какая|выбери|вариант|скажи|дай ответ", re.I
+)
+_FOLLOWUP_PATTERN = re.compile(
+    r"^\s*(?:\d+[\s,.!]*$|да\b|нет\b|перв\w*\b|втор\w*\b|"
+    r"трет\w*\b|именно\b|верно\b|город\b|москва\b|springfield\b)",
+    re.I,
 )
 _WEATHER_PATTERN = re.compile(r"\b(?:погод\w*|температур\w*|прогноз\w*)\b", re.I)
 _RATE_PATTERN = re.compile(
@@ -73,27 +83,30 @@ class PromptComposer:
         *,
         is_roleplay: bool,
         has_images: bool = False,
+        has_custom_appearance: bool = False,
     ) -> str:
         """Собрать минимальный набор секций для текущего сообщения."""
         parts = [self._sections.core]
         if is_roleplay:
-            parts.extend(
-                (
-                    self._sections.lore,
-                    self._sections.body,
-                    self._sections.roleplay,
-                )
-            )
+            if not has_custom_appearance:
+                parts.extend((self._sections.lore, self._sections.body))
+            parts.append(self._sections.roleplay)
             return self._join(parts)
 
         if _LORE_PATTERN.search(user_message):
             parts.append(self._sections.lore)
-        if _BODY_PATTERN.search(user_message) and not has_images:
+        if (
+            _BODY_PATTERN.search(user_message)
+            and not has_images
+            and not has_custom_appearance
+        ):
             parts.append(self._sections.body)
         return self._join(parts)
 
     @staticmethod
-    def select_tools(user_message: str) -> frozenset[str]:
+    def select_tools(
+        user_message: str, history: Sequence[ConversationTurn] = ()
+    ) -> frozenset[str]:
         """Выбрать только инструменты, нужные текущему запросу."""
         selected: set[str] = set()
         if _URL_PATTERN.search(user_message):
@@ -106,6 +119,32 @@ class PromptComposer:
             selected.add("get_exchange_rate")
         if _TIME_PATTERN.search(user_message):
             selected.add("get_current_time")
+        if (
+            not selected
+            and history
+            and len(user_message) <= 140
+            and not re.search(
+                r"\b(?:объясни|расскажи|покажи|давай)\b", user_message, re.I
+            )
+            and _CLARIFICATION_PATTERN.search(history[-1].assistant_message)
+            and (
+                _FOLLOWUP_PATTERN.search(user_message)
+                or (
+                    re.fullmatch(r"[A-ZА-ЯЁ][\w ,.-]{1,60}", user_message)
+                    and not re.search(
+                        r"\b(?:привет|спасибо|здравствуй|стоп|как|объясни|расскажи|покажи)\b",
+                        user_message,
+                        re.I,
+                    )
+                )
+            )
+        ):
+            # Уточнение города/региона не содержит слова «погода», но всё ещё
+            # должно иметь инструмент. Старые ответы не задают новые полномочия.
+            for turn in reversed(history[-2:]):
+                selected.update(PromptComposer.select_tools(turn.user_message))
+                if selected:
+                    break
         return frozenset(selected)
 
     @staticmethod

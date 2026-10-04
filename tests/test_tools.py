@@ -147,6 +147,102 @@ def test_weather_handles_unknown_ambiguous_and_units(
             asyncio.run(get_weather(args))
 
 
+def test_weather_resolves_major_city_with_explicit_country(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capital = {
+        "name": "Москва",
+        "population": 12000000,
+        "latitude": 55.75,
+        "longitude": 37.6,
+    }
+    village = {"name": "Москва", "population": 30, "latitude": 57, "longitude": 36}
+    weather = {
+        "timezone": "Europe/Moscow",
+        "current": {},
+        "current_units": {},
+        "daily": {},
+        "daily_units": {},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": [capital, village]}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    result = asyncio.run(get_weather({"city": "Москва", "country_code": "RU"}))
+    assert result["place"]["name"] == "Москва"
+    assert fetch.await_args is not None
+    assert fetch.await_args.args[1]["latitude"] == "55.75"
+    fetch.side_effect = None
+    fetch.return_value = json.dumps({"results": [capital, village]}).encode()
+    assert asyncio.run(get_weather({"city": "Москва"}))["status"] == "ambiguous"
+
+
+def test_weather_region_selects_chosen_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    place = {
+        "name": "Springfield",
+        "admin1": "Missouri",
+        "latitude": 37.2,
+        "longitude": -93.3,
+    }
+    weather = {
+        "timezone": "America/Chicago",
+        "current": {},
+        "current_units": {},
+        "daily": {},
+        "daily_units": {},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": [place]}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    assert (
+        asyncio.run(get_weather({"city": "Springfield", "region": "Missouri"}))[
+            "place"
+        ]["admin1"]
+        == "Missouri"
+    )
+
+
+def test_weather_matches_english_region_to_russian_geocoder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    russian = {
+        "id": 1,
+        "name": "Спрингфилд",
+        "admin1": "Миссури",
+        "latitude": 37.2,
+        "longitude": -93.3,
+    }
+    english = {**russian, "admin1": "Missouri"}
+    weather = {
+        "timezone": "America/Chicago",
+        "current": {},
+        "current_units": {},
+        "daily": {},
+        "daily_units": {},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": [russian]}).encode(),
+            json.dumps({"results": [english]}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    result = asyncio.run(
+        get_weather({"city": "Springfield", "country_code": "US", "region": "Missouri"})
+    )
+    assert result["place"]["admin1"] == "Миссури"
+
+
 @pytest.mark.parametrize("failure", ["", "http", "size"])
 def test_provider_fetch_checks_status_size_and_closes_session(
     monkeypatch: pytest.MonkeyPatch, failure: str

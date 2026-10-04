@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -26,6 +27,7 @@ from protogen_delta.services.e621 import (
     looks_like_e621_query,
     normalize_e621_query,
 )
+from protogen_delta.services.telegram_video import TelegramVideoConverter
 
 
 def _post(post_id: int = 42, ext: str = "jpg") -> E621Post:
@@ -451,3 +453,151 @@ def test_caption_handles_missing_optional_metadata() -> None:
     post = E621Post(1, "x", None, "jpg", 0, None, None, 0, 0, (), frozenset(), ())
     assert post.media_url is None
     assert "не указан" in handler_module._caption(post)
+
+
+@pytest.mark.parametrize(
+    "raw", ["dragon order:favcount count:3", "dragon order:favcount 3"]
+)
+def test_batch_keeps_sort_order_and_remembers_each_post(
+    tmp_path: Path, raw: str
+) -> None:
+    client = _Client([_post(1), _post(2), _post(3), _post(4)])
+    history = E621HistoryRepository(tmp_path)
+    states = UserStateStore()
+    states.get(7).content_mode = "adult"
+    router = create_e621_router(cast(E621Client, client), history, states)
+    message, mock = _message("/e6 " + raw)
+    asyncio.run(_call_message(router, 0, message))
+    assert mock.answer_photo.await_count == 3
+    assert [
+        call.kwargs["caption"].split(" ·")[0]
+        for call in mock.answer_photo.await_args_list
+    ] == ["e621 #1", "e621 #2", "e621 #3"]
+    assert "count:" not in client.queries[0].tags
+    assert asyncio.run(history.seen_ids(7)) == {1, 2, 3}
+
+
+@pytest.mark.parametrize(
+    "raw", ["dragon count:0", "dragon count:11", "dragon count:2 count:3"]
+)
+def test_batch_rejects_invalid_count(raw: str) -> None:
+    with pytest.raises(E621QueryError, match="Количество"):
+        handler_module._split_count(raw)
+
+
+def test_webm_is_converted_and_sent_as_streaming_video(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    convert = AsyncMock(return_value=b"mp4")
+    monkeypatch.setattr(TelegramVideoConverter, "convert", convert)
+    client = _Client([_post(1, "webm")])
+    router = create_e621_router(
+        cast(E621Client, client), E621HistoryRepository(tmp_path), UserStateStore()
+    )
+    message, mock = _message()
+    asyncio.run(_call_message(router, 0, message))
+    assert mock.answer_video.await_args.kwargs["supports_streaming"] is True
+    assert mock.answer_video.await_args.args[0].filename.endswith(".mp4")
+    mock.answer_document.assert_not_awaited()
+
+
+def test_oversized_video_prefers_mp4_alternate_over_preview(tmp_path: Path) -> None:
+    post = replace(
+        _post(1, "webm"),
+        file_size=100_000_000,
+        mp4_urls=("https://static.example/720.mp4",),
+    )
+    client = _Client([post])
+    router = create_e621_router(
+        cast(E621Client, client), E621HistoryRepository(tmp_path), UserStateStore()
+    )
+    message, mock = _message()
+    asyncio.run(_call_message(router, 0, message))
+    mock.answer_video.assert_awaited_once()
+    mock.answer_photo.assert_not_awaited()
+
+
+def test_parse_mp4_alternates() -> None:
+    post = _parse_post(
+        {
+            "id": 1,
+            "sample": {
+                "alternates": {
+                    "720p": {
+                        "urls": [
+                            "https://static.example/a.webm",
+                            "https://static.example/a.mp4",
+                        ]
+                    }
+                }
+            },
+        }
+    )
+    assert post.mp4_urls == ("https://static.example/a.mp4",)
+    assert post.webm_urls == ("https://static.example/a.webm",)
+
+
+def test_oversized_original_uses_convertible_webm_sample(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post = replace(
+        _post(1, "webm"),
+        file_size=100_000_000,
+        webm_urls=("https://static.example/720.webm",),
+    )
+    convert = AsyncMock(return_value=b"mp4")
+    monkeypatch.setattr(TelegramVideoConverter, "convert", convert)
+    router = create_e621_router(
+        cast(E621Client, _Client([post])),
+        E621HistoryRepository(tmp_path),
+        UserStateStore(),
+    )
+    message, mock = _message()
+    asyncio.run(_call_message(router, 0, message))
+    mock.answer_video.assert_awaited_once()
+    mock.answer_photo.assert_not_awaited()
+
+
+def test_oversized_video_fallback_is_labeled_as_preview(tmp_path: Path) -> None:
+    post = replace(_post(1, "webm"), file_size=100_000_000)
+    client = _Client([post])
+    router = create_e621_router(
+        cast(E621Client, client), E621HistoryRepository(tmp_path), UserStateStore()
+    )
+    message, mock = _message()
+    asyncio.run(_call_message(router, 0, message))
+    assert "отправлено превью" in mock.answer_photo.await_args.kwargs["caption"]
+
+
+def test_unavailable_mp4_alternate_falls_back_to_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post = replace(_post(1, "webm"), mp4_urls=("https://static.example/a.mp4",))
+    client = _Client([post])
+    monkeypatch.setattr(
+        client,
+        "download",
+        AsyncMock(side_effect=[E621Error("unavailable"), b"invalid webm"]),
+    )
+    router = create_e621_router(
+        cast(E621Client, client), E621HistoryRepository(tmp_path), UserStateStore()
+    )
+    message, mock = _message()
+    asyncio.run(_call_message(router, 0, message))
+    mock.answer_document.assert_awaited_once()
+    assert "исходный WebM" in mock.answer_document.await_args.kwargs["caption"]
+
+
+def test_old_next_button_rechecks_changed_age_mode(tmp_path: Path) -> None:
+    states = UserStateStore()
+    states.get(7).content_mode = "adult"
+    client = _Client([_post(1), _post(2)])
+    router = create_e621_router(
+        cast(E621Client, client), E621HistoryRepository(tmp_path), states
+    )
+    message, _ = _message()
+    asyncio.run(_call_message(router, 0, message))
+    states.get(7).content_mode = "soft"
+    callback = _callback("e6:next:7", 7, message)
+    asyncio.run(router.callback_query.handlers[0].callback(callback))
+    assert client.queries[-1].base_url == E926_BASE_URL

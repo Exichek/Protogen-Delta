@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
+from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientTimeout
 from aiohttp_socks import ProxyConnector
@@ -58,6 +59,8 @@ class E621Post:
     artists: tuple[str, ...]
     tags: frozenset[str]
     sources: tuple[str, ...]
+    mp4_urls: tuple[str, ...] = ()
+    webm_urls: tuple[str, ...] = ()
 
     @property
     def page_url(self) -> str:
@@ -196,7 +199,12 @@ class E621Client:
             payload = json.loads(body)
             posts = payload.get("posts", [])
             parsed = [_parse_post(post) for post in posts if isinstance(post, dict)]
-            return [post for post in parsed if not post.tags & BLOCKED_AGE_TAGS]
+            return [
+                post
+                for post in parsed
+                if not post.tags & BLOCKED_AGE_TAGS
+                and (query.base_url != E926_BASE_URL or post.rating == "s")
+            ]
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise E621Error("e621 вернул неожиданный ответ.") from error
 
@@ -236,6 +244,18 @@ def _parse_post(post: dict[str, Any]) -> E621Post:
     preview = post.get("preview") or {}
     tags = post.get("tags") or {}
     score = post.get("score") or {}
+    mp4_urls: list[str] = []
+    webm_urls: list[str] = []
+    alternates = sample.get("alternates") or {}
+    for alternate in alternates.values() if isinstance(alternates, dict) else ():
+        if not isinstance(alternate, dict):
+            continue
+        urls = alternate.get("urls") or []
+        for url in urls if isinstance(urls, list) else ():
+            if isinstance(url, str) and urlsplit(url).path.lower().endswith(".mp4"):
+                mp4_urls.append(url)
+            elif isinstance(url, str) and urlsplit(url).path.lower().endswith(".webm"):
+                webm_urls.append(url)
     return E621Post(
         post_id=int(post["id"]),
         rating=str(post.get("rating", "?")),
@@ -254,4 +274,6 @@ def _parse_post(post: dict[str, Any]) -> E621Post:
             for item in group
         ),
         sources=tuple(str(item) for item in post.get("sources", [])),
+        mp4_urls=tuple(dict.fromkeys(mp4_urls)),
+        webm_urls=tuple(dict.fromkeys(webm_urls)),
     )
