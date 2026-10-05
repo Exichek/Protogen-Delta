@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -28,7 +29,9 @@ from protogen_delta.services.response_engine import ResponseEngine
 from protogen_delta.services.speech import SpeechRecognitionError, SpeechTranscriber
 
 
-def test_music_file_detection_and_metadata_are_bounded(monkeypatch):
+def test_music_file_detection_and_metadata_are_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert is_audio_file("audio/mpeg", None)
     assert is_audio_file("application/octet-stream", "MUSIC.FLAC")
     assert not is_audio_file(None, "a.docx")
@@ -57,24 +60,26 @@ def test_music_file_detection_and_metadata_are_bounded(monkeypatch):
 
 
 class _Response:
-    def __init__(self, body, status=200):
+    def __init__(self, body: bytes, status: int = 200) -> None:
         self.status = status
         self.body = body
         self.content = self
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> _Response:
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def iter_chunked(self, size):
+    async def iter_chunked(self, size: int) -> AsyncIterator[bytes]:
         # Не полагаться на одно read(): JSON может прийти несколькими частями.
         for index in range(0, len(self.body), 7):
             yield self.body[index : index + 7]  # noqa: E203
 
 
-def test_recognizer_uploads_only_twelve_seconds_and_parses_result(monkeypatch):
+def test_recognizer_uploads_only_twelve_seconds_and_parses_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     post = Mock(
         return_value=_Response(
             json.dumps(
@@ -96,7 +101,9 @@ def test_recognizer_uploads_only_twelve_seconds_and_parses_result(monkeypatch):
     session.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr(module.aiohttp, "ClientSession", Mock(return_value=session))
     service = MusicRecognitionService("test-token")
-    result = json.loads(asyncio.run(service.recognize(wav_data(15))))
+    report = asyncio.run(service.recognize(wav_data(15)))
+    assert report is not None
+    result = json.loads(report)
     assert result == {
         "title": "Track",
         "artist": "Artist",
@@ -135,7 +142,9 @@ def test_recognizer_uploads_only_twelve_seconds_and_parses_result(monkeypatch):
         "oversize",
     ],
 )
-def test_recognizer_handles_no_match_and_errors(monkeypatch, body, status, expected):
+def test_recognizer_handles_no_match_and_errors(
+    monkeypatch: pytest.MonkeyPatch, body: bytes, status: int, expected: str | None
+) -> None:
     session = Mock()
     session.__aenter__ = AsyncMock(
         return_value=SimpleNamespace(post=Mock(return_value=_Response(body, status)))
@@ -150,7 +159,9 @@ def test_recognizer_handles_no_match_and_errors(monkeypatch, body, status, expec
         assert asyncio.run(service.recognize(wav_data())) is None
 
 
-def test_recognizer_network_and_invalid_audio_fail_cleanly(monkeypatch):
+def test_recognizer_network_and_invalid_audio_fail_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = MusicRecognitionService("test-token")
     with pytest.raises(MusicRecognitionError):
         asyncio.run(service.recognize(b"bad"))
@@ -162,12 +173,14 @@ def test_recognizer_network_and_invalid_audio_fail_cleanly(monkeypatch):
         asyncio.run(service.recognize(wav_data()))
 
 
-def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(monkeypatch):
-    async def scenario():
+def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
         engine = AsyncMock(spec=ResponseEngine)
         bot = AsyncMock(spec=Bot)
 
-        async def download(file_id, *, destination):
+        async def download(file_id: str, *, destination: io.BytesIO) -> None:
             destination.write(b"audio")
 
         bot.download.side_effect = download
@@ -210,13 +223,15 @@ def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(monkey
     asyncio.run(scenario())
 
 
-def test_audio_document_reaches_voice_instead_of_document_reader(monkeypatch):
-    async def scenario():
+def test_audio_document_reaches_voice_instead_of_document_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
         engine = AsyncMock(spec=ResponseEngine)
         bot = AsyncMock(spec=Bot)
         bot.id = 123
 
-        async def download(file_id, *, destination):
+        async def download(file_id: str, *, destination: io.BytesIO) -> None:
             destination.write(b"audio")
 
         bot.download.side_effect = download

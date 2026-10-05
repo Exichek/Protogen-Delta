@@ -1,7 +1,9 @@
 """Общая коллекция, ограничения возраста и точное применение внешности."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -13,7 +15,7 @@ from test_miniapp import TOKEN, _signed_init_data
 from test_response_engine import _create_engine
 
 from protogen_delta.core.telegram_commands import commands_for_mode, set_user_commands
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.e621 import create_e621_router
@@ -21,7 +23,7 @@ from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.repositories.e621_history import E621HistoryRepository
-from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.images import ImagesRepository, MediaKind
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.services.appearance_description import (
     APPEARANCE_LIMIT,
@@ -36,7 +38,7 @@ from protogen_delta.services.response_engine import (
 )
 
 
-def _delivered(kind, identity):
+def _delivered(kind: str, identity: str) -> Message:
     message = Mock(spec=Message)
     message.video = message.animation = message.document = None
     message.photo = []
@@ -45,11 +47,13 @@ def _delivered(kind, identity):
         message.photo = [item]
     else:
         setattr(message, kind, item)
-    return message
+    return cast(Message, message)
 
 
 @pytest.mark.parametrize("kind", ["photo", "document", "video", "animation"])
-def test_gallery_preserves_type_and_identity_after_restart(tmp_path, kind):
+def test_gallery_preserves_type_and_identity_after_restart(
+    tmp_path: Path, kind: MediaKind
+) -> None:
     repo = ImagesRepository(tmp_path)
     message = _delivered(kind, "asset")
     assert remember_art(repo, message)
@@ -61,12 +65,12 @@ def test_gallery_preserves_type_and_identity_after_restart(tmp_path, kind):
     assert not remember_art(fresh, _delivered("text", "unused"))
 
 
-def test_e6_archives_successful_album_and_not_failed_delivery(tmp_path):
-    async def scenario():
+def test_e6_archives_successful_album_and_not_failed_delivery(tmp_path: Path) -> None:
+    async def scenario() -> None:
         repo = ImagesRepository(tmp_path)
         states = UserStateStore()
         states.get(7).content_mode = states.get(8).content_mode = "adult"
-        client = _Client([_post(1), _post(2, "mp4")])
+        client = cast(Mock, _Client([_post(1), _post(2, "mp4")]))
         client.download = AsyncMock(return_value=_JPEG)
         history = E621HistoryRepository(tmp_path)
         router = create_e621_router(client, history, states, images_repository=repo)
@@ -90,7 +94,9 @@ def test_e6_archives_successful_album_and_not_failed_delivery(tmp_path):
 
 @pytest.mark.parametrize("mode", ["soft", "unselected", "adult"])
 @pytest.mark.parametrize("kind", ["photo", "document", "video", "animation"])
-def test_randomart_enforces_mode_at_delivery(tmp_path, mode, kind):
+def test_randomart_enforces_mode_at_delivery(
+    tmp_path: Path, mode: ContentMode, kind: MediaKind
+) -> None:
     repo = ImagesRepository(tmp_path)
     repo.add("asset", kind=kind)
     states = UserStateStore()
@@ -105,8 +111,8 @@ def test_randomart_enforces_mode_at_delivery(tmp_path, mode, kind):
     assert raw.answer.await_count == int(mode != "adult")
 
 
-def test_age_toggle_updates_commands_help_and_menu(tmp_path):
-    async def scenario():
+def test_age_toggle_updates_commands_help_and_menu(tmp_path: Path) -> None:
+    async def scenario() -> None:
         states = UserStateStore()
         hook = AsyncMock()
         adult = create_adult_router(states, hook)
@@ -129,7 +135,7 @@ def test_age_toggle_updates_commands_help_and_menu(tmp_path):
             raw.answer.reset_mock()
             await help_router.message.handlers[0].callback(message)
             assert ("/randomart" in raw.answer.await_args.args[0]) == (mode == "adult")
-            panel = _delivered("photo", "unused")
+            panel = cast(Mock, _delivered("photo", "unused"))
             panel.edit_text = AsyncMock()
             callback.message = panel
             callback.data = "delta-menu:art"
@@ -164,7 +170,9 @@ def test_age_toggle_updates_commands_help_and_menu(tmp_path):
         ),
     ],
 )
-def test_description_preserves_valid_text(data, json_file, expected):
+def test_description_preserves_valid_text(
+    data: bytes, json_file: bool, expected: str
+) -> None:
     assert parse_description_file(data, json_file=json_file) == expected
 
 
@@ -199,13 +207,15 @@ def test_description_preserves_valid_text(data, json_file, expected):
         "empty-field",
     ],
 )
-def test_description_rejects_invalid_input(data, json_file):
+def test_description_rejects_invalid_input(data: bytes, json_file: bool) -> None:
     with pytest.raises(ValueError):
         parse_description_file(data, json_file=json_file)
 
 
-def test_text_appearance_api_isolates_profile_and_persists_without_model(tmp_path):
-    async def scenario():
+def test_text_appearance_api_isolates_profile_and_persists_without_model(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
         repository = UserStateRepository(tmp_path)
         states = UserStateStore(persistence=repository)
@@ -301,7 +311,9 @@ def test_text_appearance_api_isolates_profile_and_persists_without_model(tmp_pat
 
 
 @pytest.mark.parametrize("answer", ["НЕОДНОЗНАЧНЫЙ_РЕФЕРЕНС", "НЕЧИТАЕМЫЙ_РЕФЕРЕНС"])
-def test_unreadable_or_ambiguous_reference_preserves_previous_appearance(answer):
+def test_unreadable_or_ambiguous_reference_preserves_previous_appearance(
+    answer: str,
+) -> None:
     engine, _, model, *_ = _create_engine()
     model.chat.return_value = answer
     engine._user_states.get(7).delta_appearance = "Прежний облик"
@@ -318,11 +330,11 @@ def test_unreadable_or_ambiguous_reference_preserves_previous_appearance(answer)
     assert "2000" in prompt
 
 
-def test_text_appearance_busy_preserves_state():
+def test_text_appearance_busy_preserves_state() -> None:
     engine, *_ = _create_engine()
     engine._delivering_users.add(7)
     with pytest.raises(ResponseBusyError):
         asyncio.run(engine.set_delta_appearance_from_text(7, "Другой облик"))
     assert not engine._user_states.get(7).delta_appearance
     with pytest.raises(ValueError):
-        validate_description(3)
+        validate_description(cast(str, 3))

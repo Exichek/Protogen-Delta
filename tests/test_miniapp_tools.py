@@ -1,9 +1,12 @@
 """Инструменты в Mini App: личная доставка, безопасные URL и проверка initData."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -19,8 +22,8 @@ from protogen_delta.services.e621 import E621Error, E621QueryError
 from protogen_delta.services.media_download import MediaDownloadError
 
 
-def test_id_selection_does_not_lookup_private_numeric_ids():
-    async def scenario():
+def test_id_selection_does_not_lookup_private_numeric_ids() -> None:
+    async def scenario() -> None:
         bot = AsyncMock()
         bot.get_me.return_value = SimpleNamespace(id=10, full_name="Delta")
         bot.get_chat.return_value = SimpleNamespace(
@@ -43,8 +46,8 @@ def test_id_selection_does_not_lookup_private_numeric_ids():
     asyncio.run(scenario())
 
 
-def test_gallery_does_not_return_adult_video_or_foreign_media_urls():
-    async def scenario():
+def test_gallery_does_not_return_adult_video_or_foreign_media_urls() -> None:
+    async def scenario() -> None:
         client = Mock()
         client.search = AsyncMock(
             return_value=[
@@ -74,7 +77,9 @@ def test_gallery_does_not_return_adult_video_or_foreign_media_urls():
         )
         tools = MiniAppTools(AsyncMock(), client, Mock())
         result = await tools.gallery(42, "dragon", 2)
-        assert [item["id"] for item in result["items"]] == [1]
+        assert [item["id"] for item in cast(list[dict[str, Any]], result["items"])] == [
+            1
+        ]
         assert client.search.await_args.args[0].base_url == "https://e926.net"
         assert "rating:s" in client.search.await_args.args[0].tags
         assert client.search.await_args.kwargs["page"] == 2
@@ -89,14 +94,16 @@ def test_gallery_does_not_return_adult_video_or_foreign_media_urls():
 @pytest.mark.parametrize(
     "suffix,method", [(".mp4", "send_video"), (".webm", "send_document")]
 )
-def test_download_uses_own_chat_and_cleans_up(tmp_path, suffix, method):
-    async def scenario():
+def test_download_uses_own_chat_and_cleans_up(
+    tmp_path: Path, suffix: str, method: str
+) -> None:
+    async def scenario() -> None:
         path = tmp_path / ("download" + suffix)
         path.write_bytes(b"media")
         cleaned = []
 
         @asynccontextmanager
-        async def download(url):
+        async def download(url: str) -> AsyncIterator[SimpleNamespace]:
             assert url == "https://youtu.be/abc"
             try:
                 yield SimpleNamespace(path=path, title="Video")
@@ -133,8 +140,8 @@ def test_download_uses_own_chat_and_cleans_up(tmp_path, suffix, method):
     asyncio.run(scenario())
 
 
-def test_tools_api_checks_signature_inputs_and_handles_failures():
-    async def scenario():
+def test_tools_api_checks_signature_inputs_and_handles_failures() -> None:
+    async def scenario() -> None:
         tools = Mock()
         tools.lookup_id = AsyncMock(return_value={"id": 42})
         tools.gallery = AsyncMock(return_value={"items": []})
