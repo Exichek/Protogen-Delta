@@ -17,12 +17,17 @@ SAMPLE_RATE = 16_000
 MAX_REPORT_CHARS = 4000
 
 
-def audio_excerpt(data: bytes) -> bytes:
+def audio_excerpt(data: bytes, *, seconds: int | None = None) -> bytes:
     """Первые 60 секунд как PCM16 mono WAV, ограниченная память."""
-    if not data or len(data) > 20 * 1024 * 1024:
+    seconds = MAX_SEMANTIC_SECONDS if seconds is None else seconds
+    if (
+        not data
+        or len(data) > 20 * 1024 * 1024
+        or not 1 <= seconds <= MAX_SEMANTIC_SECONDS
+    ):
         raise AudioAnalysisError("Некорректный размер аудио")
     samples = bytearray()
-    limit = MAX_SEMANTIC_SECONDS * SAMPLE_RATE * 2
+    limit = seconds * SAMPLE_RATE * 2
     try:
         with av.open(io.BytesIO(data), mode="r") as container:
             stream = next(iter(container.streams.audio), None)

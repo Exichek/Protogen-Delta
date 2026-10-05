@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import cast
 from unittest.mock import ANY, AsyncMock
 
@@ -225,7 +226,7 @@ def test_response_engine_saves_delta_appearance_from_image() -> None:
     assert "Текущий облик Дельты" in main_prompt
     assert "назначил этот облик" in main_prompt
     assert (
-        "Не называй персонажа мускулистым"
+        "Мускулатуру отмечай лишь"
         in deepseek_mock.chat.await_args_list[0].kwargs["system_prompt"]
     )
     assert "не отвергай его" in main_prompt
@@ -349,6 +350,38 @@ def test_response_engine_adds_trusted_current_input_context() -> None:
     assert "Текущее сообщение пришло как голосовое." in call.kwargs["system_prompt"]
     history = list(engine._user_states.get(TEST_USER_ID).history)
     assert history[0].user_message == "[Расшифровка голосового]"
+
+
+@pytest.mark.parametrize("budget", [0, 50, 4000])
+def test_sticker_capabilities_survive_long_history_and_appearance(budget: int) -> None:
+    engine, _, model, _, _, _ = _create_engine()
+    engine._config = replace(engine._config, dynamic_state_chars=budget)
+    state = engine._user_states.get(TEST_USER_ID)
+    state.delta_appearance = "Бирюзовый дракон " * 50
+    for index in range(8):
+        state.history.append(
+            ConversationTurn(
+                user_message=f"Какие стикеры у тебя есть? {index}",
+                assistant_message="Я не умею отправлять стикеры, только словесно. "
+                * 20,
+            )
+        )
+    actual = (
+        "Приложение умеет отправлять настоящие Telegram-стикеры: доступны 15 реакций. "
+        "Не отрицай эту возможность."
+    )
+    asyncio.run(
+        engine.respond(
+            TEST_USER_ID, "Как работают твои стикеры?", trusted_input_context=actual
+        )
+    )
+    call = model.chat.await_args
+    assert call is not None
+    prompt = call.kwargs["system_prompt"]
+    assert actual in prompt
+    assert prompt.index(actual) > prompt.find("Краткое содержание")
+    assert "приоритетнее прежних ответов" in prompt
+    assert actual not in state.history[-1].user_message
 
 
 def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:

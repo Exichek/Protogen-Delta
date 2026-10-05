@@ -7,6 +7,7 @@ from typing import Any, Literal, cast
 from protogen_delta.repositories.json_file import JsonFileRepository
 
 _IMAGES_KEY = "IMAGES"
+MediaKind = Literal["photo", "document", "video", "animation"]
 
 
 def _get_images(data: dict[str, Any]) -> list[str]:
@@ -39,22 +40,20 @@ class ImagesRepository:
         self,
         file_id: str,
         *,
-        kind: Literal["photo", "document"] = "photo",
+        kind: MediaKind = "photo",
         file_unique_id: str | None = None,
     ) -> bool:
         """Добавить изображение и вернуть True, если его ещё не было."""
         return bool(self._add([file_id], kind, file_unique_id))
 
-    def add_many(
-        self, file_ids: Iterable[str], *, kind: Literal["photo", "document"] = "photo"
-    ) -> int:
+    def add_many(self, file_ids: Iterable[str], *, kind: MediaKind = "photo") -> int:
         """Добавить набор ID одной атомарной записью и вернуть число новых."""
         return self._add(list(dict.fromkeys(file_ids)), kind, None)
 
     def _add(
         self,
         file_ids: list[str],
-        kind: Literal["photo", "document"],
+        kind: MediaKind,
         file_unique_id: str | None,
     ) -> int:
         added = 0
@@ -77,7 +76,7 @@ class ImagesRepository:
                     continue
                 images.append(file_id)
                 existing.add(file_id)
-                if kind == "document":
+                if kind != "photo":
                     data.setdefault("KINDS", {})[file_id] = kind
                 if file_unique_id:
                     data.setdefault("UNIQUE_IDS", {})[file_id] = file_unique_id
@@ -88,9 +87,14 @@ class ImagesRepository:
         self._storage.update(add_image)
         return added
 
-    def get_kind(self, file_id: str) -> Literal["photo", "document"]:
+    def get_kind(self, file_id: str) -> MediaKind:
         kinds = self._storage.load().get("KINDS", {})
-        return "document" if kinds.get(file_id) == "document" else "photo"
+        kind = kinds.get(file_id)
+        return (
+            cast(MediaKind, kind)
+            if kind in {"document", "video", "animation"}
+            else "photo"
+        )
 
     def remove(self, file_id: str) -> bool:
         """Удалить изображение и вернуть True, если оно существовало."""

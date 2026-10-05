@@ -11,6 +11,7 @@ from aiogram.types import (
     Message,
 )
 
+from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.response_engine import ResponseEngine
@@ -135,6 +136,7 @@ def create_reset_router(
     response_engine: ResponseEngine,
     users_repository: UsersRepository,
     memory: MemoryService | None = None,
+    on_mode_change: ModeChange | None = None,
 ) -> Router:
     """Создать роутер безопасного полного сброса."""
     router = Router(name=__name__)
@@ -198,6 +200,8 @@ def create_reset_router(
         await response_engine.reset_user(
             expected_user_id,
         )
+        if on_mode_change is not None:
+            await on_mode_change(expected_user_id, "unselected")
 
         if memory is not None:
             await memory.delete_user(expected_user_id)

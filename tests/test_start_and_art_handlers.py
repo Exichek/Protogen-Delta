@@ -506,9 +506,13 @@ def test_random_art_reports_empty_database() -> None:
     images_mock = Mock(spec=ImagesRepository)
     images_mock.get_all.return_value = []
 
+    states = UserStateStore()
+    states.get(123).content_mode = "adult"
+    images_mock.get_kind.return_value = "photo"
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        user_states=states,
         admin_ids=frozenset({123}),
     )
 
@@ -525,7 +529,7 @@ def test_random_art_reports_empty_database() -> None:
     answer_mock.assert_awaited_once_with(
         "В локальной коллекции /randomart пока нет артов. "
         "Администратор может добавить фото командой /addimage в ответ "
-        "на него. Для поиска на e621 используй /e6 — это отдельный источник.",
+        "на него. Успешные результаты /e6 тоже пополняют коллекцию.",
     )
     answer_photo_mock.assert_not_awaited()
 
@@ -546,9 +550,13 @@ def test_random_art_sends_selected_image(
         lambda values: values[0],
     )
 
+    states = UserStateStore()
+    states.get(123).content_mode = "adult"
+    images_mock.get_kind.return_value = "photo"
     router = create_art_router(
         images_repository=cast(ImagesRepository, images_mock),
         art_chat_id=-100123,
+        user_states=states,
         admin_ids=frozenset({123}),
     )
 
@@ -585,12 +593,16 @@ def test_random_art_handles_telegram_error(
         lambda values: values[0],
     )
 
+    states = UserStateStore()
+    states.get(123).content_mode = "adult"
+    images_mock.get_kind.return_value = "photo"
     router = create_art_router(
         images_repository=cast(
             ImagesRepository,
             images_mock,
         ),
         art_chat_id=-100123,
+        user_states=states,
         admin_ids=frozenset({123}),
     )
 

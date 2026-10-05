@@ -480,7 +480,7 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    create_adult_router_mock.assert_called_once_with(user_states)
+    create_adult_router_mock.assert_called_once_with(user_states, ANY)
 
     assert dispatcher_mock.include_router.call_count == 19
 
@@ -552,13 +552,14 @@ def test_main_builds_application_and_starts_polling(
         rate_limiter=ANY,
         sticker_service=ANY,
         audio_understanding=None,
+        music_recognition=None,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
         drop_pending_updates=False,
     )
 
-    create_menu_router_mock.assert_called_once_with(None)
+    create_menu_router_mock.assert_called_once_with(None, user_states)
     create_utilities_router_mock.assert_called_once_with(bot_mock)
     set_commands_mock.assert_awaited_once_with(bot_mock, None)
 

@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 
@@ -20,6 +21,7 @@ def create_art_router(
     art_chat_id: int,
     admin_ids: frozenset[int] = frozenset(),
     sources: ArtSourcesRepository | None = None,
+    user_states: UserStateStore | None = None,
 ) -> Router:
     """Создать роутер для работы с артами."""
     router = Router(name=__name__)
@@ -95,28 +97,43 @@ def create_art_router(
     @router.message(Command("randomart"))
     async def random_art(message: Message) -> None:
         """Отправить случайный арт из локального хранилища."""
+        if message.from_user is None or user_states is None:
+            await message.answer(
+                "Коллекция доступна только в режиме 18+. Выбери режим через /adult."
+            )
+            return
+        async with user_states.use(message.from_user.id) as state:
+            if state.content_mode != "adult":
+                await message.answer(
+                    "Коллекция доступна только в режиме 18+. Выбери режим через /adult."
+                )
+                return
+            # Держим блокировку до отправки: смена возраста не обгоняет выдачу.
+            await send_random_art(message)
+
+    async def send_random_art(message: Message) -> None:
         images = images_repository.get_all()
 
         if not images:
             await message.answer(
                 "В локальной коллекции /randomart пока нет артов. "
                 "Администратор может добавить фото командой /addimage в ответ "
-                "на него. Для поиска на e621 используй /e6 — это отдельный источник."
+                "на него. Успешные результаты /e6 тоже пополняют коллекцию."
             )
             return
 
         file_id = random.choice(images)
 
         try:
-            send = (
-                message.answer_document
-                if images_repository.get_kind(file_id) == "document"
-                else message.answer_photo
-            )
-            await send(
-                file_id,
-                caption="🎨 Лови артик!",
-            )
+            kind = images_repository.get_kind(file_id)
+            if kind == "document":
+                await message.answer_document(file_id, caption="🎨 Лови артик!")
+            elif kind == "video":
+                await message.answer_video(file_id, caption="🎨 Лови артик!")
+            elif kind == "animation":
+                await message.answer_animation(file_id, caption="🎨 Лови артик!")
+            else:
+                await message.answer_photo(file_id, caption="🎨 Лови артик!")
         except TelegramAPIError:
             logger.warning(
                 "Не удалось отправить случайный арт: %s",

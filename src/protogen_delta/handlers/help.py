@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from protogen_delta.core.message_utils import split_message
+from protogen_delta.core.user_state import UserStateStore
 
 HELP_TEXT = (
     "📖 ИИ-ассистент Протоген Дельта — помощь и команды:\n\n"
@@ -29,14 +30,19 @@ HELP_TEXT = (
 )
 
 
-def create_help_router() -> Router:
+def create_help_router(user_states: UserStateStore | None = None) -> Router:
     """Создать роутер команды /help."""
     router = Router(name=__name__)
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
         """Отправить пользователю список доступных команд."""
-        for chunk in split_message(HELP_TEXT):
+        text = HELP_TEXT.replace("/randomart – 🎨 Случайный арт\n", "")
+        if user_states is not None and message.from_user is not None:
+            async with user_states.use(message.from_user.id) as state:
+                if state.content_mode == "adult":
+                    text = HELP_TEXT
+        for chunk in split_message(text):
             await message.answer(chunk)
 
     return router

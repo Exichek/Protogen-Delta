@@ -10,6 +10,8 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+from protogen_delta.core.user_state import UserStateStore
+
 _PREFIX = "delta-menu"
 
 _PAGES = {
@@ -95,7 +97,9 @@ def _keyboard(page: str, mini_app_url: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def create_menu_router(mini_app_url: str | None = None) -> Router:
+def create_menu_router(
+    mini_app_url: str | None = None, user_states: UserStateStore | None = None
+) -> Router:
     """Создать роутер панели управления и её навигации."""
     router = Router(name=__name__)
 
@@ -115,6 +119,14 @@ def create_menu_router(mini_app_url: str | None = None) -> Router:
         if text is None:
             await callback.answer("Этот раздел больше недоступен.", show_alert=True)
             return
+
+        if page == "art" and user_states is not None:
+            async with user_states.use(callback.from_user.id) as state:
+                if state.content_mode == "adult":
+                    text += (
+                        "\n\n/randomart — случайный арт из общей коллекции. "
+                        "Выданные посты /e6 сохраняются в неё автоматически."
+                    )
 
         if isinstance(callback.message, Message):
             await callback.message.edit_text(
