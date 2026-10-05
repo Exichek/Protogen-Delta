@@ -1,6 +1,54 @@
 {
   "STICKERS": [
     {
+      "file_id": "AgADLqYAAmTTIUo",
+      "file_unique_id": "AgADLqYAAmTTIUo",
+      "name": "hi_sticker2",
+      "tags": ["greeting"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADwqkAAq9DGUo",
+      "file_unique_id": "AgADwqkAAq9DGUo",
+      "name": "hi_sticker3",
+      "tags": ["greeting"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADEqYAAlwkIEo",
+      "file_unique_id": "AgADEqYAAlwkIEo",
+      "name": "harmful_stiker",
+      "tags": ["refusal", "angry"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADTK8AApwNIUo",
+      "file_unique_id": "AgADTK8AApwNIUo",
+      "name": "harmful_stiker2",
+      "tags": ["error", "confused"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgAD_qkAAo4pIUo",
+      "file_unique_id": "AgAD_qkAAo4pIUo",
+      "name": "boop_sticker",
+      "tags": ["playful"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADaa8AAmA7IUo",
+      "file_unique_id": "AgADaa8AAmA7IUo",
+      "name": "beep",
+      "tags": ["happy", "playful"],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
       "file_id": "AgAD6rAAAhoQCUo",
       "file_unique_id": "AgAD6rAAAhoQCUo",
       "name": "boring",
