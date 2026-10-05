@@ -351,6 +351,7 @@ def test_art_handler_saves_photo_from_allowed_chat() -> None:
 
     images_mock.add.assert_called_once_with(
         "large-file-id",
+        file_unique_id=None,
     )
 
 
@@ -438,6 +439,7 @@ def test_art_handler_saves_image_document() -> None:
     images_mock.add.assert_called_once_with(
         "document-file-id",
         kind="document",
+        file_unique_id=None,
     )
 
 

@@ -53,9 +53,33 @@ def sticker_reply_tags(text: str) -> set[str]:
     }
 
 
+def _reaction_text(text: str) -> str:
+    """Считать поводом слова автора, исключая код, URL и явные цитаты."""
+    return re.sub(
+        r'```[\s\S]*?```|`[^`]*`|https?://\S+|«[^»]*»|“[^”]*”|"[^"\n]*"',
+        "",
+        text,
+    )
+
+
+def declines_stickers(text: str) -> bool:
+    """Не отправлять реакцию в ответ на явное нежелание получать стикеры."""
+    return bool(
+        re.search(
+            r"\b(?:не\s+(?:надо|нужно|нужны|хочу|присылай|отправляй|кидай|"
+            r"скидывай|шли|показывай)|перестань|отключи|убери)\b.{0,40}"
+            r"\b(?:стикер\w*|stickers?)\b|"
+            r"\b(?:стикер\w*|stickers?)\b.{0,25}\bне\s+(?:надо|нужны|нужно)|"
+            r"\bбез\s+(?:стикер\w*|stickers?)\b",
+            _reaction_text(text),
+            re.IGNORECASE,
+        )
+    )
+
+
 def sticker_context_tags(text: str) -> set[str]:
     """Найти конкретный повод для реакции без нового запроса к модели."""
-    text = re.sub(r"```[\s\S]*?```|`[^`]*`|https?://\S+", "", text)
+    text = _reaction_text(text)
     return {
         tag
         for tag, pattern in _CONTEXT_PATTERNS.items()
@@ -65,7 +89,9 @@ def sticker_context_tags(text: str) -> set[str]:
 
 def has_sticker_request(text: str) -> bool:
     """Распознать просьбу показать реакцию, исключая код и обсуждение настройки."""
-    text = re.sub(r"```[\s\S]*?```|`[^`]*`|https?://\S+", "", text).lower()
+    if declines_stickers(text):
+        return False
+    text = _reaction_text(text).lower()
     if not re.search(r"\b(?:стикер\w*|stickers?)\b", text):
         return False
     if re.search(
@@ -160,6 +186,9 @@ class ContextualStickerService:
         reply_text: str = "",
     ) -> bool:
         """Иногда отправить подходящий стикер и сообщить об успехе."""
+        if declines_stickers(context_text):
+            logger.debug("Sticker reaction outcome=declined")
+            return False
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
         requested = has_sticker_request(context_text)

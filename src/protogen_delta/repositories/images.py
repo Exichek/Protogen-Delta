@@ -1,5 +1,6 @@
 """Репозиторий изображений бота."""
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -35,23 +36,57 @@ class ImagesRepository:
         return _get_images(self._storage.load())
 
     def add(
-        self, file_id: str, *, kind: Literal["photo", "document"] = "photo"
+        self,
+        file_id: str,
+        *,
+        kind: Literal["photo", "document"] = "photo",
+        file_unique_id: str | None = None,
     ) -> bool:
         """Добавить изображение и вернуть True, если его ещё не было."""
+        return bool(self._add([file_id], kind, file_unique_id))
+
+    def add_many(
+        self, file_ids: Iterable[str], *, kind: Literal["photo", "document"] = "photo"
+    ) -> int:
+        """Добавить набор ID одной атомарной записью и вернуть число новых."""
+        return self._add(list(dict.fromkeys(file_ids)), kind, None)
+
+    def _add(
+        self,
+        file_ids: list[str],
+        kind: Literal["photo", "document"],
+        file_unique_id: str | None,
+    ) -> int:
+        added = 0
 
         def add_image(data: dict[str, Any]) -> bool:
             """Добавить изображение внутри атомарной операции."""
+            nonlocal added
             images = _get_images(data)
+            existing = set(images)
+            unique_ids = data.get("UNIQUE_IDS", {})
+            changed = False
+            for file_id in file_ids:
+                if file_id in existing:
+                    # Старой записи можно добавить идентификатор без смены кода.
+                    if file_unique_id and unique_ids.get(file_id) != file_unique_id:
+                        data.setdefault("UNIQUE_IDS", {})[file_id] = file_unique_id
+                        changed = True
+                    continue
+                if file_unique_id and file_unique_id in unique_ids.values():
+                    continue
+                images.append(file_id)
+                existing.add(file_id)
+                if kind == "document":
+                    data.setdefault("KINDS", {})[file_id] = kind
+                if file_unique_id:
+                    data.setdefault("UNIQUE_IDS", {})[file_id] = file_unique_id
+                added += 1
+                changed = True
+            return changed
 
-            if file_id in images:
-                return False
-
-            images.append(file_id)
-            if kind == "document":
-                data.setdefault("KINDS", {})[file_id] = kind
-            return True
-
-        return self._storage.update(add_image)
+        self._storage.update(add_image)
+        return added
 
     def get_kind(self, file_id: str) -> Literal["photo", "document"]:
         kinds = self._storage.load().get("KINDS", {})
@@ -69,6 +104,7 @@ class ImagesRepository:
 
             images.remove(file_id)
             data.get("KINDS", {}).pop(file_id, None)
+            data.get("UNIQUE_IDS", {}).pop(file_id, None)
             return True
 
         return self._storage.update(remove_image)

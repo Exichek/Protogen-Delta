@@ -19,7 +19,39 @@ from protogen_delta.repositories.stickers import (
     StickersRepository,
 )
 from protogen_delta.services.sticker_pack import StickerPackImporter
-from protogen_delta.services.stickers import ContextualStickerService
+from protogen_delta.services.stickers import (
+    ContextualStickerService,
+    has_sticker_request,
+    sticker_context_tags,
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Не отправляй стикеры :D",
+        "Не скидывай стикеры, спасибо :) ",
+        "Давай без стикеров 😂",
+        "Стикеры не нужны, привет",
+    ],
+)
+def test_sticker_opt_out_wins_over_smile_or_greeting(tmp_path: Path, text: str) -> None:
+    repository = StickersRepository(tmp_path)
+    repository.upsert(_entry("greeting", "greeting", "happy", "laugh"))
+    bot = AsyncMock(spec=Bot)
+    service = ContextualStickerService(
+        cast(Bot, bot), repository, UserStateStore(), min_replies=1, chance=1
+    )
+    assert not has_sticker_request(text)
+    assert not asyncio.run(service.maybe_send(chat_id=1, user_id=1, context_text=text))
+    bot.send_sticker.assert_not_awaited()
+
+
+def test_quoted_sticker_request_and_emoji_are_not_authors_reaction() -> None:
+    text = 'Он написал «пришли стикер :D» и "привет 😊", а я спрашиваю про код.'
+    assert not has_sticker_request(text)
+    assert not sticker_context_tags(text)
+    assert "laugh" in sticker_context_tags("Он написал «привет», ахаха :D")
 
 
 def _entry(
