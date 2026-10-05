@@ -4,13 +4,14 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message
 
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.user_state import ConversationTurn, UserStateStore
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
@@ -47,6 +48,115 @@ def test_sticker_request_intent(text: str) -> None:
 )
 def test_sticker_discussion_is_not_send_request(text: str) -> None:
     assert not has_sticker_request(text)
+
+
+STICKER_QUESTION = "Как работают твои стикеры говоришь? :D"
+STICKER_EXPLANATION = (
+    "У меня есть набор из 19 Telegram-стикеров. "
+    "Если хочешь посмотреть — скажи, я попробую показать один."
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "скинь какой-то",
+        "покажи какой-нибудь",
+        "давай пример",
+        "ещё один",
+        "скинь",
+        "Ну пришли один пожалуйста :D",
+        "Дай мне любой 🙂",
+    ],
+)
+def test_followup_request_requires_immediate_sticker_context(text: str) -> None:
+    assert not has_sticker_request(text)
+    assert has_sticker_request(
+        text, previous_user_message=STICKER_QUESTION, previous_reply=STICKER_EXPLANATION
+    )
+    assert not has_sticker_request(text, previous_reply=STICKER_EXPLANATION)
+    assert not has_sticker_request(text, previous_user_message=STICKER_QUESTION)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "не надо",
+        "не скидывай",
+        "давай пример кода",
+        "скинь музыку",
+        "покажи время",
+        "давай без стикеров",
+        "а как это работает?",
+        "Вот `скинь один`",
+        "«скинь какой-то»",
+        "скинь https://example.org/video.mp4",
+        "скинь " + " " * 150,
+    ],
+)
+def test_followup_does_not_turn_other_requests_into_stickers(text: str) -> None:
+    assert not has_sticker_request(
+        text, previous_user_message=STICKER_QUESTION, previous_reply=STICKER_EXPLANATION
+    )
+
+
+def test_followup_context_is_per_user_and_clears_with_topic_or_reset(
+    tmp_path: Path,
+) -> None:
+    service, _ = _service(tmp_path)
+    state = service._user_states.get(42)
+    state.history.append(ConversationTurn(STICKER_QUESTION, STICKER_EXPLANATION))
+    assert service.is_request(42, "скинь какой-то")
+    assert not service.is_request(43, "скинь какой-то")
+    state.history.append(ConversationTurn("А какая погода?", "Дождь."))
+    assert not service.is_request(42, "скинь какой-то")
+    state.history.append(ConversationTurn(STICKER_QUESTION, STICKER_EXPLANATION))
+    state.reset_context()
+    assert not service.is_request(42, "скинь какой-то")
+
+
+@pytest.mark.parametrize("outcome", ["sent", "disabled", "cooldown", "telegram_error"])
+def test_screenshot_followup_sends_directly_or_reports_actual_failure(
+    tmp_path: Path, outcome: str
+) -> None:
+    service, bot = _service(tmp_path)
+    state = service._user_states.get(42)
+    state.history.append(ConversationTurn(STICKER_QUESTION, STICKER_EXPLANATION))
+    service._random_value = lambda: 1.0
+    if outcome == "disabled":
+        service._chance = 0
+    elif outcome == "telegram_error":
+        bot.send_sticker.side_effect = TelegramBadRequest(
+            method=Mock(), message="failed"
+        )
+    engine = AsyncMock(spec=ResponseEngine)
+    message = SimpleNamespace(
+        text="скинь какой-то",
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=7),
+        answer=AsyncMock(),
+    )
+    router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
+
+    async def scenario() -> None:
+        if outcome == "cooldown":
+            assert await service.maybe_send(
+                chat_id=7, user_id=42, context_text="Покажи стикер"
+            )
+            bot.send_sticker.reset_mock()
+        await router.message.handlers[0].callback(cast(Message, message))
+
+    asyncio.run(scenario())
+    engine.respond_and_deliver.assert_not_awaited()
+    assert bot.send_sticker.await_count == int(outcome in {"sent", "telegram_error"})
+    if outcome == "sent":
+        message.answer.assert_not_awaited()
+        assert bot.send_sticker.await_args.kwargs["sticker"].startswith("safe-")
+    else:
+        message.answer.assert_awaited_once()
+        assert "не получилось" in message.answer.await_args.args[0] or (
+            "отключены" in message.answer.await_args.args[0]
+        )
 
 
 def _service(tmp_path: Path) -> tuple[ContextualStickerService, AsyncMock]:

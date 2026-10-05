@@ -88,13 +88,35 @@ def sticker_context_tags(text: str) -> set[str]:
     }
 
 
-def has_sticker_request(text: str) -> bool:
+def has_sticker_request(
+    text: str, *, previous_user_message: str = "", previous_reply: str = ""
+) -> bool:
     """Распознать просьбу показать реакцию, исключая код и обсуждение настройки."""
     if declines_stickers(text):
         return False
-    text = _reaction_text(text).lower()
+    visible = _reaction_text(text)
+    has_excluded_content = visible != text
+    text = visible.lower()
     if not re.search(r"\b(?:стикер\w*|stickers?)\b", text):
-        return False
+        if not all(
+            re.search(r"\b(?:стикер\w*|stickers?)\b", _reaction_text(context), re.I)
+            for context in (previous_user_message, previous_reply)
+        ):
+            return False
+        return bool(
+            not has_excluded_content
+            and len(text) <= 120
+            and re.fullmatch(
+                r"\s*(?:ну\s+)?(?:пожалуйста\s+)?(?:"
+                r"(?:скинь|пришли|кинь|отправь|покажи|дай|давай)\s*"
+                r"(?:(?:мне|сюда)\s+)?"
+                r"(?:какой[- ]?(?:нибудь|то)|что[- ]нибудь|любой|один|одного|"
+                r"пример|хоть\s+один|ещ[её](?:\s+(?:один|пример))?)?"
+                r"|ещ[её](?:\s+(?:один|раз|пример))?)"
+                r"(?:\s+пожалуйста)?(?:\s|[^\w\s]|[:;=]-?[dдpр3]|[xх][dд]+)*",
+                text,
+            )
+        )
     if re.search(
         r"\b(?:не\s+(?:надо|нужно|хочу|присылай|отправляй|кидай)|"
         r"перестань|отключи|убери|опиши|распознай|добавить|настроить)\b",
@@ -179,6 +201,16 @@ class ContextualStickerService:
             for entry in self._repository.get_all()
         )
 
+    def is_request(self, user_id: int, text: str) -> bool:
+        """Разрешить «скинь какой-то» только после обсуждения стикеров."""
+        history = self._user_states.get(user_id).history
+        previous = history[-1] if history else None
+        return has_sticker_request(
+            text,
+            previous_user_message=previous.user_message if previous else "",
+            previous_reply=previous.assistant_message if previous else "",
+        )
+
     def correct_reply(self, user_id: int, reply: str) -> str:
         """Не отправлять ложное отрицание и не закреплять его в истории."""
         if not self.is_available(user_id):
@@ -203,7 +235,7 @@ class ContextualStickerService:
             return False
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
-        requested = has_sticker_request(context_text)
+        requested = self.is_request(user_id, context_text)
         semantic_tags = sticker_context_tags(context_text)
         greeting = "greeting" in semantic_tags
         if (
