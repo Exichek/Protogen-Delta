@@ -157,6 +157,8 @@ def create_start_router(
                 deepseek,
                 first_start_prompt,
             )
+            if sticker_service is not None:
+                reply = sticker_service.correct_reply(user_id, reply)
 
             for chunk in split_message(reply):
                 await message.answer(chunk)
@@ -168,6 +170,8 @@ def create_start_router(
                 deepseek,
                 repeat_start_prompt or first_start_prompt,
             )
+            if sticker_service is not None:
+                reply = sticker_service.correct_reply(user_id, reply)
 
             for chunk in split_message(reply):
                 await message.answer(chunk)

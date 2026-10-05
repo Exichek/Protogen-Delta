@@ -110,6 +110,7 @@ class ResponseEngine:
         config: ResponseEngineConfig,
         memory: MemoryService | None = None,
         creator_id: int | None = None,
+        reply_transform: Callable[[int, str], str] | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -135,6 +136,7 @@ class ResponseEngine:
         )
         self._memory = memory
         self._creator_id = creator_id
+        self._reply_transform = reply_transform
         self._delivering_users: set[int] = set()
 
     async def respond_and_deliver(
@@ -192,14 +194,17 @@ class ResponseEngine:
                     model_message_override=model_message_override,
                     trusted_input_context=trusted_input_context,
                 )
+                reply = (
+                    self._reply_transform(user_id, prepared.text)
+                    if self._reply_transform is not None
+                    else prepared.text
+                )
                 if deliver is not None:
-                    await deliver(prepared.text)
+                    await deliver(reply)
                 if prepared.user_message is not None:
                     self._register_reply(user_state)
-                    self._remember_turn(
-                        user_state, prepared.user_message, prepared.text
-                    )
-                return prepared.text
+                    self._remember_turn(user_state, prepared.user_message, reply)
+                return reply
 
     async def reset_user_context(
         self,
