@@ -472,8 +472,34 @@ def create_e621_router(
         session.task = asyncio.current_task()
         session.results.clear()
         prepared: list[PreparedMedia] = []
+        pending: list[tuple[E621Post, asyncio.Task[PreparedMedia]]] = []
+        scheduled = 0
+        completed = 0
+        exhausted = False
         skipped = 0
         started = monotonic()
+
+        async def stop_preparation(*, keep_ready: bool = False) -> None:
+            nonlocal skipped
+            unfinished: list[E621Post] = []
+            tasks = [task for _, task in pending]
+            for post, task in pending:
+                if keep_ready and task.done() and not task.cancelled():
+                    try:
+                        prepared.append(task.result())
+                    except E621Error:
+                        skipped += 1
+                    except TimeoutError:
+                        unfinished.append(post)
+                else:
+                    unfinished.append(post)
+                    task.cancel()
+            pending.clear()
+            # Неготовые посты доступны по «Ещё» после таймаута или отмены.
+            session.pending[:0] = unfinished
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
         session.progress = (
             "Подбираю и готовлю медиа… Видео может потребовать конвертацию."
         )
@@ -483,22 +509,41 @@ def create_e621_router(
                 session.query, session.page, session.pending = query, 1, []
             await update_panel(message, user_id, session)
             reserved = await history.seen_ids(user_id)
-            for index in range(session.count):
+            while completed < session.count:
                 async with asyncio.timeout(
                     max(0, _BATCH_SECONDS - (monotonic() - started))
                 ):
-                    post = await pick(session, reserved, adult)
-                    if post is None:
+                    while (
+                        len(pending) < 2 and scheduled < session.count and not exhausted
+                    ):
+                        post = await pick(session, reserved, adult)
+                        if post is None:
+                            exhausted = True
+                            break
+                        pending.append(
+                            (
+                                post,
+                                asyncio.create_task(
+                                    media.prepare(post, album=session.count > 1)
+                                ),
+                            )
+                        )
+                        scheduled += 1
+                    if not pending:
                         break
-                    session.progress = f"Готовлю {index + 1}/{session.count}…"
+                    session.progress = f"Готовлю {completed + 1}/{session.count}…"
                     if monotonic() - session.progress_at >= 1:
                         await update_panel(message, user_id, session)
                         session.progress_at = monotonic()
                     try:
-                        p = await media.prepare(post, album=session.count > 1)
+                        p = await pending[0][1]
                     except E621Error:
                         skipped += 1
+                        pending.pop(0)
+                        completed += 1
                         continue
+                    pending.pop(0)
+                    completed += 1
                 prepared.append(p)
                 if (
                     len(prepared) >= 2
@@ -518,6 +563,7 @@ def create_e621_router(
             if skipped:
                 session.progress += f" Недоступных файлов: {skipped}."
         except TimeoutError:
+            await stop_preparation(keep_ready=True)
             if prepared:
                 try:
                     await send_group(message, user_id, session, prepared)
@@ -560,6 +606,7 @@ def create_e621_router(
                 else "Telegram не принял вложение. Попробуй другую подборку."
             )
         finally:
+            await stop_preparation()
             session.task = None
             prepared.clear()
             if session.results and session.panel and not session.closed:

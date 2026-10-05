@@ -21,6 +21,7 @@ class Transcript:
     text: str
     language: str | None = None
     truncated: bool = False
+    uncertain: bool = False
 
 
 class SpeechTranscriber:
@@ -82,9 +83,20 @@ class SpeechTranscriber:
                 vad_filter=True,
                 condition_on_previous_text=False,
             )
-            text = " ".join(
-                segment.text.strip() for segment in segments if segment.text.strip()
-            ).strip()
+            pieces: list[str] = []
+            uncertain = False
+            for segment in segments:
+                piece = segment.text.strip()
+                if not piece:
+                    continue
+                pieces.append(piece)
+                # Это эвристика декодера, а не калиброванная вероятность ошибки.
+                score = getattr(segment, "avg_logprob", None)
+                silence = getattr(segment, "no_speech_prob", None)
+                uncertain |= (isinstance(score, (int, float)) and score < -1.0) or (
+                    isinstance(silence, (int, float)) and silence > 0.6
+                )
+            text = " ".join(pieces).strip()
         except Exception as error:
             raise SpeechRecognitionError("Не удалось распознать аудио") from error
         if not text:
@@ -94,4 +106,5 @@ class SpeechTranscriber:
             text=text[:MAX_TRANSCRIPT_CHARS],
             language=getattr(info, "language", None),
             truncated=truncated,
+            uncertain=uncertain,
         )

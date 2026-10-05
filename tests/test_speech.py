@@ -111,3 +111,28 @@ def test_inference_error_is_translated() -> None:
 
     with pytest.raises(SpeechRecognitionError, match="распознать"):
         asyncio.run(transcriber.transcribe(b"audio"))
+
+
+@pytest.mark.parametrize(
+    "score,silence,uncertain",
+    [(-0.4, 0.05, False), (-1.4, 0.1, True), (-0.4, 0.8, True)],
+)
+def test_decoder_uncertainty_is_preserved_without_rewriting_words(
+    score: float, silence: float, uncertain: bool
+) -> None:
+    model = Mock()
+    model.transcribe.return_value = (
+        iter(
+            [
+                SimpleNamespace(
+                    text="Моя любимая", avg_logprob=score, no_speech_prob=silence
+                )
+            ]
+        ),
+        SimpleNamespace(language="ru"),
+    )
+    transcriber = SpeechTranscriber()
+    transcriber._model = model
+    result = asyncio.run(transcriber.transcribe(b"audio"))
+    assert result.text == "Моя любимая"
+    assert result.uncertain is uncertain

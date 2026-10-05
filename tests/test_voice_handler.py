@@ -29,6 +29,20 @@ from protogen_delta.services.speech import (
 TEST_USER_ID = 123456
 
 
+def test_uncertain_words_are_marked_in_context_and_saved_history() -> None:
+    router, engine, _, _ = _router(Transcript("Моя любимая", "ru", uncertain=True))
+    message, _ = _message(
+        voice=SimpleNamespace(file_id="voice", file_size=10, duration=2)
+    )
+    asyncio.run(router.message.handlers[0].callback(message))
+    call = engine.respond_and_deliver.await_args
+    assert call is not None
+    assert "Неуверенная расшифровка" in call.args[1]
+    assert "неуверенное распознавание" in call.kwargs["trusted_input_context"]
+    assert "Не достраивай" in call.kwargs["trusted_input_context"]
+    assert call.kwargs["model_message_override"] == "Моя любимая"
+
+
 def test_audio_model_report_is_used_and_failure_falls_back(monkeypatch: Any) -> None:
     import protogen_delta.handlers.voice as voice_module
 
