@@ -4,19 +4,24 @@ import asyncio
 from importlib.resources import files
 from typing import Any, cast
 
+from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.core.user_state import ContentMode, UserState, UserStateStore
 from protogen_delta.miniapp.auth import (
     MiniAppAuthError,
     MiniAppUser,
     validate_init_data,
 )
+from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
+from protogen_delta.services.appearance_description import parse_description_file
 from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_image,
 )
+from protogen_delta.services.e621 import E621Error, E621QueryError
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
     ResponseBusyError,
@@ -60,6 +65,8 @@ class MiniAppServer:
         port: int = 8080,
         auth_max_age_seconds: int = 3600,
         response_engine: ResponseEngine | None = None,
+        on_mode_change: ModeChange | None = None,
+        tools: MiniAppTools | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -73,6 +80,8 @@ class MiniAppServer:
         self._port = port
         self._auth_max_age_seconds = auth_max_age_seconds
         self._response_engine = response_engine
+        self._on_mode_change = on_mode_change
+        self._tools = tools
         self._appearance_pending: set[int] = set()
         self._appearance_slots = asyncio.Semaphore(2)
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
@@ -88,8 +97,10 @@ class MiniAppServer:
                 web.patch("/api/profile", self._update_profile),
                 web.delete("/api/profile/roleplay", self._delete_roleplay_profile),
                 web.post("/api/profile/appearance", self._upload_appearance),
+                web.put("/api/profile/appearance", self._set_text_appearance),
                 web.delete("/api/profile/appearance", self._reset_appearance),
                 web.get("/health", self._health),
+                web.post("/api/tools/{tool}", self._run_tool),
             ]
         )
         return application
@@ -210,6 +221,7 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text="Границы слишком длинные")
 
         async with self._user_states.use(user.id) as state:
+            previous_mode = state.content_mode
             if content_mode is not None:
                 state.content_mode = cast(ContentMode, content_mode)
             if roleplay_active is not None:
@@ -223,6 +235,9 @@ class MiniAppServer:
             if boundaries is not None:
                 state.roleplay_boundaries = boundaries.strip()
             response = self._profile(state, user)
+            mode = state.content_mode
+        if mode != previous_mode and self._on_mode_change is not None:
+            await self._on_mode_change(user.id, mode)
         return web.json_response(response, headers={"Cache-Control": "no-store"})
 
     async def _delete_roleplay_profile(self, request: web.Request) -> web.Response:
@@ -317,3 +332,83 @@ class MiniAppServer:
             state.delta_appearance = ""
             payload = self._profile(state, user)
         return web.json_response(payload, headers={"Cache-Control": "no-store"})
+
+    async def _set_text_appearance(self, request: web.Request) -> web.Response:
+        """Применить описание или TXT/JSON только к собственному облику Дельты."""
+        user = self._authenticate(request)
+        if self._response_engine is None:
+            raise web.HTTPServiceUnavailable(text="Смена облика сейчас недоступна.")
+        if user.id in self._appearance_pending:
+            raise web.HTTPConflict(text="Облик уже обрабатывается. Подожди немного.")
+        self._appearance_pending.add(user.id)
+        try:
+            try:
+                if request.content_type == "application/json":
+                    description = parse_description_file(
+                        await request.read(), json_file=True
+                    )
+                elif request.content_type == "text/plain":
+                    description = parse_description_file(
+                        await request.read(), json_file=False
+                    )
+                else:
+                    raise ValueError("Нужен текст, TXT или JSON.")
+                await self._response_engine.set_delta_appearance_from_text(
+                    user.id, description
+                )
+            except ValueError as error:
+                raise web.HTTPBadRequest(text=str(error)) from error
+            except ResponseBusyError as error:
+                raise web.HTTPConflict(
+                    text="Бот ещё отвечает в чате. Попробуй после ответа."
+                ) from error
+            async with self._user_states.use(user.id) as state:
+                payload = self._profile(state, user)
+            return web.json_response(payload, headers={"Cache-Control": "no-store"})
+        finally:
+            self._appearance_pending.discard(user.id)
+
+    async def _run_tool(self, request: web.Request) -> web.Response:
+        """Авторизовать владельца до разбора тела и запуска инструмента."""
+        user = self._authenticate(request)
+        if self._tools is None:
+            raise web.HTTPServiceUnavailable(text="Инструменты сейчас недоступны.")
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Нужен JSON-объект.")
+            tool = request.match_info["tool"]
+            if tool == "id":
+                target = payload.get("target", "self")
+                if not isinstance(target, str):
+                    raise ValueError("Некорректный выбор ID.")
+                result = await self._tools.lookup_id(user.id, target)
+            elif tool == "gallery":
+                raw, page = payload.get("query"), payload.get("page", 1)
+                if (
+                    not isinstance(raw, str)
+                    or type(page) is not int
+                    or not 1 <= page <= 1000
+                ):
+                    raise ValueError("Нужны теги и номер страницы от 1 до 1000.")
+                result = await self._tools.gallery(user.id, raw, page)
+            elif tool == "download":
+                url = payload.get("url")
+                if not isinstance(url, str):
+                    raise ValueError("Нужна ссылка на видео.")
+                result = await self._tools.download(user.id, url.strip())
+            else:
+                raise web.HTTPNotFound(text="Такого инструмента нет.")
+        except ToolsBusyError as error:
+            raise web.HTTPTooManyRequests(text=str(error)) from error
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        except TelegramAPIError as error:
+            raise web.HTTPBadGateway(
+                text="Telegram не смог определить ID. Для приватных чатов используй выбор в Telegram."
+            ) from error
+        except E621QueryError as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        except E621Error as error:
+            raise web.HTTPBadGateway(text=str(error)) from error
+        return web.json_response(result, headers={"Cache-Control": "no-store"})

@@ -20,6 +20,7 @@ from protogen_delta.services.documents import (
     UnsupportedDocumentError,
     extract_document,
 )
+from protogen_delta.services.music import is_audio_file
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -53,7 +54,12 @@ def create_document_router(
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
 
-    @router.message(F.document)
+    @router.message(
+        F.document,
+        lambda message: not is_audio_file(
+            message.document.mime_type, message.document.file_name
+        ),
+    )
     async def handle_document(message: Message) -> None:
         """Скачать документ, извлечь текст и передать его движку ответа."""
         document = message.document

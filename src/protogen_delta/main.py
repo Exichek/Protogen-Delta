@@ -15,8 +15,8 @@ from protogen_delta.config.settings import Settings, load_settings
 from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.state import BotState
-from protogen_delta.core.telegram_commands import set_commands
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.telegram_commands import set_commands, set_user_commands
+from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
@@ -38,6 +38,7 @@ from protogen_delta.handlers.unknown_command import create_unknown_command_route
 from protogen_delta.handlers.utilities import create_utilities_router
 from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.miniapp.server import MiniAppServer
+from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
@@ -54,6 +55,7 @@ from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
+from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
@@ -229,6 +231,10 @@ async def main() -> None:
                 "кадров в порядке времени. Это анализ выбранных кадров, не просмотр "
                 "каждого мгновения; звук видео автоматически не анализируется. "
                 "Распознаю речь из голосовых и аудиофайлов. "
+                "Приложение отправляет готовые Telegram-стикеры из размеченного "
+                "пака отдельным механизмом после основного текста; это не "
+                "рисование и не мысленная или словесная реакция. "
+                "Доступность и интервалы задаются текущими настройками. "
                 + (
                     "Для анализа музыки и звуков подключена аудиомодель. "
                     if settings.audio_understanding_enabled
@@ -290,8 +296,13 @@ async def main() -> None:
             first_start_prompt=first_start_prompt,
             repeat_start_prompt=repeat_start_prompt,
         )
-        help_router = create_help_router()
-        menu_router = create_menu_router(settings.mini_app_url)
+
+        async def on_mode_change(user_id: int, mode: ContentMode) -> None:
+            async with user_states.use(user_id) as current_state:
+                await set_user_commands(bot, user_id, current_state.content_mode)
+
+        help_router = create_help_router(user_states)
+        menu_router = create_menu_router(settings.mini_app_url, user_states)
         utilities_router = create_utilities_router(bot)
 
         art_router = create_art_router(
@@ -299,6 +310,7 @@ async def main() -> None:
             art_chat_id=settings.art_chat_id,
             admin_ids=settings.admin_ids,
             sources=ArtSourcesRepository(settings.data_dir, settings.art_chat_id),
+            user_states=user_states,
         )
 
         effective_admin_ids = settings.admin_ids | (
@@ -324,16 +336,18 @@ async def main() -> None:
             creator_id=settings.creator_id,
         )
 
-        adult_router = create_adult_router(user_states)
+        adult_router = create_adult_router(user_states, on_mode_change)
+        e621_client = E621Client(
+            settings.e621_user_agent,
+            proxy_url=settings.telegram_proxy_url,
+            request_interval=settings.e621_request_interval_seconds,
+        )
         e621_router = create_e621_router(
-            E621Client(
-                settings.e621_user_agent,
-                proxy_url=settings.telegram_proxy_url,
-                request_interval=settings.e621_request_interval_seconds,
-            ),
+            e621_client,
             e621_history,
             user_states,
             bot_id=bot.id,
+            images_repository=images_repository,
         )
 
         rate_limiter = UserRateLimiter(
@@ -345,6 +359,7 @@ async def main() -> None:
             response_engine,
             users_repository,
             memory,
+            on_mode_change=on_mode_change,
         )
 
         rp_router = create_rp_router(
@@ -383,6 +398,11 @@ async def main() -> None:
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
             audio_understanding=audio_understanding,
+            music_recognition=(
+                MusicRecognitionService(settings.music_audd_api_token)
+                if settings.music_audd_api_token
+                else None
+            ),
         )
 
         dispatcher.include_router(start_router)
@@ -397,7 +417,8 @@ async def main() -> None:
         dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(rp_router)
-        dispatcher.include_router(create_download_router(MediaDownloader()))
+        downloader = MediaDownloader()
+        dispatcher.include_router(create_download_router(downloader))
         dispatcher.include_router(
             create_image_source_router(
                 bot, ImageSourceService(settings.saucenao_api_key or "")
@@ -413,6 +434,10 @@ async def main() -> None:
             drop_pending_updates=False,
         )
         await set_commands(bot, settings.mini_app_url)
+        for user_id in users_repository.get_all():
+            async with user_states.use(user_id) as state:
+                mode = state.content_mode
+            await on_mode_change(user_id, mode)
 
         # Команда /proactive временно скрыта: на время этого режима фоновые
         # сообщения включаются всем, включая ранее отключившие их в тестах.
@@ -426,6 +451,8 @@ async def main() -> None:
                 port=settings.mini_app_port,
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
                 response_engine=response_engine,
+                on_mode_change=on_mode_change,
+                tools=MiniAppTools(bot, e621_client, downloader),
             )
             await mini_app_server.start()
 

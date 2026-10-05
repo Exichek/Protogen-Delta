@@ -9,6 +9,7 @@ from aiogram.types import (
     Message,
 )
 
+from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.core.user_state import ContentMode, UserStateStore
 
 _CALLBACK_PREFIX = "adult"
@@ -90,7 +91,9 @@ def _parse_callback(data: str) -> tuple[ContentMode, int] | None:
     return mode, user_id
 
 
-def create_adult_router(user_states: UserStateStore) -> Router:
+def create_adult_router(
+    user_states: UserStateStore, on_mode_change: ModeChange | None = None
+) -> Router:
     """Создать роутер команды и кнопок возрастного режима."""
     router = Router(name=__name__)
 
@@ -124,6 +127,9 @@ def create_adult_router(user_states: UserStateStore) -> Router:
 
         async with user_states.use(expected_user_id) as state:
             state.content_mode = mode
+
+        if on_mode_change is not None:
+            await on_mode_change(expected_user_id, mode)
 
         if isinstance(callback.message, Message):
             await callback.message.edit_text(

@@ -17,8 +17,8 @@
     .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .stat { padding:12px; border-radius:14px; background:#ffffff08; } .stat b { display:block; margin-top:5px; }
     label { display:block; font-size:13px; color:var(--tg-theme-hint-color,#95a4b8); margin:14px 0 6px; }
-    select,textarea,button { width:100%; border:0; border-radius:12px; font:inherit; }
-    select,textarea { padding:12px; color:var(--tg-theme-text-color,#eef4ff); background:var(--tg-theme-bg-color,#0c1420); outline:1px solid #ffffff18; }
+    input,select,textarea,button { width:100%; border:0; border-radius:12px; font:inherit; }
+    input,select,textarea { padding:12px; color:var(--tg-theme-text-color,#eef4ff); background:var(--tg-theme-bg-color,#0c1420); outline:1px solid #ffffff18; }
     textarea { min-height:110px; resize:vertical; }
     button { margin-top:16px; padding:13px; font-weight:700; color:var(--tg-theme-button-text-color,#fff); background:var(--tg-theme-button-color,#6c5ce7); cursor:pointer; }
     button.secondary { color:#ffb2b9; background:#ff556622; outline:1px solid #ff718044; }
@@ -27,9 +27,19 @@
     .appearance-actions button { margin-top:12px; }
     .appearance-preview { display:block; width:100%; max-height:260px; object-fit:contain; margin-top:14px; border-radius:12px; background:var(--tg-theme-bg-color,#0c1420); }
     .appearance-preview[hidden] { display:none; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+    [hidden] { display:none !important; }
     #appearance { white-space:pre-wrap; overflow-wrap:anywhere; }
     #appearance-status { margin-top:12px; min-height:20px; font-size:14px; }
     #appearance-file-name { overflow-wrap:anywhere; font-size:13px; }
+    .tabs { display:grid; grid-template-columns:1fr 1fr; gap:10px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
+    .tabs button { margin-top:0; opacity:.65; }
+    .tabs button[aria-selected="true"] { opacity:1; }
+    .gallery { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:16px; }
+    .gallery article { min-width:0; overflow:hidden; border-radius:12px; background:#ffffff08; }
+    .gallery img { display:block; width:100%; aspect-ratio:1; object-fit:contain; }
+    .gallery a { display:block; color:var(--tg-theme-link-color,#86c8ff); padding:8px; overflow-wrap:anywhere; }
+    .tool-status { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:12px; }
     .error { color:#ff7d88; } .ok { color:#62dca4; }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
   </style>
@@ -37,6 +47,11 @@
 <body>
 <main>
   <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted">ИИ-ассистент с характером</p><p class="muted" id="hello">Профиль и настройки</p></div></header>
+  <nav class="tabs" role="tablist" aria-label="Разделы Дельты">
+    <button id="tab-rp" role="tab" aria-controls="rp-panel" aria-selected="true">RP и облик</button>
+    <button id="tab-tools" role="tab" aria-controls="tools-panel" aria-selected="false">Полезное</button>
+  </nav>
+  <div id="rp-panel" role="tabpanel" aria-labelledby="tab-rp">
   <section class="card">
     <div class="grid">
       <div class="stat">Возрастной режим<b id="mode">—</b></div>
@@ -60,8 +75,16 @@
   <section class="card" aria-labelledby="appearance-title">
     <b id="appearance-title">Текущий облик Дельты</b>
     <p class="muted" id="appearance">Базовый облик</p>
-    <p class="muted">Загрузи арт персонажа — я разберу внешность и приму этот облик.</p>
-    <p class="muted">JPEG, PNG или WebP до 20 МБ. Меняется только внешность.</p>
+    <p class="muted">Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
+    <label for="appearance-mode">Источник облика</label>
+    <select id="appearance-mode"><option value="image">Картинка</option><option value="text">Текст или TXT/JSON</option></select>
+    <div id="appearance-text-panel" hidden>
+      <label for="appearance-description">Описание внешности Дельты</label>
+      <textarea id="appearance-description" maxlength="2000" placeholder="Вид, телосложение, окрас и расположение узоров, голова, глаза, хвост, одежда и аксессуары"></textarea>
+      <p class="muted">До 2000 знаков. TXT/JSON до 64 КБ, UTF-8 или UTF-16. Текст сохраняется без переформулировки.</p>
+      <details><summary>Пример JSON</summary><pre>{"species":"Дракон", "colors":"Бирюзовая чешуя", "hair":"Белая грива", "tail":"Длинный, белый кончик"}</pre><p class="muted">Можно также {"appearance":"Полное описание внешности"}.</p></details>
+    </div>
+    <p id="appearance-image-hint" class="muted">JPEG, PNG или WebP до 20 МБ.</p>
     <input id="appearance-file" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
     <img id="appearance-preview" class="appearance-preview" alt="Выбранный арт для облика" hidden>
     <p id="appearance-file-name" class="muted"></p>
@@ -72,6 +95,40 @@
     <button id="reset-appearance" class="secondary" type="button" disabled>Вернуть базовый облик</button>
     <div id="appearance-status" role="status" aria-live="polite"></div>
   </section>
+  </div>
+  <div id="tools-panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+    <section class="card">
+      <b>Telegram ID</b>
+      <div class="grid"><button id="my-id" type="button">Мой ID</button><button id="bot-id" type="button">ID Дельты</button></div>
+      <label for="id-target">Публичная группа или канал</label>
+      <input id="id-target" maxlength="33" placeholder="@username" autocapitalize="none" spellcheck="false">
+      <button id="lookup-id" type="button">Узнать ID</button>
+      <button id="select-id" type="button">Выбрать в Telegram</button>
+      <p class="muted">Для пользователя, бота или приватной группы Telegram откроет выбор в чате с Дельтой.</p>
+      <div id="id-status" class="tool-status" role="status"></div>
+      <button id="copy-id" type="button" hidden>Скопировать ID</button>
+    </section>
+    <section class="card">
+      <b>Скачать видео</b>
+      <label for="download-url">Ссылка на публичное видео</label>
+      <input id="download-url" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…">
+      <button id="download-video" type="button">Скачать и отправить мне в чат</button>
+      <div id="download-status" class="tool-status" role="status"></div>
+      <details><summary>Как это работает?</summary><p class="muted">YouTube, Instagram, TikTok и Vimeo. Одно видео до 10 минут и 45 МБ. Результат придёт в личный чат с ботом. Загрузка может занять до двух минут; доступ зависит от ограничений сайта. Приватные видео и плейлисты не поддерживаются. Новый запрос — через 30 секунд. Языковая модель не используется.</p></details>
+    </section>
+    <section class="card">
+      <b>Поиск артов e926</b>
+      <p class="muted">Обычные арты без откровенного контента. Просмотр картинок прямо здесь.</p>
+      <label for="gallery-query">Теги через пробел</label>
+      <input id="gallery-query" maxlength="300" value="dragon" autocapitalize="none" spellcheck="false">
+      <label for="gallery-order">Сортировка</label>
+      <select id="gallery-order"><option value="">Новые</option><option value="order:favcount">По избранному</option><option value="order:random">Случайно</option></select>
+      <button id="search-gallery" type="button">Найти арты</button>
+      <div id="gallery-status" class="tool-status" role="status"></div>
+      <div id="gallery-results" class="gallery"></div>
+      <button id="gallery-more" type="button" hidden>Следующая страница</button>
+    </section>
+  </div>
 </main>
 <script>
   const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
@@ -96,12 +153,16 @@
   const appearanceStatus = document.querySelector("#appearance-status");
   const fileInput = document.querySelector("#appearance-file");
   const preview = document.querySelector("#appearance-preview");
+  const appearanceMode = document.querySelector("#appearance-mode");
+  const descriptionInput = document.querySelector("#appearance-description");
   let appearanceBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null;
   const updateAppearanceButtons = () => {
     document.querySelector("#choose-appearance").disabled = appearanceBusy || !appearanceEnabled;
-    document.querySelector("#apply-appearance").disabled = appearanceBusy || !appearanceEnabled || !selectedFile;
+    document.querySelector("#apply-appearance").disabled = appearanceBusy || !appearanceEnabled || !(selectedFile || (appearanceMode.value === "text" && descriptionInput.value.trim()));
     document.querySelector("#reset-appearance").disabled = appearanceBusy || !customAppearance;
     fileInput.disabled = appearanceBusy || !appearanceEnabled;
+    appearanceMode.disabled = appearanceBusy;
+    descriptionInput.disabled = appearanceBusy || !appearanceEnabled;
   };
   const renderAppearance = p => {
     customAppearance = Boolean(p.delta_appearance);
@@ -117,20 +178,35 @@
   };
   const appearanceFail = error => { appearanceStatus.className="error"; appearanceStatus.textContent = initData ? `Ошибка: ${error.message}` : "Открой панель кнопкой внутри Telegram."; };
   document.querySelector("#choose-appearance").addEventListener("click", () => fileInput.click());
+  appearanceMode.addEventListener("change", () => {
+    clearSelection(); appearanceStatus.textContent = "";
+    const text = appearanceMode.value === "text";
+    document.querySelector("#appearance-text-panel").hidden = !text;
+    document.querySelector("#appearance-image-hint").hidden = text;
+    document.querySelector("#choose-appearance").textContent = text ? "Загрузить TXT/JSON" : "Выбрать картинку";
+    fileInput.accept = text ? ".txt,.json,text/plain,application/json" : "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+    updateAppearanceButtons();
+  });
+  descriptionInput.addEventListener("input", () => { if (selectedFile) clearSelection(); updateAppearanceButtons(); });
   fileInput.addEventListener("change", () => {
     const file = fileInput.files[0]; if (!file) return;
     clearSelection(); appearanceStatus.textContent="";
     if (file.size > 20 * 1024 * 1024) { appearanceFail(new Error("Картинка должна быть до 20 МБ.")); updateAppearanceButtons(); return; }
-    selectedFile = file; previewUrl = URL.createObjectURL(file); preview.src = previewUrl; preview.hidden = false;
+    if (appearanceMode.value === "text") {
+      if (!/\.(txt|json)$/i.test(file.name) || file.size > 64 * 1024) { appearanceFail(new Error("Выбери TXT/JSON до 64 КБ.")); updateAppearanceButtons(); return; }
+      selectedFile = new File([file], file.name, {type:/\.json$/i.test(file.name) ? "application/json" : "text/plain"});
+    } else {
+      selectedFile = file; previewUrl = URL.createObjectURL(file); preview.src = previewUrl; preview.hidden = false;
+    }
     document.querySelector("#appearance-file-name").textContent = file.name;
     updateAppearanceButtons();
   });
   document.querySelector("#apply-appearance").addEventListener("click", async () => {
-    if (!selectedFile || appearanceBusy) return;
-    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Разбираю внешность…";
+    if (appearanceBusy || (!selectedFile && !descriptionInput.value.trim())) return;
+    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent=appearanceMode.value === "text" ? "Сохраняю описание…" : "Разбираю внешность…";
     try {
-      const profile = await api("POST", selectedFile, "/api/profile/appearance");
-      renderAppearance(profile); clearSelection(); appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
+      const profile = await api(appearanceMode.value === "text" ? "PUT" : "POST", selectedFile || {appearance:descriptionInput.value}, "/api/profile/appearance");
+      renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
@@ -140,11 +216,40 @@
     appearanceBusy=true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Возвращаю базовый облик…";
     try {
       const profile = await api("DELETE", null, "/api/profile/appearance");
-      renderAppearance(profile); clearSelection(); appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
+      renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
   });
+  for (const name of ["rp", "tools"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
+    for (const tab of ["rp", "tools"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
+  });
+  const toolCall = async (button, statusId, tool, body, done) => {
+    const output=document.querySelector(statusId); button.disabled=true; output.className="tool-status"; output.textContent="Обрабатываю…";
+    try { if (!initData) throw new Error("Открой панель внутри Telegram."); const result=await api("POST", body, `/api/tools/${tool}`); done(result, output); }
+    catch(error) { output.className="tool-status error"; output.textContent=error.message; }
+    finally { button.disabled=false; }
+  };
+  let copiedId=null;
+  const showId = (result, output) => { copiedId=result.id ?? null; document.querySelector("#copy-id").hidden=copiedId===null; output.textContent=result.message || `${result.title}\nID: ${result.id}`; };
+  for (const [selector, target] of [["#my-id","self"],["#bot-id","bot"],["#select-id","select"],["#lookup-id",null]]) document.querySelector(selector).addEventListener("click", e => toolCall(e.currentTarget,"#id-status","id",{target:target || document.querySelector("#id-target").value.trim()},showId));
+  document.querySelector("#copy-id").addEventListener("click", async () => { try { await navigator.clipboard.writeText(String(copiedId)); document.querySelector("#id-status").textContent=`ID ${copiedId} скопирован.`; } catch { document.querySelector("#id-status").textContent=`ID: ${copiedId}. Выдели текст и скопируй.`; } });
+  document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
+  let galleryPage=1, galleryQuery="", galleryBusy=false;
+  const gallerySearch = async (more=false) => {
+    if (galleryBusy) return;
+    if (!more) { galleryPage=1; galleryQuery=[document.querySelector("#gallery-query").value.trim(),document.querySelector("#gallery-order").value].filter(Boolean).join(" "); }
+    galleryBusy=true; document.querySelector("#gallery-more").disabled=true;
+    await toolCall(document.querySelector("#search-gallery"),"#gallery-status","gallery",{query:galleryQuery,page:galleryPage},(result,output)=>{
+      const container=document.querySelector("#gallery-results"); container.replaceChildren();
+      for (const item of result.items) { const article=document.createElement("article"), img=document.createElement("img"), link=document.createElement("a"); img.src=item.url; img.alt=`Арт #${item.id}`; img.loading="lazy"; img.referrerPolicy="no-referrer"; link.href=item.page_url; link.target="_blank"; link.rel="noopener noreferrer"; link.textContent=`#${item.id} · ♥ ${item.favs} · ${item.artists.join(", ") || "Автор не указан"}`; article.append(img,link); container.append(article); }
+      output.textContent=result.items.length ? `Страница ${result.page}: ${result.items.length} артов.` : "Не нашлось статичных артов. Попробуй другие теги.";
+      document.querySelector("#gallery-more").hidden=!result.has_more; galleryPage=result.page+1;
+    });
+    galleryBusy=false; document.querySelector("#gallery-more").disabled=false;
+  };
+  document.querySelector("#search-gallery").addEventListener("click",()=>gallerySearch());
+  document.querySelector("#gallery-more").addEventListener("click",()=>gallerySearch(true));
   const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
   api().then(render).catch(fail);
   document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });

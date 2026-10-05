@@ -100,7 +100,7 @@ def test_help_handler_sends_help_text() -> None:
     )
 
     answer_mock.assert_awaited_once_with(
-        HELP_TEXT,
+        HELP_TEXT.replace("/randomart – 🎨 Случайный арт\n", ""),
     )
 
 

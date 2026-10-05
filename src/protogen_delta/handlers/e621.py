@@ -34,6 +34,8 @@ from protogen_delta.repositories.e621_history import (
     PopularPeriod,
     SearchOrder,
 )
+from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.services.art_gallery import remember_art
 from protogen_delta.services.e621 import (
     E621Client,
     E621Error,
@@ -301,6 +303,7 @@ def create_e621_router(
     user_states: UserStateStore,
     *,
     bot_id: int = 0,
+    images_repository: ImagesRepository | None = None,
 ) -> Router:
     router = Router(name=__name__)
     sessions: dict[int, _SearchSession] = {}
@@ -464,6 +467,14 @@ def create_e621_router(
             await history.mark_seen(user_id, p.post.post_id, time())
             if isinstance(result, Message):
                 await media.remember(p, result)
+                if images_repository is not None:
+                    try:
+                        remember_art(images_repository, result)
+                    except OSError, ValueError, TypeError:
+                        logger.warning(
+                            "Пост %s доставлен, но не сохранён в общую коллекцию",
+                            p.post.post_id,
+                        )
             session.results.append(p.post)
 
     async def send_batch(
