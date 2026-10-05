@@ -252,6 +252,14 @@ async def main() -> None:
             ),
         )
 
+        sticker_service = ContextualStickerService(
+            bot,
+            stickers_repository,
+            user_states,
+            chance=settings.sticker_reaction_chance,
+            cooldown_seconds=settings.sticker_cooldown_seconds,
+            min_replies=settings.sticker_min_replies,
+        )
         response_engine = ResponseEngine(
             deepseek=deepseek,
             insult_classifier=insult_classifier,
@@ -262,14 +270,7 @@ async def main() -> None:
             config=response_engine_config,
             memory=memory,
             creator_id=settings.creator_id,
-        )
-        sticker_service = ContextualStickerService(
-            bot,
-            stickers_repository,
-            user_states,
-            chance=settings.sticker_reaction_chance,
-            cooldown_seconds=settings.sticker_cooldown_seconds,
-            min_replies=settings.sticker_min_replies,
+            reply_transform=sticker_service.correct_reply,
         )
         sticker_importer = StickerPackImporter(bot, stickers_repository)
         if settings.sticker_pack_enabled:

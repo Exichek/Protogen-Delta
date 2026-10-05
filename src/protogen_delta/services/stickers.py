@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramAPIError
 
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
+from protogen_delta.services.sticker_capabilities import correct_sticker_capability
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,15 @@ class ContextualStickerService:
             state.content_mode == "adult" or entry.rating == "safe"
             for entry in self._repository.get_all()
         )
+
+    def correct_reply(self, user_id: int, reply: str) -> str:
+        """Не отправлять ложное отрицание и не закреплять его в истории."""
+        if not self.is_available(user_id):
+            return reply
+        corrected = correct_sticker_capability(reply)
+        if corrected != reply:
+            logger.info("Sticker capability outcome=corrected")
+        return corrected
 
     async def maybe_send(
         self,
