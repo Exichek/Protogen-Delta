@@ -45,12 +45,30 @@ AUDIO_UNDERSTANDING_ENABLED=true
 AUDIO_API_KEY=<ключ отдельного провайдера>
 AUDIO_BASE_URL=<HTTPS OpenAI-compatible endpoint>
 AUDIO_MODEL=<модель с input_audio и streaming text>
+AUDIO_INPUT_DATA_URL=false
 ```
 
-Например, формат соответствует [Qwen-Omni](https://www.alibabacloud.com/help/en/model-studio/qwen-omni):
-конкретные endpoint, модель и ключ выбираются для региона аккаунта. Обычной
+По умолчанию WAV передаётся как чистый base64, как требует
+[OpenRouter](https://openrouter.ai/docs/guides/overview/multimodal/audio).
+Для [Qwen-Omni](https://www.alibabacloud.com/help/en/model-studio/qwen-omni)
+укажите `AUDIO_INPUT_DATA_URL=true`: данные будут иметь префикс `data:;base64,`.
+Конкретные endpoint, модель и ключ выбираются для региона аккаунта. Обычной
 текстовой модели недостаточно. До настройки сервис выключен; история диалога
 и личность Дельты в этот дополнительный запрос не передаются.
+
+Для Nemotron через OpenRouter:
+
+```dotenv
+AUDIO_BASE_URL=https://openrouter.ai/api/v1
+AUDIO_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+AUDIO_INPUT_DATA_URL=false
+```
+
+У варианта `:free` нулевая цена токенов, но живая проверка OpenRouter выявила
+требование баланса от $0.50 для аудиозапросов (HTTP 402 без баланса).
+Для бесплатной модели приложение ограничивает цену провайдера нулём и выключает
+дополнительное reasoning, чтобы ответ помещался в бюджет 600 токенов.
+Смена на платную модель или автоматическое платное резервирование не выполняется.
 
 ## Источник арта
 

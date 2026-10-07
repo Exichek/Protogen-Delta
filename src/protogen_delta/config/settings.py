@@ -37,6 +37,7 @@ class Settings:
     audio_api_key: str | None = None
     audio_base_url: str | None = None
     audio_model: str | None = None
+    audio_input_data_url: bool = False
     music_audd_api_token: str | None = None
     saucenao_api_key: str | None = None
     telegram_proxy_url: str | None = None
@@ -346,6 +347,9 @@ def load_settings() -> Settings:
         audio_api_key=audio_key or None,
         audio_base_url=audio_url or None,
         audio_model=audio_model or None,
+        audio_input_data_url=_parse_bool(
+            os.getenv("AUDIO_INPUT_DATA_URL", "false"), "AUDIO_INPUT_DATA_URL"
+        ),
         music_audd_api_token=os.getenv("MUSIC_AUDD_API_TOKEN", "").strip() or None,
         saucenao_api_key=os.getenv("SAUCENAO_API_KEY", "").strip() or None,
         deepseek_model=deepseek_model,
