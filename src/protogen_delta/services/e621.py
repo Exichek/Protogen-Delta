@@ -208,7 +208,13 @@ class E621Client:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise E621Error("e621 вернул неожиданный ответ.") from error
 
-    async def download(self, url: str, *, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
+    async def download(
+        self,
+        url: str,
+        *,
+        max_bytes: int = MAX_IMAGE_BYTES,
+        allow_redirects: bool = True,
+    ) -> bytes:
         """Загрузить медиа с тем же User-Agent и строгим лимитом размера."""
         if max_bytes <= 0:
             raise ValueError("max_bytes должен быть больше нуля")
@@ -216,7 +222,9 @@ class E621Client:
         try:
             async with self._session(30) as session:
                 async with session.get(
-                    url, headers={"User-Agent": self._user_agent}
+                    url,
+                    headers={"User-Agent": self._user_agent},
+                    allow_redirects=allow_redirects,
                 ) as response:
                     if response.status != 200:
                         raise E621Error(f"Файл e621 вернул HTTP {response.status}.")

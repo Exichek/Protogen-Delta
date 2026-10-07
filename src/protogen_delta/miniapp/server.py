@@ -397,6 +397,21 @@ class MiniAppServer:
                 if not isinstance(url, str):
                     raise ValueError("Нужна ссылка на видео.")
                 result = await self._tools.download(user.id, url.strip())
+            elif tool == "gallery-image":
+                post_id, full = payload.get("post_id"), payload.get("full", False)
+                if type(post_id) is not int or post_id <= 0 or type(full) is not bool:
+                    raise ValueError("Нужен номер арта и режим просмотра.")
+                data, content_type = await self._tools.gallery_image(
+                    user.id, post_id, full=full
+                )
+                return web.Response(
+                    body=data,
+                    content_type=content_type,
+                    headers={
+                        "Cache-Control": "no-store",
+                        "X-Content-Type-Options": "nosniff",
+                    },
+                )
             else:
                 raise web.HTTPNotFound(text="Такого инструмента нет.")
         except ToolsBusyError as error:

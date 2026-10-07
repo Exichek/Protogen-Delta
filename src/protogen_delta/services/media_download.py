@@ -14,21 +14,40 @@ from urllib.parse import urlsplit
 MAX_DOWNLOAD_BYTES = 45 * 1024 * 1024
 MAX_DOWNLOAD_SECONDS = 600
 DOWNLOAD_TIMEOUT_SECONDS = 120
-_HOSTS = frozenset(
+_VK_HOSTS = frozenset(
     {
-        "youtube.com",
-        "www.youtube.com",
-        "m.youtube.com",
-        "youtu.be",
-        "instagram.com",
-        "www.instagram.com",
-        "tiktok.com",
-        "www.tiktok.com",
-        "vm.tiktok.com",
-        "vt.tiktok.com",
-        "vimeo.com",
-        "www.vimeo.com",
+        "vk.com",
+        "www.vk.com",
+        "m.vk.com",
+        "new.vk.com",
+        "vk.ru",
+        "www.vk.ru",
+        "m.vk.ru",
+        "new.vk.ru",
+        "vkvideo.ru",
+        "www.vkvideo.ru",
+        "m.vkvideo.ru",
+        "vksport.vkvideo.ru",
     }
+)
+_HOSTS = (
+    frozenset(
+        {
+            "youtube.com",
+            "www.youtube.com",
+            "m.youtube.com",
+            "youtu.be",
+            "instagram.com",
+            "www.instagram.com",
+            "tiktok.com",
+            "www.tiktok.com",
+            "vm.tiktok.com",
+            "vt.tiktok.com",
+            "vimeo.com",
+            "www.vimeo.com",
+        }
+    )
+    | _VK_HOSTS
 )
 
 
@@ -63,8 +82,11 @@ def validate_media_url(url: str) -> str:
     if not valid:
         raise MediaDownloadError(
             "Нужна HTTPS-ссылка на одно публичное видео YouTube, Instagram, "
-            "TikTok или Vimeo."
+            "TikTok, Vimeo или VK/VK Видео."
         )
+    if parsed.hostname in _VK_HOSTS:
+        # Экстрактор VK не принимает www; стандартный HTTPS-порт можно опустить.
+        return parsed._replace(netloc=parsed.hostname.removeprefix("www.")).geturl()
     return url
 
 

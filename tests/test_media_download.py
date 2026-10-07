@@ -100,6 +100,11 @@ def test_real_remux_and_separate_stream_download(
         "https://youtube.com/a b",
         "file:///tmp/a",
         "https://127.0.0.1/a",
+        "https://vk.com.evil.org/video-123_456",
+        "https://vkvideo.ru@127.0.0.1/video-123_456",
+        "https://user@vk.ru/video-123_456",
+        "https://vk.ru:8443/video-123_456",
+        "https://vkvideo.ru/",
     ],
 )
 def test_rejects_unsupported_or_ambiguous_urls(url: str) -> None:
@@ -114,6 +119,34 @@ def test_allows_exact_platform_hosts() -> None:
         "https://vm.tiktok.com/abc/",
     ):
         assert validate_media_url(url) == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://vk.com/video-123_456",
+        "https://vk.ru/video-123_456",
+        "https://vkvideo.ru/video-123_456",
+        "https://m.vk.com/video-123_456",
+        "https://m.vk.ru/clip-123_456",
+        "https://m.vkvideo.ru/video-123_456",
+        "https://vk.com/clip30014565_456240946",
+        "https://vk.com/clips-74006511?z=clip-74006511_456247211",
+        "https://vk.com/videos-77521?z=video-77521_162222515%2Fclub77521",
+        "https://vk.com/video_ext.php?oid=-77521&id=162222515&hash=87b046504ccd8bfa",
+        "https://www.vk.com/video-123_456?list=abc",
+        "https://www.vk.ru:443/clip-123_456",
+        "https://www.vkvideo.ru/video-123_456",
+        "https://vksport.vkvideo.ru/video-123_456",
+    ],
+)
+def test_vk_links_are_accepted_by_installed_extractor(url: str) -> None:
+    from yt_dlp.extractor.vk import VKIE  # type: ignore[import-untyped]
+
+    normalized = validate_media_url(url)
+    assert VKIE.suitable(normalized)
+    assert "www." not in normalized
+    assert "?" not in url or normalized.split("?", 1)[1] == url.split("?", 1)[1]
 
 
 @pytest.mark.parametrize(
