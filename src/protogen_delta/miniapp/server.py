@@ -21,7 +21,6 @@ from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_image,
 )
-from protogen_delta.services.e621 import E621Error, E621QueryError
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
     ResponseBusyError,
@@ -383,35 +382,11 @@ class MiniAppServer:
                 if not isinstance(target, str):
                     raise ValueError("Некорректный выбор ID.")
                 result = await self._tools.lookup_id(user.id, target)
-            elif tool == "gallery":
-                raw, page = payload.get("query"), payload.get("page", 1)
-                if (
-                    not isinstance(raw, str)
-                    or type(page) is not int
-                    or not 1 <= page <= 1000
-                ):
-                    raise ValueError("Нужны теги и номер страницы от 1 до 1000.")
-                result = await self._tools.gallery(user.id, raw, page)
             elif tool == "download":
                 url = payload.get("url")
                 if not isinstance(url, str):
                     raise ValueError("Нужна ссылка на видео.")
                 result = await self._tools.download(user.id, url.strip())
-            elif tool == "gallery-image":
-                post_id, full = payload.get("post_id"), payload.get("full", False)
-                if type(post_id) is not int or post_id <= 0 or type(full) is not bool:
-                    raise ValueError("Нужен номер арта и режим просмотра.")
-                data, content_type = await self._tools.gallery_image(
-                    user.id, post_id, full=full
-                )
-                return web.Response(
-                    body=data,
-                    content_type=content_type,
-                    headers={
-                        "Cache-Control": "no-store",
-                        "X-Content-Type-Options": "nosniff",
-                    },
-                )
             else:
                 raise web.HTTPNotFound(text="Такого инструмента нет.")
         except ToolsBusyError as error:
@@ -422,8 +397,4 @@ class MiniAppServer:
             raise web.HTTPBadGateway(
                 text="Telegram не смог определить ID. Для приватных чатов используй выбор в Telegram."
             ) from error
-        except E621QueryError as error:
-            raise web.HTTPBadRequest(text=str(error)) from error
-        except E621Error as error:
-            raise web.HTTPBadGateway(text=str(error)) from error
         return web.json_response(result, headers={"Cache-Control": "no-store"})

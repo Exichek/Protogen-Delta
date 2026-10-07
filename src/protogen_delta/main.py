@@ -454,9 +454,7 @@ async def main() -> None:
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
                 response_engine=response_engine,
                 on_mode_change=on_mode_change,
-                tools=MiniAppTools(
-                    bot, e621_client, downloader, user_states=user_states
-                ),
+                tools=MiniAppTools(bot, downloader),
             )
             await mini_app_server.start()
 
