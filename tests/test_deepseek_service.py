@@ -188,6 +188,7 @@ def test_deepseek_chat_sends_expected_request(
 
     create_mock.assert_awaited_once_with(
         model="test-model",
+        max_tokens=4096,
         messages=[
             {
                 "role": "system",
@@ -244,6 +245,7 @@ def test_deepseek_chat_sends_history_in_order(
 
     create_mock.assert_awaited_once_with(
         model="test-model",
+        max_tokens=4096,
         messages=[
             {
                 "role": "system",

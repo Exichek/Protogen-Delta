@@ -2,6 +2,7 @@ services:
   delta:
     build: .
     restart: unless-stopped
+    stop_grace_period: 2m
     env_file: .env
     environment:
       DATA_DIR: /app/data
@@ -10,8 +11,10 @@ services:
       MINI_APP_HOST: 0.0.0.0
       MINI_APP_PORT: "8080"
       PDF_OCR_ENABLED: "true"
+      HF_HOME: /home/protogen/.cache/huggingface
     volumes:
       - delta_data:/app/data
+      - whisper_models:/home/protogen/.cache/huggingface
     expose:
       - "8080"
     healthcheck:
@@ -37,5 +40,6 @@ services:
         condition: service_healthy
 volumes:
   delta_data:
+  whisper_models:
   caddy_data:
   caddy_config:

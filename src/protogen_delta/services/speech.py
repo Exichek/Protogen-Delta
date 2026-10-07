@@ -5,6 +5,8 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
+from protogen_delta.services.blocking_work import BlockingWorkPool
+
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 MAX_AUDIO_DURATION_SECONDS = 600
 MAX_TRANSCRIPT_CHARS = 30_000
@@ -39,6 +41,7 @@ class SpeechTranscriber:
         self._compute_type = compute_type
         self._model: Any | None = None
         self._model_lock = asyncio.Lock()
+        self._work = BlockingWorkPool()
 
     async def _ensure_model(self) -> Any:
         """Создать единственный экземпляр модели при первом голосовом сообщении."""
@@ -46,7 +49,12 @@ class SpeechTranscriber:
             return self._model
         async with self._model_lock:
             if self._model is None:
-                self._model = await asyncio.to_thread(self._load_model)
+                self._model = await self._work.run(self._load_and_cache_model)
+        return self._model
+
+    def _load_and_cache_model(self) -> Any:
+        if self._model is None:
+            self._model = self._load_model()
         return self._model
 
     def _load_model(self) -> Any:
@@ -71,7 +79,7 @@ class SpeechTranscriber:
         if len(data) > MAX_AUDIO_BYTES:
             raise SpeechRecognitionError("Аудиофайл превышает 20 МБ")
         model = await self._ensure_model()
-        return await asyncio.to_thread(self._transcribe_sync, model, data)
+        return await self._work.run(self._transcribe_sync, model, data)
 
     @staticmethod
     def _transcribe_sync(model: Any, data: bytes) -> Transcript:
@@ -85,23 +93,29 @@ class SpeechTranscriber:
             )
             pieces: list[str] = []
             uncertain = False
+            size = 0
+            truncated = False
             for segment in segments:
                 piece = segment.text.strip()
                 if not piece:
                     continue
                 pieces.append(piece)
+                size += len(piece) + (1 if len(pieces) > 1 else 0)
                 # Это эвристика декодера, а не калиброванная вероятность ошибки.
                 score = getattr(segment, "avg_logprob", None)
                 silence = getattr(segment, "no_speech_prob", None)
                 uncertain |= (isinstance(score, (int, float)) and score < -1.0) or (
                     isinstance(silence, (int, float)) and silence > 0.6
                 )
+                if size > MAX_TRANSCRIPT_CHARS:
+                    truncated = True
+                    break
             text = " ".join(pieces).strip()
         except Exception as error:
             raise SpeechRecognitionError("Не удалось распознать аудио") from error
         if not text:
             raise SpeechRecognitionError("В аудио не удалось распознать речь")
-        truncated = len(text) > MAX_TRANSCRIPT_CHARS
+        truncated = truncated or len(text) > MAX_TRANSCRIPT_CHARS
         return Transcript(
             text=text[:MAX_TRANSCRIPT_CHARS],
             language=getattr(info, "language", None),
