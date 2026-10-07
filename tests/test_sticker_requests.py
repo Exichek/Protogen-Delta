@@ -264,7 +264,12 @@ def test_text_request_reports_unavailable_or_cooldown(
 def test_regular_text_supplies_actual_capabilities(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     engine = AsyncMock(spec=ResponseEngine)
-    message = SimpleNamespace(text="Как дела?", from_user=SimpleNamespace(id=42))
+    message = SimpleNamespace(
+        text="Как дела?",
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=7, type="private"),
+        forward_origin=None,
+    )
     router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
     asyncio.run(router.message.handlers[0].callback(cast(Message, message)))
     call = engine.respond_and_deliver.await_args

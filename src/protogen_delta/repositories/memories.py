@@ -104,6 +104,24 @@ class MemoriesRepository:
         """Удалить всю дополнительную память пользователя."""
         await asyncio.to_thread(self._delete_user_sync, user_id)
 
+    async def forget_sources(self, user_id: int, sources: tuple[str, ...]) -> None:
+        """Не возвращать удалённые/устаревшие факты через эпизодическую память."""
+        await asyncio.to_thread(self._forget_sources_sync, user_id, sources)
+
+    def _forget_sources_sync(self, user_id: int, sources: tuple[str, ...]) -> None:
+        with closing(self._connect()) as connection, connection:
+            needles = tuple(source.casefold() for source in sources if source)
+            rows = connection.execute(
+                "SELECT id,text FROM memories WHERE user_id=?", (user_id,)
+            ).fetchall()
+            for row_id, text in rows:
+                if not any(source in text.casefold() for source in needles):
+                    continue
+                connection.execute(
+                    "DELETE FROM memories WHERE user_id=? AND id=?",
+                    (user_id, row_id),
+                )
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path)
         connection.execute("PRAGMA foreign_keys = ON")

@@ -141,6 +141,7 @@ def test_main_builds_application_and_starts_polling(
         "personality/protogen_lore.txt": "LORE PROMPT",
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
+        "furry_species_reference": "SPECIES REFERENCE",
     }
 
     load_prompt_mock = Mock(
@@ -401,6 +402,7 @@ def test_main_builds_application_and_starts_polling(
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
         call("personality/rp.txt"),
+        call("furry_species_reference"),
     ]
 
     setup_logging_mock.assert_called_once_with(
@@ -482,7 +484,7 @@ def test_main_builds_application_and_starts_polling(
 
     create_adult_router_mock.assert_called_once_with(user_states, ANY)
 
-    assert dispatcher_mock.include_router.call_count == 19
+    assert dispatcher_mock.include_router.call_count == 20
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,

@@ -105,6 +105,34 @@ def _create_request() -> Mock:
     return Mock()
 
 
+def test_fact_extraction_uses_bounded_json_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, constructor, create, _ = _create_service(monkeypatch)
+    create.return_value = _create_response(' {"changes":[]} ')
+    assert (
+        asyncio.run(service.extract_user_facts("fact rules", "data"))
+        == '{"changes":[]}'
+    )
+    constructor.return_value.with_options.assert_called_once_with(
+        timeout=6.0, max_retries=0
+    )
+    assert create.await_args is not None
+    kwargs = create.await_args.kwargs
+    assert kwargs["messages"] == [
+        {"role": "system", "content": "fact rules"},
+        {"role": "user", "content": "data"},
+    ]
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert kwargs["max_tokens"] == 600 and kwargs["temperature"] == 0
+    assert "tools" not in kwargs
+    create.return_value = _create_response(None)
+    assert asyncio.run(service.extract_user_facts("rules", "data")) == ""
+    create.side_effect = deepseek_module.APITimeoutError(_create_request())
+    with pytest.raises(DeepSeekTimeoutError):
+        asyncio.run(service.extract_user_facts("rules", "data"))
+
+
 def _create_error_response(
     status_code: int,
 ) -> Mock:

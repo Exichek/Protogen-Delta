@@ -30,6 +30,7 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
         BotCommand(command="id", description="🪪 Узнать Telegram ID"),
         BotCommand(command="download", description="📥 Скачать видео по ссылке"),
         BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
+        BotCommand(command="memory", description="🧠 Мой постоянный профиль"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),
         BotCommand(command="help", description="ℹ️ Помощь"),
     ]

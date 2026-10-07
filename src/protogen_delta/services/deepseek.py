@@ -520,6 +520,34 @@ class DeepSeekService:
                 )
         return "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
 
+    async def extract_user_facts(self, system_prompt: str, user_message: str) -> str:
+        """Ограниченный JSON-запрос без истории, изображений и инструментов."""
+        client = self._client.with_options(timeout=6.0, max_retries=0)
+        started_at = perf_counter()
+        try:
+            response = await client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=600,
+                temperature=0,
+                **self._provider_options,
+            )
+        except OpenAIError as error:
+            raise _translate_openai_error(error) from error
+        _log_request_metrics(
+            request_type="user_facts",
+            started_at=started_at,
+            response=response,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=0,
+        )
+        return (response.choices[0].message.content or "").strip()
+
     async def classify(
         self,
         system_prompt: str,

@@ -19,7 +19,11 @@ from protogen_delta.services.music import (
     MusicRecognitionService,
     audio_tags,
 )
-from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.response_engine import (
+    ResponseBusyError,
+    ResponseEngine,
+    personal_fact_options,
+)
 from protogen_delta.services.speech import (
     MAX_AUDIO_BYTES,
     MAX_AUDIO_DURATION_SECONDS,
@@ -267,6 +271,7 @@ def create_voice_router(
                         context_tags=("voice",),
                     ),
                     model_message_override=model_message,
+                    **personal_fact_options(message.chat.type),
                     trusted_input_context=trusted_context,
                 )
             except ResponseBusyError:

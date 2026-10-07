@@ -21,7 +21,11 @@ from protogen_delta.services.documents import (
     extract_document,
 )
 from protogen_delta.services.music import is_audio_file
-from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.response_engine import (
+    ResponseBusyError,
+    ResponseEngine,
+    personal_fact_options,
+)
 from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
@@ -135,6 +139,7 @@ def create_document_router(
                         context_tags=("document",),
                     ),
                     attachment_text=attachment_text,
+                    **personal_fact_options(message.chat.type),
                     attachment_name=f"{file_name} ({extracted.kind})",
                     images=images,
                 )

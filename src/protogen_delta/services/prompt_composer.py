@@ -58,6 +58,7 @@ class PromptSections:
     lore: str = ""
     body: str = ""
     roleplay: str = ""
+    species: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +88,17 @@ class PromptComposer:
     ) -> str:
         """Собрать минимальный набор секций для текущего сообщения."""
         parts = [self._sections.core]
+        if (
+            has_images
+            or (is_roleplay and has_custom_appearance)
+            or re.search(
+                r"\b(?:фурр\w*|фурсон\w*|сергал\w*|sergal\w*|протоген\w*|protogen\w*|"
+                r"примаген\w*|primagen\w*|синт(?:ы|а|ов)?|synth\w*|акул\w*|shark\w*|дракон\w*|dragon\w*)\b",
+                user_message,
+                re.I,
+            )
+        ):
+            parts.append(self._sections.species)
         if is_roleplay:
             if not has_custom_appearance:
                 parts.extend((self._sections.lore, self._sections.body))

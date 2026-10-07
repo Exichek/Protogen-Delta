@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import TypedDict
 
 from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.core.log_context import bind_log_context
@@ -22,6 +23,7 @@ from protogen_delta.core.user_state import (
     UserState,
     UserStateStore,
 )
+from protogen_delta.repositories.user_facts import FactsUpdate
 from protogen_delta.services.appearance_description import (
     APPEARANCE_LIMIT,
     validate_description,
@@ -53,6 +55,20 @@ from protogen_delta.services.state_context import build_state_context
 
 logger = logging.getLogger(__name__)
 
+
+class PersonalFactsOptions(TypedDict, total=False):
+    use_personal_facts: bool
+
+
+def personal_fact_options(chat_type: str) -> PersonalFactsOptions:
+    """Не передавать приватный профиль в групповые ответы."""
+    return (
+        {"use_personal_facts": False}
+        if chat_type in {"group", "supergroup", "channel"}
+        else {}
+    )
+
+
 FetishNames = dict[str, str]
 ReplyDelivery = Callable[[str], Awaitable[None]]
 RP_SETUP_REPLY = (
@@ -77,6 +93,7 @@ class PreparedReply:
 
     text: str
     user_message: str | None = None
+    forgotten: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,8 +106,10 @@ class ResponseEngineConfig:
     rp_prompt: str
     protogen_lore_prompt: str = ""
     body_prompt: str = ""
+    species_prompt: str = ""
     dynamic_state_chars: int = 4000
     memory_chars: int = 2000
+    profile_chars: int = 7000
     history_chars: int = 8000
     history_live_turns: int = 4
     capabilities_context: str = ""
@@ -132,6 +151,7 @@ class ResponseEngine:
                 lore=config.protogen_lore_prompt,
                 body=config.body_prompt,
                 roleplay=config.rp_prompt,
+                species=config.species_prompt,
             )
         )
         self._memory = memory
@@ -150,6 +170,7 @@ class ResponseEngine:
         attachment_name: str | None = None,
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
+        use_personal_facts: bool = True,
     ) -> None:
         """Отклонить повторный запрос и удержать lock до конца доставки."""
         if user_id in self._delivering_users:
@@ -165,6 +186,7 @@ class ResponseEngine:
                 attachment_name=attachment_name,
                 model_message_override=model_message_override,
                 trusted_input_context=trusted_input_context,
+                use_personal_facts=use_personal_facts,
             )
         finally:
             self._delivering_users.remove(user_id)
@@ -180,6 +202,7 @@ class ResponseEngine:
         attachment_name: str | None = None,
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
+        use_personal_facts: bool = True,
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
@@ -193,6 +216,7 @@ class ResponseEngine:
                     attachment_name=attachment_name,
                     model_message_override=model_message_override,
                     trusted_input_context=trusted_input_context,
+                    use_personal_facts=use_personal_facts,
                 )
                 reply = (
                     self._reply_transform(user_id, prepared.text)
@@ -203,7 +227,15 @@ class ResponseEngine:
                     await deliver(reply)
                 if prepared.user_message is not None:
                     self._register_reply(user_state)
-                    self._remember_turn(user_state, prepared.user_message, reply)
+                    self._remember_turn(
+                        user_state,
+                        prepared.user_message,
+                        (
+                            "Просьба забыть сведения обработана."
+                            if prepared.forgotten
+                            else reply
+                        ),
+                    )
                 return reply
 
     async def reset_user_context(
@@ -244,6 +276,7 @@ class ResponseEngine:
         attachment_name: str | None = None,
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
+        use_personal_facts: bool = True,
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
@@ -306,6 +339,27 @@ class ResponseEngine:
             insult_type=insult_type,
         )
 
+        fact_context: list[str] = []
+        fact_update = FactsUpdate()
+        if self._memory is not None and use_personal_facts:
+            try:
+                if (
+                    not is_rp
+                    and not images
+                    and attachment_text is None
+                    and model_message_override is None
+                ):
+                    observed = await self._memory.observe_facts(user_id, user_message)
+                    if isinstance(observed, FactsUpdate):
+                        fact_update = observed
+                    if fact_update.removed_sources:
+                        user_state.history.clear()
+                profile = await self._memory.fact_context(user_id)
+                if isinstance(profile, list):
+                    fact_context = profile
+            except Exception:
+                logger.warning("User fact profile unavailable")
+
         state_context = build_state_context(
             user_state,
             include_intimate=is_rp or mood == "horny",
@@ -317,8 +371,19 @@ class ResponseEngine:
                 "но сохраняешь собственный характер и не выдумываешь полномочия."
             )
 
+        if fact_update.attempted:
+            state_context.append(
+                "Постоянный профиль обновлён на этом ходе."
+                if fact_update.changed
+                else "Постоянный профиль на этом ходе не обновлён. Не обещай, что новые факты сохранены."
+            )
+        if fact_update.forgotten:
+            state_context.append(
+                "Пользователь просит удалить сведения. Не повторяй удалённые значения в ответе."
+            )
+
         memory_context: list[str] = []
-        if self._memory is not None:
+        if self._memory is not None and use_personal_facts:
             try:
                 memory_context = await self._memory.context(
                     user_id,
@@ -589,7 +654,7 @@ class ResponseEngine:
             )
 
         history = self._prompt_composer.compact_history(
-            tuple(user_state.history),
+            tuple(user_state.history) if use_personal_facts else (),
             live_turns=self._config.history_live_turns,
             history_chars=self._config.history_chars,
         )
@@ -618,6 +683,7 @@ class ResponseEngine:
             insult_type=insult_type,
             state_context=state_context,
             memory_context=memory_context,
+            fact_context=fact_context,
             trusted_input_context=trusted_input_context,
         )
 
@@ -693,7 +759,11 @@ class ResponseEngine:
         elif not reply.strip():
             reply = "DeepSeek промолчал..."
 
-        if self._memory is not None:
+        if (
+            self._memory is not None
+            and use_personal_facts
+            and not fact_update.forgotten
+        ):
             try:
                 await self._memory.note_message(
                     user_id,
@@ -707,7 +777,15 @@ class ResponseEngine:
                     user_id,
                 )
 
-        return PreparedReply(reply, user_message)
+        return PreparedReply(
+            reply,
+            (
+                "Пользователь попросил забыть сведения."
+                if fact_update.forgotten
+                else user_message if use_personal_facts else None
+            ),
+            forgotten=fact_update.forgotten,
+        )
 
     async def set_delta_appearance_from_image(
         self, user_id: int, image: ImageInput
@@ -761,6 +839,8 @@ class ResponseEngine:
         prompt = load_prompt("appearance_extraction").format(
             limit=_APPEARANCE_LIMIT, content_rules=adult_details
         )
+        if self._config.species_prompt:
+            prompt += "\n\n" + self._config.species_prompt
         try:
             description = await self._deepseek.chat(
                 system_prompt=prompt,
@@ -843,6 +923,7 @@ class ResponseEngine:
         insult_type: InsultType,
         state_context: list[str],
         memory_context: list[str],
+        fact_context: list[str] | None = None,
         trusted_input_context: str | None = None,
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
@@ -865,6 +946,10 @@ class ResponseEngine:
         )
         context_lines.extend(
             self._limit_context(memory_context, self._config.memory_chars)
+        )
+
+        context_lines.extend(
+            self._limit_context(fact_context or [], self._config.profile_chars)
         )
 
         if insult_type == "direct":

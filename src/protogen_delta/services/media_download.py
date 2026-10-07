@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,14 @@ _VK_HOSTS = frozenset(
         "vksport.vkvideo.ru",
     }
 )
+_TWITTER_HOSTS = frozenset(
+    f"{prefix}{domain}"
+    for domain in ("x.com", "twitter.com")
+    for prefix in ("", "www.", "m.", "mobile.")
+)
+_TWITTER_PATH = re.compile(
+    r"/(?:(?:i/web|[A-Za-z0-9_]+)/status|statuses)/\d+(?:/video/\d+)?/?"
+)
 _HOSTS = (
     frozenset(
         {
@@ -48,6 +57,7 @@ _HOSTS = (
         }
     )
     | _VK_HOSTS
+    | _TWITTER_HOSTS
 )
 
 
@@ -76,15 +86,19 @@ def validate_media_url(url: str) -> str:
             and parsed.username is None
             and parsed.password is None
             and bool(parsed.path.strip("/"))
+            and (
+                parsed.hostname not in _TWITTER_HOSTS
+                or bool(_TWITTER_PATH.fullmatch(parsed.path))
+            )
         )
     except ValueError:
         valid = False
     if not valid:
         raise MediaDownloadError(
             "Нужна HTTPS-ссылка на одно публичное видео YouTube, Instagram, "
-            "TikTok, Vimeo или VK/VK Видео."
+            "TikTok, Vimeo, VK/VK Видео или X/Twitter (ссылка на пост)."
         )
-    if parsed.hostname in _VK_HOSTS:
+    if parsed.hostname in _VK_HOSTS | _TWITTER_HOSTS:
         # Экстрактор VK не принимает www; стандартный HTTPS-порт можно опустить.
         return parsed._replace(netloc=parsed.hostname.removeprefix("www.")).geturl()
     return url

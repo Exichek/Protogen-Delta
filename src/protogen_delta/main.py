@@ -17,6 +17,7 @@ from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands, set_user_commands
 from protogen_delta.core.user_state import ContentMode, UserStateStore
+from protogen_delta.core.user_statistics import UserStatisticsMiddleware
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
@@ -28,6 +29,7 @@ from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.image_source import create_image_source_router
 from protogen_delta.handlers.media import create_media_router
+from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
@@ -44,7 +46,9 @@ from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.stickers import StickersRepository
+from protogen_delta.repositories.user_facts import UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
+from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.deepseek import DeepSeekService
@@ -62,6 +66,7 @@ from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
+from protogen_delta.services.user_facts import UserFactsService
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +150,11 @@ async def main() -> None:
         memories_repository = MemoriesRepository(settings.data_dir)
         stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
-        memory = MemoryService(memories_repository)
+        facts_repository = UserFactsRepository(settings.data_dir)
+        statistics_repository = UserStatisticsRepository(settings.data_dir)
+        dispatcher.message.outer_middleware(
+            UserStatisticsMiddleware(statistics_repository)
+        )
 
         bot_state = BotState()
         user_states = UserStateStore(
@@ -206,6 +215,9 @@ async def main() -> None:
             ),
         )
 
+        memory = MemoryService(
+            memories_repository, facts=UserFactsService(facts_repository, deepseek)
+        )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
             prompt=insult_prompt,
@@ -226,6 +238,7 @@ async def main() -> None:
             rp_prompt=rp_modifier_prompt,
             protogen_lore_prompt=protogen_lore_prompt,
             body_prompt=body_prompt,
+            species_prompt=load_prompt("furry_species_reference"),
             capabilities_context=(
                 "Читаю PDF, DOCX, XLSX и текстовые файлы/код. Рассматриваю фото, "
                 "стикеры, GIF, TGS, MP4 и WebM: приложение извлекает несколько "
@@ -325,6 +338,7 @@ async def main() -> None:
             users_repository=users_repository,
             bot_state=bot_state,
             admin_ids=effective_admin_ids,
+            user_statistics=statistics_repository,
         )
         sticker_admin_router = create_sticker_admin_router(
             stickers_repository,
@@ -362,6 +376,7 @@ async def main() -> None:
             users_repository,
             memory,
             on_mode_change=on_mode_change,
+            user_statistics=statistics_repository,
         )
 
         rp_router = create_rp_router(
@@ -418,6 +433,7 @@ async def main() -> None:
         dispatcher.include_router(adult_router)
         dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
+        dispatcher.include_router(create_memory_router(memory, user_states))
         dispatcher.include_router(rp_router)
         downloader = MediaDownloader()
         dispatcher.include_router(create_download_router(downloader))

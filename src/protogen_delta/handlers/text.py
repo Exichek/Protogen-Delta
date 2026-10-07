@@ -21,6 +21,7 @@ BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщен�
 
 class _InputContext(TypedDict, total=False):
     trusted_input_context: str
+    use_personal_facts: bool
 
 
 def create_text_router(
@@ -83,6 +84,11 @@ def create_text_router(
 
         try:
             input_context: _InputContext = {}
+            if (
+                message.chat.type in {"group", "supergroup", "channel"}
+                or message.forward_origin is not None
+            ):
+                input_context["use_personal_facts"] = False
             if sticker_service is not None:
                 input_context["trusted_input_context"] = (
                     sticker_service.capabilities_context(user_id)
