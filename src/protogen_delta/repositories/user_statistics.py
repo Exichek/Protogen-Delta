@@ -47,6 +47,9 @@ class UserStatisticsRepository:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS stats_meta (started REAL NOT NULL)"
             )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS stats_seen_at ON stats_seen(at)"
+            )
             if not connection.execute("SELECT 1 FROM stats_meta").fetchone():
                 connection.execute("INSERT INTO stats_meta VALUES (?)", (time(),))
 
@@ -91,7 +94,9 @@ class UserStatisticsRepository:
                 return
             connection.execute(
                 "INSERT INTO stats_users VALUES (?, ?, ?, ?, ?, 1) "
-                "ON CONFLICT(user_id) DO UPDATE SET name=excluded.name, username=excluded.username, "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "name=CASE WHEN excluded.last_seen>=last_seen THEN excluded.name ELSE name END, "
+                "username=CASE WHEN excluded.last_seen>=last_seen THEN excluded.username ELSE username END, "
                 "first_seen=MIN(first_seen, excluded.first_seen), "
                 "last_seen=MAX(last_seen, excluded.last_seen), total=total+1",
                 (user_id, name, username, at, at),

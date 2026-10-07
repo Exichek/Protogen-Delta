@@ -489,7 +489,7 @@ async def main() -> None:
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
 
-        await dispatcher.start_polling(bot)
+        await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         if proactive_messenger is not None:
             proactive_messenger.stop()

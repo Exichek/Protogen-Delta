@@ -12,12 +12,16 @@ RUN python -m venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-COPY pyproject.toml poetry.lock README.md ./
+COPY pyproject.toml poetry.lock ./
+
+RUN poetry install --only main --no-root --no-interaction --no-ansi
+
+FROM builder AS package
+
+COPY README.md ./
 COPY src ./src
 
-RUN poetry install --only main --no-root --no-interaction --no-ansi \
-    && poetry build --format wheel \
-    && pip install --no-deps dist/*.whl
+RUN poetry build --format wheel
 
 
 FROM python:3.14-slim AS runtime
@@ -39,10 +43,13 @@ RUN groupadd --system protogen \
         --create-home \
         --home-dir /home/protogen \
         protogen \
-    && mkdir -p /app/data \
-    && chown -R protogen:protogen /app
+    && mkdir -p /app/data /home/protogen/.cache/huggingface \
+    && chown -R protogen:protogen /app /home/protogen/.cache
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=package /build/dist/*.whl /tmp/delta-wheel/
+RUN pip install --no-deps /tmp/delta-wheel/*.whl \
+    && rm -rf /tmp/delta-wheel
 
 USER protogen
 

@@ -567,6 +567,7 @@ def test_main_builds_application_and_starts_polling(
 
     dispatcher_mock.start_polling.assert_awaited_once_with(
         bot_mock,
+        tasks_concurrency_limit=32,
     )
 
     deepseek_mock.close.assert_awaited_once_with()

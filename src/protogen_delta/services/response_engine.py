@@ -94,6 +94,7 @@ class PreparedReply:
     text: str
     user_message: str | None = None
     forgotten: bool = False
+    remember_history: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,15 +228,16 @@ class ResponseEngine:
                     await deliver(reply)
                 if prepared.user_message is not None:
                     self._register_reply(user_state)
-                    self._remember_turn(
-                        user_state,
-                        prepared.user_message,
-                        (
-                            "Просьба забыть сведения обработана."
-                            if prepared.forgotten
-                            else reply
-                        ),
-                    )
+                    if prepared.remember_history:
+                        self._remember_turn(
+                            user_state,
+                            prepared.user_message,
+                            (
+                                "Просьба забыть сведения обработана."
+                                if prepared.forgotten
+                                else reply
+                            ),
+                        )
                 return reply
 
     async def reset_user_context(
@@ -782,9 +784,10 @@ class ResponseEngine:
             (
                 "Пользователь попросил забыть сведения."
                 if fact_update.forgotten
-                else user_message if use_personal_facts else None
+                else user_message
             ),
             forgotten=fact_update.forgotten,
+            remember_history=use_personal_facts,
         )
 
     async def set_delta_appearance_from_image(

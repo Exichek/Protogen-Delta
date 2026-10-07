@@ -434,11 +434,14 @@ class UserStateStore:
         now: float,
     ) -> None:
         """Удалить давно неиспользуемые состояния."""
-        for user_id, state in list(self._states.items()):
+        stale_ids = []
+        for user_id, state in self._states.items():
             if now - state.last_accessed_at < self._retention_seconds:
                 break
 
             if self._is_state_in_use(state):
                 continue
 
+            stale_ids.append(user_id)
+        for user_id in stale_ids:
             del self._states[user_id]

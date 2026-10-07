@@ -7,17 +7,30 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp_socks import ProxyConnector
+
+from protogen_delta.services.tools.public_connector import (
+    PublicProxyConnector,
+    PublicResolver,
+)
 
 _MAX_BODY_BYTES = 1_048_576
 _MAX_PUBLIC_BODY_BYTES = 3 * _MAX_BODY_BYTES
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
-def _session(proxy_url: str | None) -> ClientSession:
+def _session(proxy_url: str | None, *, public_only: bool = False) -> ClientSession:
     """Создать короткоживущую HTTP-сессию с необязательным прокси."""
-    connector = ProxyConnector.from_url(proxy_url) if proxy_url else None
+    connector: TCPConnector | None
+    if public_only:
+        connector = (
+            PublicProxyConnector(proxy_url)
+            if proxy_url
+            else TCPConnector(resolver=PublicResolver())
+        )
+    else:
+        connector = ProxyConnector.from_url(proxy_url) if proxy_url else None
     return ClientSession(connector=connector, timeout=ClientTimeout(total=8))
 
 
@@ -57,7 +70,7 @@ async def fetch_public_page(
     if not 0 < max_bytes <= _MAX_PUBLIC_BODY_BYTES:
         raise ValueError("Некорректный лимит страницы")
     current = url.strip()
-    async with _session(proxy_url) as session:
+    async with _session(proxy_url, public_only=True) as session:
         for redirect in range(max_redirects + 1):
             await _validate_public_url(current)
             async with session.get(

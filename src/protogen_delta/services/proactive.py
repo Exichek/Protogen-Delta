@@ -84,7 +84,7 @@ class ProactiveMessenger:
 
     async def run_once(self) -> int:
         """Выполнить один проход планировщика и вернуть число отправлений."""
-        if self._is_quiet_hour(self._local_datetime().hour):
+        if self._stop.is_set() or self._is_quiet_hour(self._local_datetime().hour):
             return 0
         now = self._clock()
         candidates = await self._repository.due_candidates(
@@ -95,6 +95,8 @@ class ProactiveMessenger:
         )
         sent = 0
         for candidate in candidates:
+            if self._stop.is_set():
+                break
             memories = await self._repository.recent(candidate.user_id, limit=20)
             memories = [
                 item
@@ -126,6 +128,8 @@ class ProactiveMessenger:
                 ).strip()
                 if not text:
                     continue
+                if self._stop.is_set():
+                    break
                 if _PRESSURE_PATTERN.search(text):
                     logger.info("Proactive generation outcome=pressure_fallback")
                     text = _NEUTRAL_INVITATION
@@ -138,7 +142,11 @@ class ProactiveMessenger:
                     idle_seconds=self._config.idle_seconds,
                     cooldown_seconds=self._config.cooldown_seconds,
                 )
-                if not still_due or self._is_quiet_hour(self._local_datetime().hour):
+                if (
+                    self._stop.is_set()
+                    or not still_due
+                    or self._is_quiet_hour(self._local_datetime().hour)
+                ):
                     continue
                 await self._bot.send_message(candidate.user_id, text)
             except TelegramForbiddenError:

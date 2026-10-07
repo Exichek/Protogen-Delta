@@ -87,7 +87,11 @@ def parse_fact_changes(raw: str, text: str) -> list[FactChange]:
         if all(_question_after(normalized, p.end()) for p in positions):
             raise ValueError("Цитата является частью вопроса")
         if action == "forget":
-            if not _FORGET.search(text):
+            if not _FORGET.search(source) or re.search(
+                r"\b(?:не\s+забудь|не\s+удаляй|don't\s+forget|do\s+not\s+forget)\b",
+                source,
+                re.I,
+            ):
                 raise ValueError("Нет просьбы забыть сведения")
         elif (
             not value

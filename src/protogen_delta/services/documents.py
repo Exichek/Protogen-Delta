@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from openpyxl import load_workbook
@@ -19,6 +20,31 @@ MAX_DOCUMENT_CHARS = 60_000
 MAX_PDF_SCAN_PAGES = 4
 MAX_PDF_IMAGE_PIXELS = 40_000_000
 MAX_PDF_IMAGE_DIMENSION = 2048
+MAX_OFFICE_EXPANDED_BYTES = 100 * 1024 * 1024
+MAX_OFFICE_PART_BYTES = 32 * 1024 * 1024
+MAX_OFFICE_PARTS = 2000
+MAX_XLSX_ROWS = 5000
+MAX_XLSX_COLUMNS = 128
+MAX_XLSX_SHEETS = 20
+MAX_XLSX_TOTAL_ROWS = 20000
+
+
+def _validate_office_archive(data: bytes) -> None:
+    """Проверять объём ZIP до распаковки DOCX/XLSX библиотекой."""
+    try:
+        with ZipFile(io.BytesIO(data)) as archive:
+            parts = archive.infolist()
+            if (
+                len(parts) > MAX_OFFICE_PARTS
+                or sum(p.file_size for p in parts) > MAX_OFFICE_EXPANDED_BYTES
+                or any(p.file_size > MAX_OFFICE_PART_BYTES for p in parts)
+            ):
+                raise DocumentTooLargeError(
+                    "DOCX/XLSX слишком большой после распаковки"
+                )
+    except BadZipFile as error:
+        raise DocumentReadError("Повреждённый архив DOCX/XLSX") from error
+
 
 _TEXT_EXTENSIONS = frozenset(
     {
@@ -261,29 +287,53 @@ def _cell_text(value: Any) -> str:
 
 def _extract_xlsx(data: bytes) -> ExtractedDocument:
     """Извлечь вычисленные значения листов XLSX в табличный текст."""
+    workbook = None
     try:
         workbook = load_workbook(
             io.BytesIO(data),
             read_only=True,
             data_only=True,
+            keep_links=False,
         )
         parts: list[str] = []
         size = 0
-        for worksheet in workbook.worksheets:
+        rows_left = MAX_XLSX_TOTAL_ROWS
+        truncated = len(workbook.worksheets) > MAX_XLSX_SHEETS
+        for worksheet in workbook.worksheets[:MAX_XLSX_SHEETS]:
+            row_limit = min(
+                worksheet.max_row or MAX_XLSX_ROWS, MAX_XLSX_ROWS, rows_left
+            )
+            column_limit = min(
+                worksheet.max_column or MAX_XLSX_COLUMNS, MAX_XLSX_COLUMNS
+            )
+            if row_limit <= 0:
+                truncated = True
+                break
+            if (worksheet.max_row or 0) > row_limit or (
+                worksheet.max_column or 0
+            ) > MAX_XLSX_COLUMNS:
+                truncated = True
             parts.append(f"[Лист: {worksheet.title}]")
-            for row in worksheet.iter_rows(values_only=True):
+            for row in worksheet.iter_rows(
+                max_row=row_limit, max_col=column_limit, values_only=True
+            ):
+                rows_left -= 1
                 line = "\t".join(_cell_text(value) for value in row).rstrip()
                 if line:
                     parts.append(line)
                     size += len(line)
                 if size >= MAX_DOCUMENT_CHARS:
+                    truncated = True
                     break
             if size >= MAX_DOCUMENT_CHARS:
                 break
-        workbook.close()
     except Exception as error:
         raise DocumentReadError("Не удалось прочитать XLSX") from error
-    return _limited("\n".join(parts), "XLSX")
+    finally:
+        if workbook is not None:
+            workbook.close()
+    result = _limited("\n".join(parts), "XLSX")
+    return replace(result, truncated=True) if truncated else result
 
 
 def extract_document(
@@ -305,10 +355,12 @@ def extract_document(
     if suffix == ".docx" or normalized_mime == (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ):
+        _validate_office_archive(data)
         return _extract_docx(data)
     if suffix == ".xlsx" or normalized_mime == (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     ):
+        _validate_office_archive(data)
         return _extract_xlsx(data)
     if (
         suffix in _TEXT_EXTENSIONS

@@ -14,6 +14,7 @@ from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
+from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import (
     ResponseBusyError,
@@ -125,6 +126,7 @@ async def _download_animation(
     bot: Bot,
     file_id: str,
     *,
+    blocking_work: BlockingWorkPool,
     file_size: int | None,
     label: str,
 ) -> tuple[ImageInput, ...]:
@@ -139,7 +141,7 @@ async def _download_animation(
     detected = _detected_mime_type(data)
     if detected is not None and detected != "image/gif":
         return (ImageInput(data=data, mime_type=detected, label=f"{label}, кадр"),)
-    frames = await asyncio.to_thread(extract_animation_frames, data, label=label)
+    frames = await blocking_work.run(extract_animation_frames, data, label=label)
     if not frames:
         raise ValueError("unsupported_image")
     return frames
@@ -167,6 +169,7 @@ def create_media_router(
 
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
+    blocking_work = BlockingWorkPool(2)
     albums: dict[
         tuple[int, str],
         list[tuple[Message, asyncio.Task[ImageInput]]],
@@ -328,6 +331,7 @@ def create_media_router(
             frames = await _download_animation(
                 bot,
                 file_id,
+                blocking_work=blocking_work,
                 file_size=file_size,
                 label=label,
             )
@@ -359,7 +363,7 @@ def create_media_router(
             destination = io.BytesIO()
             try:
                 await bot.download(sticker.file_id, destination=destination)
-                frames = await asyncio.to_thread(
+                frames = await blocking_work.run(
                     extract_tgs_frames,
                     destination.getvalue(),
                     label="TGS-анимация стикера",

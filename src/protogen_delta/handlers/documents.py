@@ -1,6 +1,5 @@
 """Обработчик текстовых пользовательских документов."""
 
-import asyncio
 import io
 import logging
 from pathlib import Path
@@ -12,6 +11,7 @@ from aiogram.types import Message
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.documents import (
     MAX_DOCUMENT_BYTES,
@@ -30,7 +30,10 @@ from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
-DOCUMENT_TOO_LARGE_REPLY = "Документ слишком большой: сейчас могу скачать до 20 МБ."
+DOCUMENT_TOO_LARGE_REPLY = (
+    "Документ слишком большой или тяжёлый после распаковки. "
+    "Пришли файл до 20 МБ или нужный фрагмент."
+)
 DOCUMENT_DOWNLOAD_ERROR_REPLY = (
     "Не смог скачать документ из Telegram. Попробуй ещё раз."
 )
@@ -57,6 +60,7 @@ def create_document_router(
     """Создать роутер чтения поддерживаемых документов."""
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
+    blocking_work = BlockingWorkPool(2)
 
     @router.message(
         F.document,
@@ -88,7 +92,7 @@ def create_document_router(
         file_name = _safe_file_name(document.file_name)
         try:
             arguments = {"ocr_enabled": True} if ocr_enabled else {}
-            extracted = await asyncio.to_thread(
+            extracted = await blocking_work.run(
                 extract_document,
                 destination.getvalue(),
                 file_name,

@@ -19,13 +19,25 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
 )
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import ToolExecutor, get_current_time
 
 logger = logging.getLogger(__name__)
+
+
+def _chat_reply(response: ChatCompletion) -> str:
+    choice = response.choices[0]
+    text = choice.message.content or ""
+    if text and getattr(choice, "finish_reason", None) == "length":
+        text = (
+            text.rstrip()
+            + "\n\n[Ответ достиг лимита длины и может быть неполным. Попроси продолжить.]"
+        )
+    return text
+
 
 _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
@@ -363,6 +375,7 @@ class DeepSeekService:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
+                max_tokens=4096,
                 **self._provider_options,
             )
         except TimeoutError as error:
@@ -381,7 +394,7 @@ class DeepSeekService:
             history_turns=len(history),
         )
 
-        return response.choices[0].message.content or ""
+        return _chat_reply(response)
 
     async def _chat_with_tools(
         self,
@@ -459,6 +472,7 @@ class DeepSeekService:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
+                max_tokens=4096,
                 **self._provider_options,
             )
             _log_request_metrics(
@@ -469,7 +483,7 @@ class DeepSeekService:
                 user_message=user_message,
                 history_turns=history_turns,
             )
-            return response.choices[0].message.content or ""
+            return _chat_reply(response)
         calls_used = 0
         for step in range(4):
             tool_choice: Any = "none" if step == 3 or calls_used >= 6 else "auto"
@@ -497,7 +511,7 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
-                return message.content or ""
+                return _chat_reply(response)
             if step == 3:
                 break
             if len(message.tool_calls) > 6:
