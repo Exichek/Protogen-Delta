@@ -28,6 +28,7 @@ def test_optional_media_providers_and_brave_key_file(
     monkeypatch.setenv("AUDIO_API_KEY", "audio-test-key")
     monkeypatch.setenv("AUDIO_BASE_URL", "https://example.com/v1")
     monkeypatch.setenv("AUDIO_MODEL", "omni-test")
+    monkeypatch.setenv("AUDIO_INPUT_DATA_URL", "true")
     monkeypatch.setenv("PDF_OCR_ENABLED", "true")
     monkeypatch.setenv("SAUCENAO_API_KEY", "source-test-key")
     path = tmp_path / "brave-key"
@@ -38,6 +39,7 @@ def test_optional_media_providers_and_brave_key_file(
     assert settings.brave_search_api_key == "new-test-key"
     assert settings.pdf_ocr_enabled and settings.audio_understanding_enabled
     assert settings.audio_model == "omni-test"
+    assert settings.audio_input_data_url
     assert settings.saucenao_api_key == "source-test-key"
     for key in ("", "two words", "x" * 4097):
         path.write_text(key, "utf-8")

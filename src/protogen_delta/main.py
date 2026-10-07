@@ -134,6 +134,7 @@ async def main() -> None:
                     max_retries=0,
                 ),
                 settings.audio_model or "",
+                input_data_url=settings.audio_input_data_url,
             )
         dispatcher = Dispatcher()
         register_error_handler(dispatcher)

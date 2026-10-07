@@ -58,9 +58,15 @@ def audio_excerpt(data: bytes, *, seconds: int | None = None) -> bytes:
 class AudioUnderstandingService:
     """OpenAI-compatible input_audio, например Qwen-Omni; отдельно от chat LLM."""
 
-    def __init__(self, client: AsyncOpenAI, model: str) -> None:
+    def __init__(
+        self, client: AsyncOpenAI, model: str, *, input_data_url: bool = False
+    ) -> None:
         self._client = client
         self._model = model
+        self._input_data_url = input_data_url
+        self._free_openrouter = (
+            client.base_url.host == "openrouter.ai" and model.endswith(":free")
+        )
         self._slots = asyncio.Semaphore(2)
 
     async def analyze(self, data: bytes) -> str:
@@ -88,7 +94,11 @@ class AudioUnderstandingService:
                                     {
                                         "type": "input_audio",
                                         "input_audio": {
-                                            "data": "data:;base64," + encoded,
+                                            "data": (
+                                                "data:;base64," + encoded
+                                                if self._input_data_url
+                                                else encoded
+                                            ),
                                             "format": "wav",
                                         },
                                     },
@@ -99,6 +109,16 @@ class AudioUnderstandingService:
                         max_tokens=600,
                         stream=True,
                         stream_options={"include_usage": True},
+                        extra_body=(
+                            {
+                                "reasoning": {"enabled": False},
+                                "provider": {
+                                    "max_price": {"prompt": 0, "completion": 0}
+                                },
+                            }
+                            if self._free_openrouter
+                            else None
+                        ),
                     )
                     text = ""
                     async with stream:
