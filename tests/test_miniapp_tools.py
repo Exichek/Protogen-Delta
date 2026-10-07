@@ -1,6 +1,7 @@
 """Инструменты в Mini App: личная доставка, безопасные URL и проверка initData."""
 
 import asyncio
+import io
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -12,6 +13,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiohttp.test_utils import TestClient, TestServer
+from PIL import Image
 from test_e621 import _post
 from test_miniapp import TOKEN, _signed_init_data
 
@@ -87,6 +89,196 @@ def test_gallery_does_not_return_adult_video_or_foreign_media_urls() -> None:
             await tools.gallery(42, "dragon", 2)
         with pytest.raises(E621QueryError):
             await tools.gallery(7, "cub", 1)
+
+    asyncio.run(scenario())
+
+
+def _gallery_png() -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (16, 12), "blue").save(output, "PNG")
+    return output.getvalue()
+
+
+def test_gallery_source_tracks_age_and_always_filters_explicit_results() -> None:
+    async def scenario() -> None:
+        states = UserStateStore()
+        states.get(42).content_mode = "adult"
+        states.get(43).content_mode = "soft"
+        client = Mock()
+        client.search = AsyncMock(
+            return_value=[
+                replace(
+                    _post(1),
+                    rating="s",
+                    file_url="https://static1.e926.net/data/art.jpg",
+                    sample_url=None,
+                ),
+                replace(_post(2), rating="e"),
+            ]
+        )
+        tools = MiniAppTools(AsyncMock(), client, Mock(), user_states=states)
+        for user_id, site in ((42, "e621"), (43, "e926")):
+            result = await tools.gallery(user_id, "dragon rating:e", 1)
+            assert result["site"] == site
+            query = client.search.await_args.args[0]
+            assert query.base_url == f"https://{site}.net"
+            assert "rating:s" in query.tags and "rating:e" not in query.tags
+            items = cast(list[dict[str, Any]], result["items"])
+            assert [item["id"] for item in items] == [1]
+            assert items[0]["page_url"] == f"https://{site}.net/posts/1"
+
+    asyncio.run(scenario())
+
+
+def test_gallery_image_is_owned_cached_bounded_and_expires(monkeypatch: Any) -> None:
+    import protogen_delta.miniapp.tools as tools_module
+
+    now = [100.0]
+    monkeypatch.setattr(tools_module, "monotonic", lambda: now[0])
+
+    async def scenario() -> None:
+        client = Mock()
+        client.search = AsyncMock(
+            return_value=[
+                replace(
+                    _post(1),
+                    rating="s",
+                    file_url="https://static1.e926.net/data/full.png",
+                    sample_url=None,
+                    preview_url="https://static1.e926.net/data/preview.png",
+                )
+            ]
+        )
+        client.download = AsyncMock(return_value=_gallery_png())
+        tools = MiniAppTools(AsyncMock(), client, Mock())
+        await tools.gallery(42, "dragon", 1)
+        with pytest.raises(ValueError, match="Обнови поиск"):
+            await tools.gallery_image(43, 1, full=False)
+        with pytest.raises(ValueError):
+            await tools.gallery_image(42, 2, full=True)
+        client.download.assert_not_awaited()
+        data, mime = await tools.gallery_image(42, 1, full=False)
+        assert data == _gallery_png() and mime == "image/png"
+        client.download.assert_awaited_once_with(
+            "https://static1.e926.net/data/preview.png",
+            max_bytes=2 * 1024 * 1024,
+            allow_redirects=False,
+        )
+        assert await tools.gallery_image(42, 1, full=False) == (data, mime)
+        assert client.download.await_count == 1
+        await tools.gallery_image(42, 1, full=True)
+        assert client.download.await_args.kwargs == {
+            "max_bytes": 20 * 1024 * 1024,
+            "allow_redirects": False,
+        }
+        assert client.download.await_args.args[0].endswith("full.png")
+        now[0] += 601
+        with pytest.raises(ValueError):
+            await tools.gallery_image(42, 1, full=False)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1/a.png",
+        "https://static1.e926.net:8443/a.png",
+        "https://static1.e926.net:invalid/a.png",
+        "https://user@static1.e926.net/a.png",
+        "https://static1.e926.net.evil.org/a.png",
+    ],
+)
+def test_gallery_rejects_untrusted_preview_or_original(url: str) -> None:
+    async def scenario() -> None:
+        client = Mock()
+        client.search = AsyncMock(
+            return_value=[
+                replace(
+                    _post(1),
+                    rating="s",
+                    file_url=url,
+                    sample_url="https://static1.e926.net/data/sample.png",
+                ),
+                replace(
+                    _post(2),
+                    rating="s",
+                    file_url="https://static1.e926.net/data/full.png",
+                    sample_url=None,
+                    preview_url=url,
+                ),
+            ]
+        )
+        client.download = AsyncMock()
+        tools = MiniAppTools(AsyncMock(), client, Mock())
+        assert (await tools.gallery(42, "dragon", 1))["items"] == []
+        assert not tools._gallery_images
+        client.download.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_gallery_rejects_non_image_bytes() -> None:
+    async def scenario() -> None:
+        client = Mock()
+        client.search = AsyncMock(
+            return_value=[
+                replace(
+                    _post(1),
+                    rating="s",
+                    file_url="https://static1.e926.net/data/art.jpg",
+                    sample_url=None,
+                )
+            ]
+        )
+        client.download = AsyncMock(return_value=b"<html>not a picture</html>")
+        tools = MiniAppTools(AsyncMock(), client, Mock())
+        await tools.gallery(42, "dragon", 1)
+        with pytest.raises(ValueError, match="изображение"):
+            await tools.gallery_image(42, 1, full=False)
+        assert not tools._gallery_cache
+
+    asyncio.run(scenario())
+
+
+def test_gallery_image_api_authentication_and_binary_response() -> None:
+    async def scenario() -> None:
+        tools = Mock()
+        tools.gallery_image = AsyncMock(return_value=(_gallery_png(), "image/png"))
+        server = MiniAppServer(TOKEN, UserStateStore(), tools=tools)
+        headers = {"X-Telegram-Init-Data": _signed_init_data()}
+        async with TestClient(TestServer(server.application())) as client:
+            assert (
+                await client.post("/api/tools/gallery-image", json={"post_id": 1})
+            ).status == 401
+            tools.gallery_image.assert_not_awaited()
+            for payload in (
+                {"post_id": True},
+                {"post_id": "1"},
+                {"post_id": 0},
+                {"post_id": 1, "full": "false"},
+                {},
+            ):
+                assert (
+                    await client.post(
+                        "/api/tools/gallery-image", headers=headers, json=payload
+                    )
+                ).status == 400
+            response = await client.post(
+                "/api/tools/gallery-image",
+                headers=headers,
+                json={
+                    "post_id": 1,
+                    "full": True,
+                    "user_id": 7,
+                    "url": "https://127.0.0.1/",
+                },
+            )
+            assert response.status == 200 and await response.read() == _gallery_png()
+            assert response.content_type == "image/png"
+            assert response.headers["Cache-Control"] == "no-store"
+            assert response.headers["X-Content-Type-Options"] == "nosniff"
+            tools.gallery_image.assert_awaited_once_with(42, 1, full=True)
 
     asyncio.run(scenario())
 

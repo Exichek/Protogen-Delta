@@ -24,7 +24,8 @@ def create_download_router(downloader: MediaDownloader) -> Router:
         if not url:
             await message.answer(
                 "📥 /download <ссылка на видео>\n\n"
-                "YouTube, Instagram, TikTok, Vimeo. Одно публичное видео "
+                "YouTube, Instagram, TikTok, Vimeo, VK и VK Видео (включая клипы). "
+                "Одно публичное видео "
                 "до 10 минут и 45 МБ. Скачивание может зависеть от ограничений сайта."
             )
             return

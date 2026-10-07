@@ -39,6 +39,13 @@
     .gallery article { min-width:0; overflow:hidden; border-radius:12px; background:#ffffff08; }
     .gallery img { display:block; width:100%; aspect-ratio:1; object-fit:contain; }
     .gallery a { display:block; color:var(--tg-theme-link-color,#86c8ff); padding:8px; overflow-wrap:anywhere; }
+    .gallery-preview { display:block; width:100%; padding:0; margin:0; aspect-ratio:1; border:0; border-radius:0; background:transparent; color:var(--tg-theme-hint-color,#8195aa); }
+    .gallery-preview img[hidden] { display:none; }
+    .gallery-viewer { width:calc(100% - 24px); max-width:1000px; box-sizing:border-box; padding:16px; border:0; border-radius:16px; background:var(--tg-theme-bg-color,#17212b); color:var(--tg-theme-text-color,#fff); }
+    .gallery-viewer::backdrop { background:#000b; }
+    .gallery-viewer img { display:block; max-width:100%; max-height:75vh; margin:12px auto; object-fit:contain; }
+    .gallery-viewer img[hidden] { display:none; }
+    .gallery-viewer a { color:var(--tg-theme-link-color,#86c8ff); }
     .tool-status { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:12px; }
     .error { color:#ff7d88; } .ok { color:#62dca4; }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
@@ -114,10 +121,10 @@
       <input id="download-url" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…">
       <button id="download-video" type="button">Скачать и отправить мне в чат</button>
       <div id="download-status" class="tool-status" role="status"></div>
-      <details><summary>Как это работает?</summary><p class="muted">YouTube, Instagram, TikTok и Vimeo. Одно видео до 10 минут и 45 МБ. Результат придёт в личный чат с ботом. Загрузка может занять до двух минут; доступ зависит от ограничений сайта. Приватные видео и плейлисты не поддерживаются. Новый запрос — через 30 секунд. Языковая модель не используется.</p></details>
+      <details><summary>Как это работает?</summary><p class="muted">YouTube, Instagram, TikTok, Vimeo, VK и VK Видео, включая клипы. Подойдут ссылки vk.com, vk.ru и vkvideo.ru. Одно видео до 10 минут и 45 МБ. Результат придёт в личный чат с ботом. Загрузка может занять до двух минут; доступ зависит от ограничений сайта. Приватные видео и плейлисты не поддерживаются. Новый запрос — через 30 секунд. Языковая модель не используется.</p></details>
     </section>
     <section class="card">
-      <b>Поиск артов e926</b>
+      <b id="gallery-title">Поиск артов e926</b>
       <p class="muted">Обычные арты без откровенного контента. Просмотр картинок прямо здесь.</p>
       <label for="gallery-query">Теги через пробел</label>
       <input id="gallery-query" maxlength="300" value="dragon" autocapitalize="none" spellcheck="false">
@@ -149,6 +156,7 @@
     document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
     document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
     renderAppearance(p);
+    updateGallerySource(p.content_mode);
   };
   const appearanceStatus = document.querySelector("#appearance-status");
   const fileInput = document.querySelector("#appearance-file");
@@ -235,14 +243,58 @@
   for (const [selector, target] of [["#my-id","self"],["#bot-id","bot"],["#select-id","select"],["#lookup-id",null]]) document.querySelector(selector).addEventListener("click", e => toolCall(e.currentTarget,"#id-status","id",{target:target || document.querySelector("#id-target").value.trim()},showId));
   document.querySelector("#copy-id").addEventListener("click", async () => { try { await navigator.clipboard.writeText(String(copiedId)); document.querySelector("#id-status").textContent=`ID ${copiedId} скопирован.`; } catch { document.querySelector("#id-status").textContent=`ID: ${copiedId}. Выдели текст и скопируй.`; } });
   document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
-  let galleryPage=1, galleryQuery="", galleryBusy=false;
+  let galleryPage=1, galleryQuery="", galleryBusy=false, galleryGeneration=0, gallerySite="e926";
+  const galleryUrls=new Set(), galleryRequests=new Set();
+  let fullUrl=null, fullRequest=null;
+  const viewer=document.createElement("dialog"); viewer.className="gallery-viewer"; viewer.id="gallery-viewer"; viewer.setAttribute("aria-label","Просмотр арта");
+  const viewerClose=document.createElement("button"), viewerStatus=document.createElement("p"), viewerImage=document.createElement("img"), viewerLink=document.createElement("a");
+  viewerClose.type="button"; viewerClose.textContent="Закрыть"; viewerClose.id="gallery-viewer-close";
+  viewerImage.id="gallery-viewer-image"; viewerImage.hidden=true;
+  viewerLink.textContent="Открыть страницу арта"; viewerLink.target="_blank"; viewerLink.rel="noopener noreferrer";
+  viewer.append(viewerClose,viewerStatus,viewerImage,viewerLink); document.body.append(viewer);
+  const closeViewer=()=>{ fullRequest?.abort(); fullRequest=null; if(fullUrl) URL.revokeObjectURL(fullUrl); fullUrl=null; viewerImage.removeAttribute("src"); viewerImage.hidden=true; if(viewer.open) viewer.close(); };
+  viewerClose.addEventListener("click",closeViewer); viewer.addEventListener("cancel",closeViewer); viewer.addEventListener("close",()=>{if(!viewer.open) closeViewer();});
+  viewer.addEventListener("click",event=>{if(event.target===viewer && (event.clientX<viewer.getBoundingClientRect().left || event.clientX>viewer.getBoundingClientRect().right || event.clientY<viewer.getBoundingClientRect().top || event.clientY>viewer.getBoundingClientRect().bottom)) closeViewer();});
+  const galleryImage=async(item,full,controller)=>{
+    const response=await fetch("/api/tools/gallery-image",{method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":initData},body:JSON.stringify({post_id:item.id,full}),signal:controller.signal});
+    if(!response.ok) throw new Error((await response.text()).slice(0,200));
+    return URL.createObjectURL(await response.blob());
+  };
+  const openGalleryImage=async item=>{
+    closeViewer(); viewerStatus.textContent=`Загружаю полный арт #${item.id}…`; viewerImage.alt=`Арт #${item.id}`; viewerLink.href=item.page_url;
+    const controller=new AbortController(); fullRequest=controller; viewer.showModal();
+    try { const url=await galleryImage(item,true,controller); if(controller.signal.aborted){URL.revokeObjectURL(url); return;} fullUrl=url; viewerImage.src=url; viewerImage.hidden=false; viewerStatus.textContent=`Арт #${item.id}`; }
+    catch(error){if(!controller.signal.aborted) viewerStatus.textContent=`Не удалось загрузить оригинал: ${error.message}`;}
+  };
+  const clearGallery=()=>{
+    galleryGeneration++; closeViewer(); for(const request of galleryRequests) request.abort(); galleryRequests.clear();
+    for(const url of galleryUrls) URL.revokeObjectURL(url); galleryUrls.clear(); document.querySelector("#gallery-results").replaceChildren();
+  };
+  const updateGallerySource=mode=>{
+    const site=mode==="adult"?"e621":"e926";
+    if(gallerySite!==site){clearGallery(); galleryPage=1; document.querySelector("#gallery-more").hidden=true; document.querySelector("#gallery-status").textContent="";}
+    gallerySite=site; document.querySelector("#gallery-title").textContent=`Поиск артов ${site}`;
+  };
+  const loadGalleryPreviews=async(cards,generation)=>{
+    let next=0;
+    const worker=async()=>{while(next<cards.length && generation===galleryGeneration){
+      const {item,img,placeholder}=cards[next++], controller=new AbortController(); galleryRequests.add(controller);
+      try{const url=await galleryImage(item,false,controller); if(controller.signal.aborted || generation!==galleryGeneration){URL.revokeObjectURL(url);continue;} galleryUrls.add(url); img.src=url; img.hidden=false; placeholder.hidden=true;}
+      catch(error){if(!controller.signal.aborted) placeholder.textContent="Превью недоступно — нажми для оригинала";}
+      finally{galleryRequests.delete(controller);}
+    }};
+    await Promise.all([worker(),worker(),worker()]);
+  };
   const gallerySearch = async (more=false) => {
     if (galleryBusy) return;
     if (!more) { galleryPage=1; galleryQuery=[document.querySelector("#gallery-query").value.trim(),document.querySelector("#gallery-order").value].filter(Boolean).join(" "); }
-    galleryBusy=true; document.querySelector("#gallery-more").disabled=true;
+    galleryBusy=true; const generation=galleryGeneration; document.querySelector("#gallery-more").disabled=true;
     await toolCall(document.querySelector("#search-gallery"),"#gallery-status","gallery",{query:galleryQuery,page:galleryPage},(result,output)=>{
-      const container=document.querySelector("#gallery-results"); container.replaceChildren();
-      for (const item of result.items) { const article=document.createElement("article"), img=document.createElement("img"), link=document.createElement("a"); img.src=item.url; img.alt=`Арт #${item.id}`; img.loading="lazy"; img.referrerPolicy="no-referrer"; link.href=item.page_url; link.target="_blank"; link.rel="noopener noreferrer"; link.textContent=`#${item.id} · ♥ ${item.favs} · ${item.artists.join(", ") || "Автор не указан"}`; article.append(img,link); container.append(article); }
+      if(generation!==galleryGeneration) return;
+      clearGallery(); const container=document.querySelector("#gallery-results"), cards=[];
+      document.querySelector("#gallery-title").textContent=`Поиск артов ${result.site || gallerySite}`;
+      for (const item of result.items) { const article=document.createElement("article"), button=document.createElement("button"), img=document.createElement("img"), placeholder=document.createElement("span"), link=document.createElement("a"); button.type="button"; button.className="gallery-preview"; button.setAttribute("aria-label",`Открыть полный арт #${item.id}`); placeholder.textContent="Загружаю превью…"; img.alt=`Арт #${item.id}`; img.hidden=true; button.append(img,placeholder); button.addEventListener("click",()=>openGalleryImage(item)); link.href=item.page_url; link.target="_blank"; link.rel="noopener noreferrer"; link.textContent=`#${item.id} · ♥ ${item.favs} · ${item.artists.join(", ") || "Автор не указан"}`; article.append(button,link); container.append(article); cards.push({item,img,placeholder}); }
+      loadGalleryPreviews(cards,galleryGeneration);
       output.textContent=result.items.length ? `Страница ${result.page}: ${result.items.length} артов.` : "Не нашлось статичных артов. Попробуй другие теги.";
       document.querySelector("#gallery-more").hidden=!result.has_more; galleryPage=result.page+1;
     });
