@@ -14,8 +14,9 @@ from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
-from protogen_delta.services.blocking_work import BlockingWorkPool
+from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.deepseek import ImageInput
+from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
     ResponseBusyError,
     ResponseEngine,
@@ -126,7 +127,7 @@ async def _download_animation(
     bot: Bot,
     file_id: str,
     *,
-    blocking_work: BlockingWorkPool,
+    blocking_work: WorkRunner,
     file_size: int | None,
     label: str,
 ) -> tuple[ImageInput, ...]:
@@ -162,6 +163,8 @@ def create_media_router(
     rate_limiter: UserRateLimiter | None = None,
     album_delay_seconds: float = 1.2,
     sticker_service: ContextualStickerService | None = None,
+    *,
+    native_work: WorkRunner | None = None,
 ) -> Router:
     """Создать роутер поддерживаемых изображений и стикеров."""
     if album_delay_seconds <= 0:
@@ -169,7 +172,7 @@ def create_media_router(
 
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
-    blocking_work = BlockingWorkPool(2)
+    blocking_work = native_work or NativeWorkPool(2)
     albums: dict[
         tuple[int, str],
         list[tuple[Message, asyncio.Task[ImageInput]]],
@@ -368,7 +371,7 @@ def create_media_router(
                     destination.getvalue(),
                     label="TGS-анимация стикера",
                 )
-            except TelegramAPIError, OSError:
+            except TelegramAPIError, OSError, NativeWorkError:
                 logger.warning("Не удалось скачать TGS-стикер", exc_info=True)
         if frames:
             await respond_with_images(

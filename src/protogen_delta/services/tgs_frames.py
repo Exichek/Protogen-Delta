@@ -73,6 +73,20 @@ def _valid_lottie(payload: Any) -> bool:
     """Отсеять повреждённый или явно не-Lottie JSON до вызова нативного рендера."""
     if not isinstance(payload, dict) or not isinstance(payload.get("layers"), list):
         return False
+    # Telegram TGS — самостоятельная векторная анимация. Внешние изображения
+    # и шрифты не должны открывать локальные пути или URL из загруженного JSON.
+    pending = [payload]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            if any(
+                isinstance(node.get(key), str) and node[key]
+                for key in ("p", "u", "fPath")
+            ):
+                return False
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
     try:
         width = int(payload["w"])
         height = int(payload["h"])

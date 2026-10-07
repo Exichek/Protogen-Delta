@@ -620,6 +620,9 @@ def test_user_state_store_saves_persistent_state_after_use() -> None:
         roleplay_boundaries="",
         delta_appearance="",
         content_mode="unselected",
+        history=(),
+        history_updated_at=0.0,
+        history_expires_before=-603800.0,
     )
 
 
@@ -921,6 +924,9 @@ def test_user_state_store_decays_persistent_emotions_by_wall_time() -> None:
         roleplay_boundaries="",
         delta_appearance="",
         content_mode="unselected",
+        history=(),
+        history_updated_at=0.0,
+        history_expires_before=-585800.0,
     )
 
 

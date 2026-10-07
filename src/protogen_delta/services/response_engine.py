@@ -247,6 +247,7 @@ class ResponseEngine:
                                 else reply
                             ),
                         )
+                        self._user_states.mark_history_updated(user_state)
                 return reply
 
     async def reset_user_context(

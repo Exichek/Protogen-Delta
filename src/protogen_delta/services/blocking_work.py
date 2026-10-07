@@ -2,7 +2,13 @@
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
+
+
+class WorkRunner(Protocol):
+    async def run[T](
+        self, function: Callable[..., T], data: bytes, *args: Any, **kwargs: Any
+    ) -> T: ...
 
 
 class BlockingWorkPool:

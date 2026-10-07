@@ -19,6 +19,7 @@ from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_image,
 )
+from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.deepseek import DeepSeekConnectionError, ImageInput
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
@@ -276,7 +277,12 @@ def test_concurrent_uploads_and_rate_limit_are_bounded(
         monkeypatch.setattr(
             engine, "set_delta_appearance_from_image", AsyncMock(side_effect=analyze)
         )
-        server = MiniAppServer(TOKEN, engine._user_states, response_engine=engine)
+        server = MiniAppServer(
+            TOKEN,
+            engine._user_states,
+            response_engine=engine,
+            native_work=BlockingWorkPool(2),
+        )
         async with TestClient(TestServer(server.application())) as client:
 
             def headers(user_id: int) -> dict[str, str]:

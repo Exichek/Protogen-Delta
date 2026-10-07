@@ -19,6 +19,7 @@ from protogen_delta.handlers.documents import (
     create_document_router,
 )
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.documents import (
     MAX_DOCUMENT_BYTES,
     ExtractedDocument,
@@ -61,7 +62,11 @@ def _router(data: bytes) -> tuple[Any, AsyncMock, AsyncMock]:
 
     bot.download.side_effect = download
     return (
-        create_document_router(cast(ResponseEngine, engine), cast(Bot, bot)),
+        create_document_router(
+            cast(ResponseEngine, engine),
+            cast(Bot, bot),
+            native_work=BlockingWorkPool(2),
+        ),
         engine,
         bot,
     )

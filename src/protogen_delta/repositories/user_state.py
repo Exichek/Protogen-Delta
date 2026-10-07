@@ -9,6 +9,7 @@ from typing import cast
 
 from protogen_delta.core.user_state import (
     ContentMode,
+    ConversationTurn,
     EmotionalState,
     PersistentUserState,
     RelationshipState,
@@ -56,6 +57,9 @@ class UserStateRepository:
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
+        history: tuple[ConversationTurn, ...] | None = None,
+        history_updated_at: float = 0.0,
+        history_expires_before: float | None = None,
     ) -> None:
         """Сохранить состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -72,6 +76,9 @@ class UserStateRepository:
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             content_mode=content_mode,
+            history=history,
+            history_updated_at=history_updated_at,
+            history_expires_before=history_expires_before,
         )
 
     async def delete(
@@ -118,7 +125,9 @@ class UserStateRepository:
                         roleplay_preferences,
                         roleplay_boundaries,
                         delta_appearance,
-                        content_mode
+                        content_mode,
+                        history,
+                        history_updated_at
                     FROM {table}
                     WHERE {where}
                     """,
@@ -150,6 +159,8 @@ class UserStateRepository:
             roleplay_boundaries,
             delta_appearance,
             content_mode,
+            history,
+            history_updated_at,
         ) = row
 
         return PersistentUserState(
@@ -174,6 +185,8 @@ class UserStateRepository:
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             content_mode=self._decode_content_mode(content_mode),
+            history=self._decode_history(history),
+            history_updated_at=history_updated_at,
         )
 
     def _save_sync(
@@ -191,6 +204,9 @@ class UserStateRepository:
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
+        history: tuple[ConversationTurn, ...] | None = None,
+        history_updated_at: float = 0.0,
+        history_expires_before: float | None = None,
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
         table, _, key = self._scope(user_id)
@@ -198,6 +214,21 @@ class UserStateRepository:
         extra_column = "chat_id," if group else ""
         extra_value = "?," if group else ""
         conflict = "chat_id, user_id" if group else "user_id"
+        history_update = (
+            ", history = excluded.history, history_updated_at = excluded.history_updated_at"
+            if history is not None
+            else ""
+        )
+        encoded_history = json.dumps(
+            [
+                {
+                    "user": turn.user_message[:8000],
+                    "assistant": turn.assistant_message[:16000],
+                }
+                for turn in (history or ())
+            ],
+            ensure_ascii=False,
+        )
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
                 connection.execute(
@@ -221,9 +252,11 @@ class UserStateRepository:
                         roleplay_preferences,
                         roleplay_boundaries,
                         delta_appearance,
-                        content_mode
+                        content_mode,
+                        history,
+                        history_updated_at
                     )
-                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -242,6 +275,7 @@ class UserStateRepository:
                         roleplay_boundaries = excluded.roleplay_boundaries,
                         delta_appearance = excluded.delta_appearance,
                         content_mode = excluded.content_mode
+                        {history_update}
                     """,
                     (
                         *key,
@@ -262,8 +296,18 @@ class UserStateRepository:
                         roleplay_boundaries,
                         delta_appearance,
                         content_mode,
+                        encoded_history,
+                        history_updated_at,
                     ),
                 )
+                if history_expires_before is not None:
+                    for history_table in ("user_states", "conversation_states"):
+                        connection.execute(
+                            f"UPDATE {history_table} SET history = '[]', "
+                            "history_updated_at = 0 WHERE history_updated_at > 0 "
+                            "AND history_updated_at <= ?",
+                            (history_expires_before,),
+                        )
         except sqlite3.Error as error:
             raise UserStatePersistenceError(
                 f"Не удалось сохранить состояние пользователя {user_id}"
@@ -313,6 +357,8 @@ class UserStateRepository:
                     roleplay_preferences TEXT NOT NULL DEFAULT '',
                     roleplay_boundaries TEXT NOT NULL DEFAULT '',
                     delta_appearance TEXT NOT NULL DEFAULT '',
+                    history TEXT NOT NULL DEFAULT '[]',
+                    history_updated_at REAL NOT NULL DEFAULT 0,
                     content_mode TEXT NOT NULL DEFAULT 'unselected'
                 )
                 """
@@ -331,6 +377,23 @@ class UserStateRepository:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS conversation_states_user ON conversation_states(user_id)"
             )
+
+            for table in ("user_states", "conversation_states"):
+                history_columns = {
+                    row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+                }
+                for name, declaration in (
+                    ("history", "TEXT NOT NULL DEFAULT '[]'"),
+                    ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
+                ):
+                    if name not in history_columns:
+                        connection.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                        )
+                connection.execute(
+                    f"CREATE INDEX IF NOT EXISTS {table}_history_age "
+                    f"ON {table}(history_updated_at) WHERE history_updated_at > 0"
+                )
 
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(user_states)")
@@ -411,3 +474,20 @@ class UserStateRepository:
         if value in {"unselected", "soft", "adult"}:
             return cast(ContentMode, value)
         return "unselected"
+
+    @staticmethod
+    def _decode_history(value: str) -> tuple[ConversationTurn, ...]:
+        """Повреждённая история не мешает восстановлению настроек и RP."""
+        try:
+            items = json.loads(value)
+        except TypeError, json.JSONDecodeError:
+            return ()
+        if not isinstance(items, list):
+            return ()
+        return tuple(
+            ConversationTurn(item["user"][:8000], item["assistant"][:16000])
+            for item in items
+            if isinstance(item, dict)
+            and isinstance(item.get("user"), str)
+            and isinstance(item.get("assistant"), str)
+        )

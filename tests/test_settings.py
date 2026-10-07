@@ -17,6 +17,19 @@ def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "invalid"])
+def test_history_ttl_environment_rejects_invalid_values(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ART_CHAT_ID", "-1001")
+    monkeypatch.setenv("CONVERSATION_HISTORY_TTL_SECONDS", value)
+    with pytest.raises(ValueError, match="CONVERSATION_HISTORY_TTL_SECONDS"):
+        load_settings()
+
+
 def test_optional_media_providers_and_brave_key_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

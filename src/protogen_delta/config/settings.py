@@ -51,6 +51,7 @@ class Settings:
     rate_limit_seconds: float = 2.0
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
+    conversation_history_ttl_seconds: float = 604800.0
     user_state_retention_seconds: float = 86400.0
     proactive_check_seconds: float = 300.0
     proactive_idle_seconds: float = 14400.0
@@ -248,6 +249,10 @@ def load_settings() -> Settings:
         "CONVERSATION_HISTORY_LIMIT",
     )
 
+    conversation_history_ttl_seconds = _parse_positive_float(
+        os.getenv("CONVERSATION_HISTORY_TTL_SECONDS", "604800.0"),
+        "CONVERSATION_HISTORY_TTL_SECONDS",
+    )
     user_state_retention_seconds = _parse_positive_float(
         os.getenv(
             "USER_STATE_RETENTION_SECONDS",
@@ -384,6 +389,7 @@ def load_settings() -> Settings:
         rate_limit_seconds=rate_limit_seconds,
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
+        conversation_history_ttl_seconds=conversation_history_ttl_seconds,
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,
         proactive_idle_seconds=proactive_idle_seconds,

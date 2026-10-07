@@ -10,6 +10,8 @@ from math import isfinite
 from time import monotonic, time
 from typing import Literal, Protocol
 
+from protogen_delta.core.async_completion import finish_operation
+
 logger = logging.getLogger(__name__)
 
 StateKey = int | tuple[int, int]
@@ -124,6 +126,8 @@ class PersistentUserState:
     roleplay_boundaries: str = ""
     delta_appearance: str = ""
     content_mode: ContentMode = "unselected"
+    history: tuple[ConversationTurn, ...] = ()
+    history_updated_at: float = 0.0
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -155,6 +159,9 @@ class UserStatePersistence(Protocol):
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         content_mode: ContentMode = "unselected",
+        history: tuple[ConversationTurn, ...] | None = None,
+        history_updated_at: float = 0.0,
+        history_expires_before: float | None = None,
     ) -> None:
         """Сохранить долгоживущее состояние пользователя."""
         ...
@@ -190,6 +197,7 @@ class UserState:
     roleplay_boundaries: str = ""
     delta_appearance: str = ""
     content_mode: ContentMode = "unselected"
+    history_updated_at: float = 0.0
     emotions_updated_at: float = field(
         default=0.0,
         repr=False,
@@ -225,6 +233,7 @@ class UserState:
         self.mood = "neutral"
         self.reply_count = 0
         self.history.clear()
+        self.history_updated_at = 0.0
         self.emotions.arousal = 0.0
         self.roleplay_active = False
         self.roleplay_fetishes = ()
@@ -252,6 +261,7 @@ class UserStateStore:
         clock: Callable[[], float] | None = None,
         wall_clock: Callable[[], float] | None = None,
         persistence: UserStatePersistence | None = None,
+        history_ttl_seconds: float = 7 * 86400,
     ) -> None:
         """Настроить историю и время хранения неактивных состояний."""
         if history_limit <= 0:
@@ -263,6 +273,11 @@ class UserStateStore:
         if not isfinite(retention_seconds):
             raise ValueError("retention_seconds должен быть конечным числом")
 
+        if not isfinite(history_ttl_seconds) or history_ttl_seconds <= 0:
+            raise ValueError(
+                "history_ttl_seconds должен быть положительным конечным числом"
+            )
+        self._history_ttl_seconds = history_ttl_seconds
         self._states: OrderedDict[StateKey, UserState] = OrderedDict()
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
@@ -314,25 +329,43 @@ class UserStateStore:
                 )
 
                 self._decay_emotions(state)
+                if (
+                    state.history_updated_at > 0
+                    and self._wall_clock() - state.history_updated_at
+                    >= self._history_ttl_seconds
+                ):
+                    state.history.clear()
+                    state.history_updated_at = 0.0
+                original_history = tuple(state.history)
 
                 try:
                     yield state
                 finally:
+                    if tuple(state.history) != original_history:
+                        state.history_updated_at = (
+                            self._wall_clock() if state.history else 0.0
+                        )
                     if self._persistence is not None:
                         try:
-                            await self._persistence.save(
-                                user_id,
-                                emotions=state.emotions,
-                                relationship=state.relationship,
-                                emotions_updated_at=state.emotions_updated_at,
-                                roleplay_active=state.roleplay_active,
-                                roleplay_configuration=state.roleplay_configuration,
-                                roleplay_character=state.roleplay_character,
-                                roleplay_fetishes=state.roleplay_fetishes,
-                                roleplay_preferences=state.roleplay_preferences,
-                                roleplay_boundaries=state.roleplay_boundaries,
-                                delta_appearance=state.delta_appearance,
-                                content_mode=state.content_mode,
+                            await finish_operation(
+                                self._persistence.save(
+                                    user_id,
+                                    emotions=state.emotions,
+                                    relationship=state.relationship,
+                                    emotions_updated_at=state.emotions_updated_at,
+                                    roleplay_active=state.roleplay_active,
+                                    roleplay_configuration=state.roleplay_configuration,
+                                    roleplay_character=state.roleplay_character,
+                                    roleplay_fetishes=state.roleplay_fetishes,
+                                    roleplay_preferences=state.roleplay_preferences,
+                                    roleplay_boundaries=state.roleplay_boundaries,
+                                    delta_appearance=state.delta_appearance,
+                                    content_mode=state.content_mode,
+                                    history=tuple(state.history),
+                                    history_updated_at=state.history_updated_at,
+                                    history_expires_before=self._wall_clock()
+                                    - self._history_ttl_seconds,
+                                )
                             )
                         except UserStatePersistenceError:
                             logger.exception(
@@ -352,6 +385,10 @@ class UserStateStore:
         state = self.get((chat_id, user_id))
         state.content_mode = private.content_mode
         return state
+
+    def mark_history_updated(self, state: UserState) -> None:
+        """Учесть доставленный ход, даже если заполненная история не изменилась."""
+        state.history_updated_at = self._wall_clock()
 
     @asynccontextmanager
     async def use_conversation(
@@ -391,22 +428,25 @@ class UserStateStore:
 
         try:
             async with state.lock:
-                if self._persistence is not None:
-                    await self._persistence.delete(user_id)
-
-                if isinstance(user_id, int):
-                    for key, conversation in self._states.items():
-                        if isinstance(key, tuple) and key[1] == user_id:
-                            conversation.reset_all()
-                            conversation.emotions_updated_at = self._wall_clock()
-                            conversation.persistence_loaded = True
-                state.reset_all()
-                state.emotions_updated_at = self._wall_clock()
-                state.persistence_loaded = True
+                await finish_operation(self._reset_locked(user_id, state))
         finally:
             state.last_accessed_at = self._clock()
             self._states.move_to_end(user_id)
             state.active_operations -= 1
+
+    async def _reset_locked(self, user_id: StateKey, state: UserState) -> None:
+        """Завершить удаление и сброс RAM вместе, даже при отмене ожидающего запроса."""
+        if self._persistence is not None:
+            await self._persistence.delete(user_id)
+        if isinstance(user_id, int):
+            for key, conversation in self._states.items():
+                if isinstance(key, tuple) and key[1] == user_id:
+                    conversation.reset_all()
+                    conversation.emotions_updated_at = self._wall_clock()
+                    conversation.persistence_loaded = True
+        state.reset_all()
+        state.emotions_updated_at = self._wall_clock()
+        state.persistence_loaded = True
 
     @property
     def tracked_users_count(self) -> int:
@@ -436,6 +476,8 @@ class UserStateStore:
             state.roleplay_boundaries = persistent_state.roleplay_boundaries
             state.delta_appearance = persistent_state.delta_appearance
             state.content_mode = persistent_state.content_mode
+            state.history = deque(persistent_state.history, maxlen=self._history_limit)
+            state.history_updated_at = persistent_state.history_updated_at
         else:
             state.emotions_updated_at = self._wall_clock()
 

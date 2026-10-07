@@ -60,6 +60,7 @@ from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
+from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
@@ -159,6 +160,7 @@ async def main() -> None:
         bot_state = BotState()
         user_states = UserStateStore(
             history_limit=settings.conversation_history_limit,
+            history_ttl_seconds=settings.conversation_history_ttl_seconds,
             retention_seconds=settings.user_state_retention_seconds,
             persistence=user_state_repository,
         )
@@ -391,17 +393,20 @@ async def main() -> None:
             bot=bot,
             sticker_service=sticker_service,
         )
+        native_work = NativeWorkPool(2)
         media_router = create_media_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            native_work=native_work,
         )
         document_router = create_document_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            native_work=native_work,
             ocr_enabled=settings.pdf_ocr_enabled,
         )
         voice_router = create_voice_router(
@@ -471,6 +476,7 @@ async def main() -> None:
                 response_engine=response_engine,
                 on_mode_change=on_mode_change,
                 tools=MiniAppTools(bot, downloader),
+                native_work=native_work,
             )
             await mini_app_server.start()
 
