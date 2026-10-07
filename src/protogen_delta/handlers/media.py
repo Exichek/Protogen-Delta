@@ -201,7 +201,7 @@ def create_media_router(
                         context_tags=("media",),
                     ),
                     images=images,
-                    **personal_fact_options(message.chat.type),
+                    **personal_fact_options(message.chat.type, message.chat.id),
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)

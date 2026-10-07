@@ -127,7 +127,7 @@ def test_generic_mood_still_uses_probability(tmp_path: Path) -> None:
 
 def test_sticker_emoji_and_reply_reach_selection() -> None:
     message = Mock(spec=Message)
-    message.chat = SimpleNamespace(id=7)
+    message.chat = SimpleNamespace(id=7, type="private")
     message.text = message.caption = None
     message.sticker = SimpleNamespace(emoji="😂")
     message.answer = AsyncMock()

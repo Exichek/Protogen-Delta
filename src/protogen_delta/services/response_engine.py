@@ -4,9 +4,9 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TypedDict
 
 from protogen_delta.config.prompt_loader import load_prompt
+from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -56,17 +56,20 @@ from protogen_delta.services.state_context import build_state_context
 logger = logging.getLogger(__name__)
 
 
-class PersonalFactsOptions(TypedDict, total=False):
+class PersonalFactsOptions(ChatScopeOptions, total=False):
     use_personal_facts: bool
 
 
-def personal_fact_options(chat_type: str) -> PersonalFactsOptions:
+def personal_fact_options(
+    chat_type: str, chat_id: int | None = None
+) -> PersonalFactsOptions:
     """Не передавать приватный профиль в групповые ответы."""
-    return (
-        {"use_personal_facts": False}
-        if chat_type in {"group", "supergroup", "channel"}
-        else {}
-    )
+    options: PersonalFactsOptions = {}
+    if chat_type in {"group", "supergroup", "channel"}:
+        options["use_personal_facts"] = False
+        if chat_id is not None:
+            options.update(chat_scope_options(chat_id, chat_type))
+    return options
 
 
 FetishNames = dict[str, str]
@@ -172,6 +175,7 @@ class ResponseEngine:
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
         use_personal_facts: bool = True,
+        chat_id: int | None = None,
     ) -> None:
         """Отклонить повторный запрос и удержать lock до конца доставки."""
         if user_id in self._delivering_users:
@@ -188,6 +192,7 @@ class ResponseEngine:
                 model_message_override=model_message_override,
                 trusted_input_context=trusted_input_context,
                 use_personal_facts=use_personal_facts,
+                chat_id=chat_id,
             )
         finally:
             self._delivering_users.remove(user_id)
@@ -204,10 +209,13 @@ class ResponseEngine:
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
         use_personal_facts: bool = True,
+        chat_id: int | None = None,
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
-            async with self._user_states.use(user_id) as user_state:
+            async with self._user_states.use_conversation(
+                user_id, chat_id
+            ) as user_state:
                 prepared = await self._respond_for_user(
                     user_id=user_id,
                     user_message=user_message,
@@ -217,7 +225,8 @@ class ResponseEngine:
                     attachment_name=attachment_name,
                     model_message_override=model_message_override,
                     trusted_input_context=trusted_input_context,
-                    use_personal_facts=use_personal_facts,
+                    use_personal_facts=use_personal_facts and chat_id is None,
+                    remember_history=use_personal_facts or chat_id is not None,
                 )
                 reply = (
                     self._reply_transform(user_id, prepared.text)
@@ -243,9 +252,11 @@ class ResponseEngine:
     async def reset_user_context(
         self,
         user_id: int,
+        *,
+        chat_id: int | None = None,
     ) -> None:
         """Безопасно сбросить контекст конкретного пользователя."""
-        async with self._user_states.use(user_id) as user_state:
+        async with self._user_states.use_conversation(user_id, chat_id) as user_state:
             user_state.reset_context()
 
     async def reset_user(
@@ -258,9 +269,11 @@ class ResponseEngine:
     async def disable_roleplay(
         self,
         user_id: int,
+        *,
+        chat_id: int | None = None,
     ) -> bool:
         """Выключить RP-режим пользователя, сохранив остальное состояние."""
-        async with self._user_states.use(user_id) as user_state:
+        async with self._user_states.use_conversation(user_id, chat_id) as user_state:
             was_active = user_state.roleplay_active
             user_state.roleplay_active = False
             user_state.roleplay_fetishes = ()
@@ -279,6 +292,7 @@ class ResponseEngine:
         model_message_override: str | None = None,
         trusted_input_context: str | None = None,
         use_personal_facts: bool = True,
+        remember_history: bool = True,
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
@@ -656,7 +670,7 @@ class ResponseEngine:
             )
 
         history = self._prompt_composer.compact_history(
-            tuple(user_state.history) if use_personal_facts else (),
+            tuple(user_state.history) if remember_history else (),
             live_turns=self._config.history_live_turns,
             history_chars=self._config.history_chars,
         )
@@ -787,7 +801,7 @@ class ResponseEngine:
                 else user_message
             ),
             forgotten=fact_update.forgotten,
-            remember_history=use_personal_facts,
+            remember_history=remember_history,
         )
 
     async def set_delta_appearance_from_image(

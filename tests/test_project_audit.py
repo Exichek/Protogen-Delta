@@ -21,7 +21,7 @@ from test_response_engine import _create_engine
 
 import protogen_delta.services.documents as documents
 import protogen_delta.services.tools.public_connector as connector_module
-from protogen_delta.core.user_state import UserState, UserStateStore
+from protogen_delta.core.user_state import StateKey, UserState, UserStateStore
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
@@ -35,7 +35,7 @@ from protogen_delta.services.user_facts import parse_fact_changes
 
 
 def test_recent_cache_does_not_enumerate_every_user() -> None:
-    class CountingStates(OrderedDict[int, UserState]):
+    class CountingStates(OrderedDict[StateKey, UserState]):
         visited = 0
 
         def items(self) -> Any:

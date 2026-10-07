@@ -26,6 +26,7 @@ def _create_message_mock(
     """Создать mock Telegram-сообщения."""
     message_mock = Mock(spec=Message)
     message_mock.text = text
+    message_mock.chat = Mock(id=321, type="private")
 
     if user_id is None:
         message_mock.from_user = None

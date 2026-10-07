@@ -143,7 +143,7 @@ def create_document_router(
                         context_tags=("document",),
                     ),
                     attachment_text=attachment_text,
-                    **personal_fact_options(message.chat.type),
+                    **personal_fact_options(message.chat.type, message.chat.id),
                     attachment_name=f"{file_name} ({extracted.kind})",
                     images=images,
                 )

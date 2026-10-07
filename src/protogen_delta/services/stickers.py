@@ -201,9 +201,11 @@ class ContextualStickerService:
             for entry in self._repository.get_all()
         )
 
-    def is_request(self, user_id: int, text: str) -> bool:
+    def is_request(
+        self, user_id: int, text: str, *, chat_id: int | None = None
+    ) -> bool:
         """Разрешить «скинь какой-то» только после обсуждения стикеров."""
-        history = self._user_states.get(user_id).history
+        history = self._user_states.get_conversation(user_id, chat_id).history
         previous = history[-1] if history else None
         return has_sticker_request(
             text,
@@ -228,6 +230,7 @@ class ContextualStickerService:
         context_tags: Collection[str] = (),
         context_text: str = "",
         reply_text: str = "",
+        scope_chat_id: int | None = None,
     ) -> bool:
         """Иногда отправить подходящий стикер и сообщить об успехе."""
         if declines_stickers(context_text):
@@ -235,7 +238,7 @@ class ContextualStickerService:
             return False
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
-        requested = self.is_request(user_id, context_text)
+        requested = self.is_request(user_id, context_text, chat_id=scope_chat_id)
         semantic_tags = sticker_context_tags(context_text)
         greeting = "greeting" in semantic_tags
         if (
@@ -255,7 +258,7 @@ class ContextualStickerService:
         if self._chance == 0:
             return False
 
-        state = self._user_states.get(user_id)
+        state = self._user_states.get_conversation(user_id, scope_chat_id)
         tags = {tag.strip().lower() for tag in context_tags if tag.strip()}
         semantic_tags.update(sticker_reply_tags(reply_text))
         tags.update(semantic_tags)

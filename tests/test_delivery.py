@@ -133,4 +133,5 @@ def test_reply_delivery_triggers_optional_contextual_sticker() -> None:
         context_tags=("media",),
         context_text="",
         reply_text="Готово.",
+        scope_chat_id=None,
     )

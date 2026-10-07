@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.chat_scope import chat_scope_options
 from protogen_delta.core.roleplay import split_roleplay_stop
 from protogen_delta.services.response_engine import ResponseEngine
 
@@ -38,6 +39,7 @@ def create_rp_router(
 
         was_active = await response_engine.disable_roleplay(
             message.from_user.id,
+            **chat_scope_options(message.chat.id, message.chat.type),
         )
 
         if was_active:
