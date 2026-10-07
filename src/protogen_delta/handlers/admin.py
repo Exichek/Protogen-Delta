@@ -3,16 +3,22 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from protogen_delta.core.state import BotState
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.user_statistics import (
+    STATS_ZONE,
+    UserStatisticsRepository,
+)
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.user_statistics import activity_chart
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,7 @@ def create_admin_router(
     users_repository: UsersRepository,
     bot_state: BotState,
     admin_ids: frozenset[int],
+    user_statistics: UserStatisticsRepository | None = None,
 ) -> Router:
     """Создать роутер административных команд."""
     router = Router(name=__name__)
@@ -90,6 +97,69 @@ def create_admin_router(
     async def deny_access(message: Message) -> None:
         """Сообщить пользователю об отсутствии доступа."""
         await message.answer("⛔ У тебя нет доступа к этой команде.")
+
+    @router.message(Command("userstats"))
+    async def user_stats(message: Message) -> None:
+        """Статистика доступна администратору только в личном чате."""
+        if not is_admin(message):
+            await deny_access(message)
+            return
+        if message.chat.type != "private":
+            await message.answer(
+                "Статистику пользователя смотри в личном чате: /userstats <ID>."
+            )
+            return
+        parts = (message.text or "").split()
+        user_id = message.from_user.id if message.from_user else 0
+        if (
+            len(parts) == 2
+            and parts[1].isascii()
+            and parts[1].isdigit()
+            and 0 < len(parts[1]) <= 18
+            and int(parts[1]) > 0
+        ):
+            user_id = int(parts[1])
+        elif len(parts) > 1:
+            await message.answer("Укажи Telegram ID: /userstats 123456789")
+            return
+        elif message.reply_to_message and message.reply_to_message.from_user:
+            user_id = message.reply_to_message.from_user.id
+        if user_statistics is None:
+            await message.answer("Учёт активности сейчас недоступен.")
+            return
+        now = time.time()
+        stats = await user_statistics.get(user_id, now)
+        if stats is None:
+            await message.answer("Сообщений этого пользователя с начала учёта ещё нет.")
+            return
+        today = datetime.fromtimestamp(now, STATS_ZONE).date()
+        counts = [
+            sum(
+                count
+                for day, count in stats.daily
+                if day >= (today - timedelta(days=n - 1)).isoformat()
+            )
+            for n in (1, 7, 30)
+        ]
+
+        def stamp(value: float) -> str:
+            return datetime.fromtimestamp(value, STATS_ZONE).strftime("%d.%m.%Y %H:%M")
+
+        caption = (
+            f"👤 {stats.name}"
+            + (f" (@{stats.username})" if stats.username else "")
+            + f"\nID: {stats.user_id}\nПервый учтённый контакт: {stamp(stats.first_seen)}"
+            + f"\nПоследнее сообщение: {stamp(stats.last_seen)}"
+            + f"\nСообщения сегодня / 7 дн / 30 дн / всего: {counts[0]} / {counts[1]} / {counts[2]} / {stats.total}"
+            + f"\nУчёт начат: {stamp(stats.tracking_started)} (МСК)."
+            + "\nГрафик за 365 дней. Дни до начала учёта не восстановлены."
+        )
+        chart = await asyncio.to_thread(activity_chart, stats, now)
+        await message.answer_photo(
+            BufferedInputFile(chart, filename="activity.png"),
+            caption=caption,
+            parse_mode=None,
+        )
 
     @router.message(Command("listimages"))
     async def list_images(message: Message) -> None:
@@ -230,6 +300,7 @@ def create_admin_router(
             "/removeimage <id1,id2,...> — удалить арты по ID\n"
             "/artcount — показать количество артов\n"
             "/status — показать статус бота\n"
+            "/userstats <ID> — активность пользователя и график (в личке)\n"
             "/stickers — настроить контекстный стикерпак\n"
             "/message <user_id> <текст> — сообщение от создателя\n"
             "/broadcast <текст> — рассылка с подтверждением (только создатель)\n"

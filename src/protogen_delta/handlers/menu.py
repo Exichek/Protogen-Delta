@@ -46,7 +46,7 @@ _PAGES = {
     ),
     "media": (
         "🖼 Медиа и файлы\n\n"
-        "/download <ссылка> — видео из YouTube, Instagram, TikTok, Vimeo или VK "
+        "/download <ссылка> — видео из YouTube, Instagram, TikTok, Vimeo, X/Twitter или VK "
         "до 10 минут и 45 МБ.\n\n"
         "/source — ответом на фото арта; отправляет уменьшенную копию "
         "в SauceNAO для поиска похожих публикаций.\n\n"

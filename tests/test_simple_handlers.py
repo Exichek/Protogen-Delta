@@ -55,6 +55,8 @@ def _create_message_mock(
     message_mock = Mock(spec=Message)
 
     message_mock.text = text
+    message_mock.chat = Mock(id=321, type="private")
+    message_mock.forward_origin = None
 
     if user_id is None:
         message_mock.from_user = None
@@ -202,7 +204,7 @@ def test_text_handler_sends_paragraphs_with_typing_delay(
     monkeypatch.setattr("protogen_delta.handlers.delivery.sleep", sleep)
     router = create_text_router(cast(ResponseEngine, engine), bot=cast(Bot, bot))
     message, answer, _ = _create_message_mock("Расскажи подробнее")
-    message.chat = Mock(id=321)
+    message.chat = Mock(id=321, type="private")
 
     asyncio.run(_call_first_handler(router, message))
 

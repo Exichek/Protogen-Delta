@@ -43,6 +43,13 @@ def copy_snapshot(source: Path, destination: Path) -> None:
     memories_database = source / "memories.db"
     if memories_database.exists():
         databases.append((memories_database, "memories"))
+    for filename, table in (
+        ("user_facts.db", "user_facts"),
+        ("user_statistics.db", "stats_users"),
+    ):
+        database = source / filename
+        if database.exists():
+            databases.append((database, table))
     e621_database = source / "e621.db"
     if e621_database.exists():
         databases.append((e621_database, "shown_posts"))

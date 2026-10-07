@@ -15,7 +15,9 @@ from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
+from protogen_delta.repositories.user_facts import FactChange, UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
+from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 
 
@@ -42,6 +44,14 @@ def seed(path: Path) -> None:
 def test_backup_restore_and_restart(tmp_path: Path) -> None:
     source, backup, restored = (tmp_path / name for name in ("data", "backup", "new"))
     seed(source)
+    asyncio.run(
+        UserFactsRepository(source).apply(
+            123, [FactChange("name", "replace", "Exi", "Зови меня Exi")], 20.0
+        )
+    )
+    asyncio.run(
+        UserStatisticsRepository(source).record(123, "Exi", "", 123, 1, "text", 20.0)
+    )
     ArtSourcesRepository(source, -100).change(-200, add=True)
     asyncio.run(E621HistoryRepository(source).mark_seen(123, 456, 20.0))
     copy_snapshot(source, backup)
@@ -49,6 +59,9 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     asyncio.run(UserStateRepository(source).delete(123))
     copy_snapshot(backup, restored)
     assert UsersRepository(restored).get_all() == [123]
+    assert asyncio.run(UserFactsRepository(restored).all(123))[0].value == "Exi"
+    statistics = asyncio.run(UserStatisticsRepository(restored).get(123, 20.0))
+    assert statistics and statistics.total == 1
     assert ImagesRepository(restored).get_all() == ["test-image"]
     assert ArtSourcesRepository(restored, -999).get_all() == [-100, -200]
     assert StickersRepository(restored).get_all()[0].file_unique_id == "sticker-unique"

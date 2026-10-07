@@ -33,7 +33,7 @@ def _message(**values: Any) -> tuple[Message, AsyncMock]:
     """Создать минимальное сообщение Telegram для обработчика медиа."""
     message = Mock(spec=Message)
     message.from_user = SimpleNamespace(id=TEST_USER_ID)
-    message.chat = SimpleNamespace(id=777)
+    message.chat = SimpleNamespace(id=777, type="private")
     message.caption = values.pop("caption", None)
     message.media_group_id = values.pop("media_group_id", None)
     message.photo = values.pop("photo", None)

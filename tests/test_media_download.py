@@ -122,6 +122,55 @@ def test_allows_exact_platform_hosts() -> None:
 
 
 @pytest.mark.parametrize(
+    "host",
+    [
+        "x.com",
+        "www.x.com",
+        "m.x.com",
+        "mobile.x.com",
+        "twitter.com",
+        "www.twitter.com",
+        "m.twitter.com",
+        "mobile.twitter.com",
+    ],
+)
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/starwars/status/665052190608723968",
+        "/i/web/status/665052190608723968",
+        "/statuses/665052190608723968",
+        "/starwars/status/665052190608723968/video/1?ref_src=test",
+    ],
+)
+def test_x_public_posts_match_installed_extractor(host: str, path: str) -> None:
+    from yt_dlp.extractor.twitter import TwitterIE  # type: ignore[import-untyped]
+
+    normalized = validate_media_url("https://" + host + path)
+    assert TwitterIE.suitable(normalized)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://x.com/",
+        "https://x.com/starwars",
+        "https://x.com/messages",
+        "https://x.com/starwars/status/not-an-id",
+        "https://x.com/starwars/status/123/photo/1",
+        "https://x.com.evil.test/a/status/123",
+        "https://x.com@localhost/a/status/123",
+        "https://user@x.com/a/status/123",
+        "https://x.com:8443/a/status/123",
+        "https://t.co/abc",
+    ],
+)
+def test_x_rejects_non_posts_and_unsafe_hosts(url: str) -> None:
+    with pytest.raises(MediaDownloadError):
+        validate_media_url(url)
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "https://vk.com/video-123_456",

@@ -15,7 +15,11 @@ from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.deepseek import ImageInput
-from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
+from protogen_delta.services.response_engine import (
+    ResponseBusyError,
+    ResponseEngine,
+    personal_fact_options,
+)
 from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tgs_frames import MAX_TGS_BYTES, extract_tgs_frames
 
@@ -194,6 +198,7 @@ def create_media_router(
                         context_tags=("media",),
                     ),
                     images=images,
+                    **personal_fact_options(message.chat.type),
                 )
         except ResponseBusyError:
             await message.answer(BUSY_REPLY)

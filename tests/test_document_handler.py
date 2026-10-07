@@ -35,7 +35,7 @@ def _message(document: Any, caption: str | None = None) -> tuple[Message, AsyncM
     message.document = document
     message.caption = caption
     message.from_user = SimpleNamespace(id=TEST_USER_ID)
-    message.chat = SimpleNamespace(id=777)
+    message.chat = SimpleNamespace(id=777, type="private")
     message.answer = AsyncMock()
     return cast(Message, message), message.answer
 

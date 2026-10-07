@@ -270,6 +270,7 @@ def test_set_commands_configures_telegram_menu() -> None:
         "id",
         "download",
         "source",
+        "memory",
         "reset",
         "help",
     ]
@@ -283,6 +284,7 @@ def test_set_commands_configures_telegram_menu() -> None:
         "🪪 Узнать Telegram ID",
         "📥 Скачать видео по ссылке",
         "🔎 Найти источник арта (ответом)",
+        "🧠 Мой постоянный профиль",
         "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]
