@@ -271,7 +271,7 @@ def create_voice_router(
                         context_tags=("voice",),
                     ),
                     model_message_override=model_message,
-                    **personal_fact_options(message.chat.type),
+                    **personal_fact_options(message.chat.type, message.chat.id),
                     trusted_input_context=trusted_context,
                 )
             except ResponseBusyError:

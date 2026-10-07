@@ -12,6 +12,7 @@ from protogen_delta.core.user_state import (
     EmotionalState,
     PersistentUserState,
     RelationshipState,
+    StateKey,
     UserStatePersistenceError,
 )
 
@@ -32,7 +33,7 @@ class UserStateRepository:
 
     async def load(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> PersistentUserState | None:
         """Загрузить состояние без блокировки event loop."""
         return await asyncio.to_thread(
@@ -42,7 +43,7 @@ class UserStateRepository:
 
     async def save(
         self,
-        user_id: int,
+        user_id: StateKey,
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
@@ -75,7 +76,7 @@ class UserStateRepository:
 
     async def delete(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> None:
         """Удалить долгоживущее состояние без блокировки event loop."""
         await asyncio.to_thread(
@@ -83,15 +84,23 @@ class UserStateRepository:
             user_id,
         )
 
+    @staticmethod
+    def _scope(key: StateKey) -> tuple[str, str, tuple[int, ...]]:
+        """Выбирать только фиксированные SQL-идентификаторы, ключи параметризованы."""
+        if isinstance(key, tuple):
+            return "conversation_states", "chat_id = ? AND user_id = ?", key
+        return "user_states", "user_id = ?", (key,)
+
     def _load_sync(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> PersistentUserState | None:
         """Синхронно загрузить состояние из SQLite."""
+        table, where, key = self._scope(user_id)
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
                 row = connection.execute(
-                    """
+                    f"""
                     SELECT
                         warmth,
                         irritation,
@@ -110,10 +119,10 @@ class UserStateRepository:
                         roleplay_boundaries,
                         delta_appearance,
                         content_mode
-                    FROM user_states
-                    WHERE user_id = ?
+                    FROM {table}
+                    WHERE {where}
                     """,
-                    (user_id,),
+                    key,
                 ).fetchone()
         except sqlite3.Error as error:
             raise UserStatePersistenceError(
@@ -169,7 +178,7 @@ class UserStateRepository:
 
     def _save_sync(
         self,
-        user_id: int,
+        user_id: StateKey,
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
@@ -184,11 +193,17 @@ class UserStateRepository:
         content_mode: ContentMode = "unselected",
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
+        table, _, key = self._scope(user_id)
+        group = isinstance(user_id, tuple)
+        extra_column = "chat_id," if group else ""
+        extra_value = "?," if group else ""
+        conflict = "chat_id, user_id" if group else "user_id"
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
                 connection.execute(
-                    """
-                    INSERT INTO user_states (
+                    f"""
+                    INSERT INTO {table} (
+                        {extra_column}
                         user_id,
                         warmth,
                         irritation,
@@ -208,8 +223,8 @@ class UserStateRepository:
                         delta_appearance,
                         content_mode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
                         playfulness = excluded.playfulness,
@@ -229,7 +244,7 @@ class UserStateRepository:
                         content_mode = excluded.content_mode
                     """,
                     (
-                        user_id,
+                        *key,
                         emotions.warmth,
                         emotions.irritation,
                         emotions.playfulness,
@@ -256,18 +271,21 @@ class UserStateRepository:
 
     def _delete_sync(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> None:
         """Синхронно удалить долгоживущее состояние пользователя."""
+        table, where, key = self._scope(user_id)
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
                 connection.execute(
-                    """
-                    DELETE FROM user_states
-                    WHERE user_id = ?
-                    """,
-                    (user_id,),
+                    f"DELETE FROM {table} WHERE {where}",
+                    key,
                 )
+                if isinstance(user_id, int):
+                    connection.execute(
+                        "DELETE FROM conversation_states WHERE user_id = ?",
+                        (user_id,),
+                    )
         except sqlite3.Error as error:
             raise UserStatePersistenceError(
                 f"Не удалось удалить состояние пользователя {user_id}"
@@ -276,7 +294,7 @@ class UserStateRepository:
     def _initialize(self) -> None:
         """Создать таблицу и применить совместимые изменения схемы."""
         with closing(sqlite3.connect(self._path)) as connection, connection:
-            connection.execute("""
+            schema = """
                 CREATE TABLE IF NOT EXISTS user_states (
                     user_id INTEGER PRIMARY KEY,
                     warmth REAL NOT NULL,
@@ -297,7 +315,22 @@ class UserStateRepository:
                     delta_appearance TEXT NOT NULL DEFAULT '',
                     content_mode TEXT NOT NULL DEFAULT 'unselected'
                 )
-                """)
+                """
+            connection.execute(schema)
+            connection.execute(
+                schema.replace("user_states", "conversation_states")
+                .replace(
+                    "user_id INTEGER PRIMARY KEY,",
+                    "chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,",
+                )
+                .replace(
+                    "content_mode TEXT NOT NULL DEFAULT 'unselected'",
+                    "content_mode TEXT NOT NULL DEFAULT 'unselected', PRIMARY KEY(chat_id, user_id)",
+                )
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS conversation_states_user ON conversation_states(user_id)"
+            )
 
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(user_states)")

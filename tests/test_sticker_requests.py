@@ -133,7 +133,7 @@ def test_screenshot_followup_sends_directly_or_reports_actual_failure(
     message = SimpleNamespace(
         text="скинь какой-то",
         from_user=SimpleNamespace(id=42),
-        chat=SimpleNamespace(id=7),
+        chat=SimpleNamespace(id=7, type="private"),
         answer=AsyncMock(),
     )
     router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
@@ -225,7 +225,7 @@ def test_text_handler_delivers_requested_sticker_without_llm(
         text="а у тебя стикеры есть?",
         caption=None,
         sticker=None,
-        chat=SimpleNamespace(id=7),
+        chat=SimpleNamespace(id=7, type="private"),
         from_user=SimpleNamespace(id=42),
         answer=AsyncMock(),
     )
@@ -252,7 +252,7 @@ def test_text_request_reports_unavailable_or_cooldown(
     message = SimpleNamespace(
         text="Покажи стикер",
         from_user=SimpleNamespace(id=42),
-        chat=SimpleNamespace(id=7),
+        chat=SimpleNamespace(id=7, type="private"),
         answer=AsyncMock(),
     )
     router = create_text_router(cast(ResponseEngine, engine), sticker_service=service)
@@ -326,7 +326,7 @@ def test_start_sends_sticker_after_greeting_and_keeps_age_prompt(
     bot.send_sticker.side_effect = send_sticker
     message = SimpleNamespace(
         from_user=SimpleNamespace(id=42),
-        chat=SimpleNamespace(id=7),
+        chat=SimpleNamespace(id=7, type="private"),
         answer=AsyncMock(side_effect=answer),
     )
     router = create_start_router(

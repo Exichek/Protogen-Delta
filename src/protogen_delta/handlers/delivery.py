@@ -11,6 +11,7 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
+from protogen_delta.core.chat_scope import chat_scope_options
 from protogen_delta.core.message_utils import reply_delay_seconds, split_reply
 from protogen_delta.services.response_engine import ReplyDelivery
 from protogen_delta.services.stickers import ContextualStickerService
@@ -108,6 +109,9 @@ def create_reply_delivery(
                         context_tags=context_tags,
                         context_text=context_text,
                         reply_text=reply,
+                        scope_chat_id=chat_scope_options(
+                            message.chat.id, message.chat.type
+                        ).get("chat_id"),
                     )
                 except Exception:
                     logger.exception("Не удалось обработать контекстный стикер")

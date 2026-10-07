@@ -1,10 +1,9 @@
 """Обработчик обычных текстовых сообщений."""
 
-from typing import TypedDict
-
 from aiogram import Bot, F, Router
 from aiogram.types import Message
 
+from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.rp import (
@@ -19,7 +18,7 @@ RATE_LIMIT_REPLY = "Слишком быстро :D Подожди пару се�
 BUSY_REPLY = "Я ещё отвечаю на предыдущее сообщение. Подожди немного."
 
 
-class _InputContext(TypedDict, total=False):
+class _InputContext(ChatScopeOptions, total=False):
     trusted_input_context: str
     use_personal_facts: bool
 
@@ -47,10 +46,12 @@ def create_text_router(
             return
 
         user_id = message.from_user.id
+        scope = chat_scope_options(message.chat.id, message.chat.type)
 
         if is_roleplay_stop_message(message.text):
             was_active = await response_engine.disable_roleplay(
                 user_id,
+                **scope,
             )
 
             if was_active:
@@ -65,7 +66,7 @@ def create_text_router(
             return
 
         if sticker_service is not None and sticker_service.is_request(
-            user_id, message.text
+            user_id, message.text, **scope
         ):
             if not sticker_service.is_available(user_id):
                 await message.answer(
@@ -75,6 +76,7 @@ def create_text_router(
                 chat_id=message.chat.id,
                 user_id=user_id,
                 context_text=message.text,
+                scope_chat_id=scope.get("chat_id"),
             ):
                 await message.answer(
                     "Сейчас не получилось отправить стикер. Подожди немного "
@@ -83,7 +85,7 @@ def create_text_router(
             return
 
         try:
-            input_context: _InputContext = {}
+            input_context: _InputContext = {**scope}
             if (
                 message.chat.type in {"group", "supergroup", "channel"}
                 or message.forward_origin is not None

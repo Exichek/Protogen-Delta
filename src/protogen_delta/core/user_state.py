@@ -12,6 +12,8 @@ from typing import Literal, Protocol
 
 logger = logging.getLogger(__name__)
 
+StateKey = int | tuple[int, int]
+
 ContentMode = Literal["unselected", "soft", "adult"]
 
 _SECONDS_PER_HOUR = 3600.0
@@ -133,14 +135,14 @@ class UserStatePersistence(Protocol):
 
     async def load(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> PersistentUserState | None:
         """Загрузить долгоживущее состояние пользователя."""
         ...
 
     async def save(
         self,
-        user_id: int,
+        user_id: StateKey,
         *,
         emotions: EmotionalState,
         relationship: RelationshipState,
@@ -159,7 +161,7 @@ class UserStatePersistence(Protocol):
 
     async def delete(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> None:
         """Удалить долгоживущее состояние пользователя."""
         ...
@@ -261,14 +263,14 @@ class UserStateStore:
         if not isfinite(retention_seconds):
             raise ValueError("retention_seconds должен быть конечным числом")
 
-        self._states: OrderedDict[int, UserState] = OrderedDict()
+        self._states: OrderedDict[StateKey, UserState] = OrderedDict()
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
         self._clock = clock or monotonic
         self._wall_clock = wall_clock or time
         self._persistence = persistence
 
-    def get(self, user_id: int) -> UserState:
+    def get(self, user_id: StateKey) -> UserState:
         """Получить runtime-состояние пользователя или создать новое."""
         now = self._clock()
 
@@ -298,7 +300,7 @@ class UserStateStore:
     @asynccontextmanager
     async def use(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> AsyncIterator[UserState]:
         """Безопасно предоставить состояние для пользовательской операции."""
         state = self.get(user_id)
@@ -342,7 +344,30 @@ class UserStateStore:
             self._states.move_to_end(user_id)
             state.active_operations -= 1
 
-    def remove(self, user_id: int) -> bool:
+    def get_conversation(self, user_id: int, chat_id: int | None = None) -> UserState:
+        """Получить только состояние этого чата, с общим возрастным режимом."""
+        private = self.get(user_id)
+        if chat_id is None:
+            return private
+        state = self.get((chat_id, user_id))
+        state.content_mode = private.content_mode
+        return state
+
+    @asynccontextmanager
+    async def use_conversation(
+        self, user_id: int, chat_id: int | None = None
+    ) -> AsyncIterator[UserState]:
+        """Изолировать групповые поля; общий lock также защищает полный reset."""
+        async with self.use(user_id) as private:
+            if chat_id is None:
+                yield private
+            else:
+                async with self.use((chat_id, user_id)) as state:
+                    # Из лички переносится только выбранный возрастной режим.
+                    state.content_mode = private.content_mode
+                    yield state
+
+    def remove(self, user_id: StateKey) -> bool:
         """Безопасно удалить состояние пользователя, если оно не используется."""
         state = self._states.get(user_id)
 
@@ -358,7 +383,7 @@ class UserStateStore:
 
     async def reset_user(
         self,
-        user_id: int,
+        user_id: StateKey,
     ) -> None:
         """Полностью забыть состояние конкретного пользователя."""
         state = self.get(user_id)
@@ -369,6 +394,12 @@ class UserStateStore:
                 if self._persistence is not None:
                     await self._persistence.delete(user_id)
 
+                if isinstance(user_id, int):
+                    for key, conversation in self._states.items():
+                        if isinstance(key, tuple) and key[1] == user_id:
+                            conversation.reset_all()
+                            conversation.emotions_updated_at = self._wall_clock()
+                            conversation.persistence_loaded = True
                 state.reset_all()
                 state.emotions_updated_at = self._wall_clock()
                 state.persistence_loaded = True
@@ -384,7 +415,7 @@ class UserStateStore:
 
     async def _load_persistent_state(
         self,
-        user_id: int,
+        user_id: StateKey,
         state: UserState,
     ) -> None:
         """Однократно восстановить долгоживущее состояние под lock пользователя."""

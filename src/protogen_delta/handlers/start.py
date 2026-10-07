@@ -7,6 +7,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.chat_scope import chat_scope_options
 from protogen_delta.core.message_utils import split_message
 from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.handlers.adult import send_age_prompt
@@ -183,6 +184,9 @@ def create_start_router(
                     user_id=user_id,
                     context_text="привет",
                     reply_text=reply,
+                    scope_chat_id=chat_scope_options(
+                        message.chat.id, message.chat.type
+                    ).get("chat_id"),
                 )
             except Exception:
                 logger.exception("Не удалось обработать приветственный стикер")
