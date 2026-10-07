@@ -45,6 +45,7 @@ from protogen_delta.services.fetishes import (
     detect_fetishes,
 )
 from protogen_delta.services.insults import InsultClassifier, InsultType
+from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.interaction_state import (
     apply_interaction_effects,
 )
@@ -134,6 +135,7 @@ class ResponseEngine:
         memory: MemoryService | None = None,
         creator_id: int | None = None,
         reply_transform: Callable[[int, str], str] | None = None,
+        interaction_classifier: InteractionClassifier | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -161,6 +163,7 @@ class ResponseEngine:
         self._memory = memory
         self._creator_id = creator_id
         self._reply_transform = reply_transform
+        self._interaction_classifier = interaction_classifier
         self._delivering_users: set[int] = set()
 
     async def respond_and_deliver(
@@ -340,15 +343,21 @@ class ResponseEngine:
         ):
             return PreparedReply(RP_SETUP_REPLY, user_message)
 
-        insult_type, mood = await asyncio.gather(
-            self._insult_classifier.classify(
-                user_message,
-            ),
-            self._update_mood(
-                user_message,
-                user_state,
-            ),
-        )
+        if self._interaction_classifier is not None:
+            interaction = await self._interaction_classifier.classify(user_message)
+            insult_type, mood = interaction.insult, interaction.mood
+            if mood is not None:
+                user_state.mood = mood
+        else:
+            insult_type, mood = await asyncio.gather(
+                self._insult_classifier.classify(
+                    user_message,
+                ),
+                self._update_mood(
+                    user_message,
+                    user_state,
+                ),
+            )
 
         apply_interaction_effects(
             user_state,

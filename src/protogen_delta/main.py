@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from contextlib import suppress
 from typing import cast
 
 from aiogram import Bot, Dispatcher
@@ -14,6 +15,7 @@ from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import Settings, load_settings
 from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.runtime_health import PollingHealthMiddleware, RuntimeHealth
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands, set_user_commands
 from protogen_delta.core.user_state import ContentMode, UserStateStore
@@ -56,8 +58,10 @@ from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
+from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
+from protogen_delta.services.menu_sync import synchronize_menus
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
@@ -124,8 +128,12 @@ async def main() -> None:
     setup_logging(settings.log_level)
 
     bot = _create_bot(settings)
+    health = RuntimeHealth()
+    bot.session.middleware.register(PollingHealthMiddleware(health))
+    menu_task: asyncio.Task[None] | None = None
     deepseek: DeepSeekService | None = None
     proactive_messenger: ProactiveMessenger | None = None
+    native_work = NativeWorkPool(2)
     proactive_task: asyncio.Task[None] | None = None
     mini_app_server: MiniAppServer | None = None
     audio_understanding: AudioUnderstandingService | None = None
@@ -141,6 +149,7 @@ async def main() -> None:
                 ),
                 settings.audio_model or "",
                 input_data_url=settings.audio_input_data_url,
+                native_work=native_work,
             )
         dispatcher = Dispatcher()
         register_error_handler(dispatcher)
@@ -287,6 +296,9 @@ async def main() -> None:
             memory=memory,
             creator_id=settings.creator_id,
             reply_transform=sticker_service.correct_reply,
+            interaction_classifier=InteractionClassifier(
+                deepseek, mood_prompt, insult_prompt
+            ),
         )
         sticker_importer = StickerPackImporter(bot, stickers_repository)
         if settings.sticker_pack_enabled:
@@ -393,7 +405,6 @@ async def main() -> None:
             bot=bot,
             sticker_service=sticker_service,
         )
-        native_work = NativeWorkPool(2)
         media_router = create_media_router(
             response_engine,
             bot,
@@ -416,12 +427,16 @@ async def main() -> None:
                 model_size=settings.whisper_model_size,
                 device=settings.whisper_device,
                 compute_type=settings.whisper_compute_type,
+                native_work=native_work,
             ),
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            native_work=native_work,
             audio_understanding=audio_understanding,
             music_recognition=(
-                MusicRecognitionService(settings.music_audd_api_token)
+                MusicRecognitionService(
+                    settings.music_audd_api_token, native_work=native_work
+                )
                 if settings.music_audd_api_token
                 else None
             ),
@@ -457,10 +472,6 @@ async def main() -> None:
             drop_pending_updates=False,
         )
         await set_commands(bot, settings.mini_app_url)
-        for user_id in users_repository.get_all():
-            async with user_states.use(user_id) as state:
-                mode = state.content_mode
-            await on_mode_change(user_id, mode)
 
         # Команда /proactive временно скрыта: на время этого режима фоновые
         # сообщения включаются всем, включая ранее отключившие их в тестах.
@@ -477,10 +488,17 @@ async def main() -> None:
                 on_mode_change=on_mode_change,
                 tools=MiniAppTools(bot, downloader),
                 native_work=native_work,
+                runtime_health=health,
             )
             await mini_app_server.start()
 
         logger.info("Бот запущен")
+        menu_task = asyncio.create_task(
+            synchronize_menus(
+                users_repository.get_all(),
+                lambda user_id: on_mode_change(user_id, "unselected"),
+            )
+        )
 
         proactive_messenger = ProactiveMessenger(
             bot=bot,
@@ -497,6 +515,11 @@ async def main() -> None:
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
+        health.stop()
+        if menu_task is not None:
+            menu_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await menu_task
         if proactive_messenger is not None:
             proactive_messenger.stop()
         if proactive_task is not None:

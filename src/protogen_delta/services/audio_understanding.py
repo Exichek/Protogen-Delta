@@ -10,6 +10,8 @@ import av
 from openai import AsyncOpenAI, OpenAIError
 
 from protogen_delta.services.audio_analysis import AudioAnalysisError
+from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.native_work import NativeWorkPool
 
 logger = logging.getLogger(__name__)
 MAX_SEMANTIC_SECONDS = 60
@@ -29,7 +31,9 @@ def audio_excerpt(data: bytes, *, seconds: int | None = None) -> bytes:
     samples = bytearray()
     limit = seconds * SAMPLE_RATE * 2
     try:
-        with av.open(io.BytesIO(data), mode="r") as container:
+        with av.open(
+            io.BytesIO(data), mode="r", options={"protocol_whitelist": "pipe"}
+        ) as container:
             stream = next(iter(container.streams.audio), None)
             if stream is None:
                 raise AudioAnalysisError("Нет аудиопотока")
@@ -59,9 +63,15 @@ class AudioUnderstandingService:
     """OpenAI-compatible input_audio, например Qwen-Omni; отдельно от chat LLM."""
 
     def __init__(
-        self, client: AsyncOpenAI, model: str, *, input_data_url: bool = False
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        *,
+        input_data_url: bool = False,
+        native_work: WorkRunner | None = None,
     ) -> None:
         self._client = client
+        self._native_work = native_work or NativeWorkPool(2)
         self._model = model
         self._input_data_url = input_data_url
         self._free_openrouter = (
@@ -71,7 +81,12 @@ class AudioUnderstandingService:
 
     async def analyze(self, data: bytes) -> str:
         async with self._slots:
-            excerpt = await asyncio.to_thread(audio_excerpt, data)
+            try:
+                excerpt = await self._native_work.run(audio_excerpt, data)
+            except ValueError as error:
+                raise AudioAnalysisError(
+                    "Не удалось подготовить фрагмент аудио"
+                ) from error
             encoded = base64.b64encode(excerpt).decode("ascii")
             try:
                 async with asyncio.timeout(45):

@@ -14,11 +14,12 @@ from aiogram.types import Update
 from test_audio_understanding import wav_data
 from test_voice_handler import _message
 
-import protogen_delta.handlers.voice as voice_module
+import protogen_delta.services.audio_pipeline as voice_module
 import protogen_delta.services.music as module
 from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.services.audio_analysis import AudioAnalysisError
+from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.music import (
     MusicRecognitionError,
     MusicRecognitionService,
@@ -100,7 +101,7 @@ def test_recognizer_uploads_only_twelve_seconds_and_parses_result(
     session.__aenter__ = AsyncMock(return_value=SimpleNamespace(post=post))
     session.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr(module.aiohttp, "ClientSession", Mock(return_value=session))
-    service = MusicRecognitionService("test-token")
+    service = MusicRecognitionService("test-token", native_work=BlockingWorkPool(2))
     report = asyncio.run(service.recognize(wav_data(15)))
     assert report is not None
     result = json.loads(report)
@@ -151,7 +152,7 @@ def test_recognizer_handles_no_match_and_errors(
     )
     session.__aexit__ = AsyncMock(return_value=False)
     monkeypatch.setattr(module.aiohttp, "ClientSession", Mock(return_value=session))
-    service = MusicRecognitionService("test-token")
+    service = MusicRecognitionService("test-token", native_work=BlockingWorkPool(2))
     if expected == "error":
         with pytest.raises(MusicRecognitionError):
             asyncio.run(service.recognize(wav_data()))
@@ -162,7 +163,7 @@ def test_recognizer_handles_no_match_and_errors(
 def test_recognizer_network_and_invalid_audio_fail_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = MusicRecognitionService("test-token")
+    service = MusicRecognitionService("test-token", native_work=BlockingWorkPool(2))
     with pytest.raises(MusicRecognitionError):
         asyncio.run(service.recognize(b"bad"))
     session = Mock()
@@ -202,7 +203,13 @@ def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
                 file_name="a.mp3",
             )
         )
-        router = create_voice_router(engine, bot, speech, music_recognition=recognizer)
+        router = create_voice_router(
+            engine,
+            bot,
+            speech,
+            music_recognition=recognizer,
+            native_work=BlockingWorkPool(2),
+        )
         await router.message.handlers[0].callback(message)
         call = engine.respond_and_deliver.await_args
         assert "Track" in call.args[1] and "Recognized" in call.args[1]
@@ -211,7 +218,13 @@ def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
         assert "не изображай прослушивание" in call.kwargs["trusted_input_context"]
         answer.assert_not_awaited()
         recognizer.recognize.side_effect = MusicRecognitionError("offline")
-        other = create_voice_router(engine, bot, speech, music_recognition=recognizer)
+        other = create_voice_router(
+            engine,
+            bot,
+            speech,
+            music_recognition=recognizer,
+            native_work=BlockingWorkPool(2),
+        )
         await other.message.handlers[0].callback(message)
         assert (
             "Recognized"
@@ -245,7 +258,9 @@ def test_audio_document_reaches_voice_instead_of_document_reader(
         )
         dispatcher = Dispatcher()
         dispatcher.include_router(create_document_router(engine, bot))
-        dispatcher.include_router(create_voice_router(engine, bot, speech))
+        dispatcher.include_router(
+            create_voice_router(engine, bot, speech, native_work=BlockingWorkPool(2))
+        )
         update = Update.model_validate(
             {
                 "update_id": 1,

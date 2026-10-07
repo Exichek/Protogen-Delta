@@ -3,6 +3,7 @@
 import base64
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ def apply_limits() -> None:
 
         resource.setrlimit(resource.RLIMIT_AS, (1024**3, 1024**3))
         resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT, MAX_OUTPUT))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (20 * 1024 * 1024, 20 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
@@ -33,6 +34,22 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
     operation = request["operation"]
     args, kwargs = request["args"], request["kwargs"]
     try:
+        if operation == "audio":
+            from protogen_delta.services.audio_analysis import analyze_audio
+
+            return {"analysis": asdict(analyze_audio(data))}
+        if operation == "tags":
+            from protogen_delta.services.music import audio_tags
+
+            return {"tags": audio_tags(data)}
+        if operation == "clip":
+            from protogen_delta.services.audio_understanding import audio_excerpt
+
+            return {
+                "clip": base64.b64encode(audio_excerpt(data, *args, **kwargs)).decode(
+                    "ascii"
+                )
+            }
         if operation == "document":
             result = extract_document(data, *args, **kwargs)
             value: dict[str, Any] = {
@@ -91,6 +108,18 @@ def main() -> None:
         or request.stat().st_size > 8192
     ):
         raise ValueError("input_size")
+    parsed_request = json.loads(request.read_text("utf-8"))
+    if parsed_request.get("operation") == "speech":
+        from protogen_delta.services.speech_audio import prepare_speech_audio
+
+        try:
+            pcm = prepare_speech_audio(source.read_bytes())
+            if len(pcm) > 20 * 1024 * 1024:
+                raise ValueError("speech_size")
+            target.write_bytes(pcm)
+        except Exception:
+            target.write_bytes(b'{"error":"failed"}')
+        return
     payload = json.dumps(
         perform(source.read_bytes(), json.loads(request.read_text("utf-8"))),
         ensure_ascii=False,

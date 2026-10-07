@@ -5,7 +5,8 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
-from protogen_delta.services.blocking_work import BlockingWorkPool
+from protogen_delta.services.blocking_work import BlockingWorkPool, WorkRunner
+from protogen_delta.services.speech_audio import prepare_speech_audio
 
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 MAX_AUDIO_DURATION_SECONDS = 600
@@ -34,6 +35,7 @@ class SpeechTranscriber:
         model_size: str = "small",
         device: str = "cpu",
         compute_type: str = "int8",
+        native_work: WorkRunner | None = None,
     ) -> None:
         """Сохранить параметры модели без её немедленной загрузки."""
         self._model_size = model_size
@@ -42,6 +44,7 @@ class SpeechTranscriber:
         self._model: Any | None = None
         self._model_lock = asyncio.Lock()
         self._work = BlockingWorkPool()
+        self._native_work = native_work
 
     async def _ensure_model(self) -> Any:
         """Создать единственный экземпляр модели при первом голосовом сообщении."""
@@ -78,6 +81,13 @@ class SpeechTranscriber:
             raise SpeechRecognitionError("Аудиофайл пуст")
         if len(data) > MAX_AUDIO_BYTES:
             raise SpeechRecognitionError("Аудиофайл превышает 20 МБ")
+        if self._native_work is not None:
+            try:
+                data = await self._native_work.run(prepare_speech_audio, data)
+            except (ValueError, OSError) as error:
+                raise SpeechRecognitionError(
+                    "Не удалось подготовить аудио для Whisper"
+                ) from error
         model = await self._ensure_model()
         return await self._work.run(self._transcribe_sync, model, data)
 

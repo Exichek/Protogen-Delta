@@ -1,6 +1,5 @@
 """Обработчик голосовых сообщений и аудиофайлов с речью."""
 
-import asyncio
 import io
 import json
 import logging
@@ -12,13 +11,13 @@ from aiogram.types import Message
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
-from protogen_delta.services.audio_analysis import AudioAnalysisError, analyze_audio
+from protogen_delta.services.audio_pipeline import AudioPipeline
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
+from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.music import (
-    MusicRecognitionError,
     MusicRecognitionService,
-    audio_tags,
 )
+from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.response_engine import (
     ResponseBusyError,
     ResponseEngine,
@@ -27,7 +26,6 @@ from protogen_delta.services.response_engine import (
 from protogen_delta.services.speech import (
     MAX_AUDIO_BYTES,
     MAX_AUDIO_DURATION_SECONDS,
-    SpeechRecognitionError,
     SpeechTranscriber,
 )
 from protogen_delta.services.stickers import ContextualStickerService
@@ -47,10 +45,18 @@ def create_voice_router(
     sticker_service: ContextualStickerService | None = None,
     audio_understanding: AudioUnderstandingService | None = None,
     music_recognition: MusicRecognitionService | None = None,
+    *,
+    native_work: WorkRunner | None = None,
 ) -> Router:
     """Создать роутер распознавания голосовых и обычного аудио."""
     router = Router(name=__name__)
     limiter = rate_limiter or UserRateLimiter()
+    pipeline = AudioPipeline(
+        transcriber,
+        native_work or NativeWorkPool(2),
+        audio_understanding,
+        music_recognition,
+    )
 
     @router.message(
         F.voice
@@ -85,56 +91,34 @@ def create_voice_router(
             return
 
         async with show_typing(message, bot, initial_delay_seconds=1.2):
-            analysis = None
-            semantic_report = None
-            music_report = None
-            metadata: dict[str, str] = {}
+            data = destination.getvalue()
+            if len(data) > MAX_AUDIO_BYTES:
+                await message.answer(AUDIO_TOO_LARGE_REPLY)
+                return
+            result = await pipeline.collect(data, uploaded=is_uploaded_audio)
+            analysis, semantic_report, music_report = (
+                result.analysis,
+                result.semantic_report,
+                result.music_report,
+            )
+            transcript = result.transcript
+            metadata = dict(result.metadata or {})
             if is_uploaded_audio:
-                metadata = await asyncio.to_thread(audio_tags, destination.getvalue())
                 for key, attribute in (("title", "title"), ("artist", "performer")):
                     value = getattr(media, attribute, None)
                     if isinstance(value, str) and value.strip():
                         metadata[key] = " ".join(value.split())[:200]
-                if music_recognition is not None:
-                    try:
-                        music_report = await music_recognition.recognize(
-                            destination.getvalue()
-                        )
-                    except MusicRecognitionError:
-                        logger.info(
-                            "Распознавание музыки недоступно; продолжаю анализ аудиофайла"
-                        )
-                if audio_understanding is not None:
-                    try:
-                        semantic_report = await audio_understanding.analyze(
-                            destination.getvalue()
-                        )
-                    except AudioAnalysisError:
-                        logger.info(
-                            "Аудиомодель недоступна; использую локальный анализ"
-                        )
-                try:
-                    analysis = await asyncio.to_thread(
-                        analyze_audio,
-                        destination.getvalue(),
-                    )
-                except AudioAnalysisError:
-                    logger.warning(
-                        "Не удалось измерить характеристики аудио", exc_info=True
-                    )
-            try:
-                transcript = await transcriber.transcribe(destination.getvalue())
-            except SpeechRecognitionError:
-                transcript = None
-                logger.info("Whisper не нашёл разборчивую речь в аудио")
-                if (
+            if transcript is None and (
+                (
                     analysis is None
                     and semantic_report is None
                     and not metadata
                     and music_report is None
-                ) or not is_uploaded_audio:
-                    await message.answer(AUDIO_RECOGNITION_ERROR_REPLY)
-                    return
+                )
+                or not is_uploaded_audio
+            ):
+                await message.answer(AUDIO_RECOGNITION_ERROR_REPLY)
+                return
 
             caption = (message.caption or "").strip()
             media_kind = (

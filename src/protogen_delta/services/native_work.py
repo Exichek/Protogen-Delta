@@ -7,6 +7,7 @@ import math
 import os
 import signal
 import sys
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +25,7 @@ from protogen_delta.services.documents import (
 
 MAX_NATIVE_INPUT = 20 * 1024 * 1024
 MAX_NATIVE_OUTPUT = 16 * 1024 * 1024
+MAX_SPEECH_OUTPUT = 20 * 1024 * 1024
 _OPERATIONS = {
     ("protogen_delta.services.documents", "extract_document"): "document",
     (
@@ -31,6 +33,10 @@ _OPERATIONS = {
         "extract_animation_frames",
     ): "animation",
     ("protogen_delta.services.tgs_frames", "extract_tgs_frames"): "tgs",
+    ("protogen_delta.services.audio_analysis", "analyze_audio"): "audio",
+    ("protogen_delta.services.speech_audio", "prepare_speech_audio"): "speech",
+    ("protogen_delta.services.music", "audio_tags"): "tags",
+    ("protogen_delta.services.audio_understanding", "audio_excerpt"): "clip",
     (
         "protogen_delta.services.appearance_image",
         "prepare_appearance_image",
@@ -117,6 +123,9 @@ class NativeWorkPool:
         self, operation: str, data: bytes, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> dict[str, Any]:
         with TemporaryDirectory(prefix="delta-native-") as directory:
+            maximum_output = (
+                MAX_SPEECH_OUTPUT if operation == "speech" else MAX_NATIVE_OUTPUT
+            )
             source = Path(directory) / "input"
             target = Path(directory) / "result.json"
             request = Path(directory) / "request.json"
@@ -148,7 +157,7 @@ class NativeWorkPool:
                 raise
             try:
                 while process.returncode is None:
-                    if target.exists() and target.stat().st_size > MAX_NATIVE_OUTPUT:
+                    if target.exists() and target.stat().st_size > maximum_output:
                         raise NativeWorkError(
                             "Результат обработки файла слишком большой."
                         )
@@ -159,9 +168,13 @@ class NativeWorkPool:
                 if (
                     process.returncode != 0
                     or not target.exists()
-                    or not 0 < target.stat().st_size <= MAX_NATIVE_OUTPUT
+                    or not 0 < target.stat().st_size <= maximum_output
                 ):
                     raise NativeWorkError("Не удалось обработать этот файл.")
+                if operation == "speech":
+                    speech_data = target.read_bytes()
+                    if speech_data.startswith(b"RIFF"):
+                        return {"speech_data": speech_data}
                 value = json.loads(target.read_text("utf-8"))
                 if not isinstance(value, dict):
                     raise NativeWorkError("Некорректный ответ обработчика файла.")
@@ -183,8 +196,58 @@ class NativeWorkPool:
                 raise errors.get(error, DocumentReadError)(
                     "Не удалось прочитать документ"
                 )
+            if operation in {"audio", "tags", "clip", "speech"}:
+                from protogen_delta.services.audio_analysis import AudioAnalysisError
+
+                raise AudioAnalysisError("Не удалось разобрать аудио")
             raise NativeWorkError("Не удалось прочитать этот файл.")
         try:
+            if operation == "speech":
+                import io
+
+                data = value["speech_data"]
+                if not isinstance(data, bytes) or len(data) > MAX_SPEECH_OUTPUT:
+                    raise ValueError("speech_size")
+                with wave.open(io.BytesIO(data), "rb") as wav:
+                    if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (
+                        1,
+                        2,
+                        16000,
+                    ) or not 0 < wav.getnframes() <= 600 * 16000:
+                        raise ValueError("speech_format")
+                    if len(wav.readframes(wav.getnframes())) != wav.getnframes() * 2:
+                        raise ValueError("speech_frames")
+                return data
+            if operation == "tags":
+                tags = value["tags"]
+                if (
+                    not isinstance(tags, dict)
+                    or not set(tags).issubset(
+                        {"title", "artist", "album", "genre", "date"}
+                    )
+                    or not all(
+                        isinstance(v, str) and len(v) <= 200 for v in tags.values()
+                    )
+                ):
+                    raise ValueError("tags")
+                return tags
+            if operation == "clip":
+                clip = base64.b64decode(value["clip"], validate=True)
+                if not 0 < len(clip) <= 2 * 1024 * 1024:
+                    raise ValueError("clip")
+                return clip
+            if operation == "audio":
+                from protogen_delta.services.audio_analysis import AudioAnalysis
+
+                analysis = value["analysis"]
+                if not isinstance(analysis, dict) or not all(
+                    isinstance(v, (int, float))
+                    and not isinstance(v, bool)
+                    and math.isfinite(v)
+                    for v in analysis.values()
+                ):
+                    raise ValueError("analysis")
+                return AudioAnalysis(**analysis)
             raw_images = value.get("images", [])
             if not isinstance(raw_images, list) or len(raw_images) > 4:
                 raise ValueError("images")
@@ -231,5 +294,5 @@ class NativeWorkPool:
                     raise ValueError("appearance")
                 return images[0]
             return images
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError, wave.Error) as error:
             raise NativeWorkError("Некорректный ответ обработчика файла.") from error

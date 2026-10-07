@@ -549,6 +549,7 @@ def test_main_builds_application_and_starts_polling(
         model_size="small",
         device="cpu",
         compute_type="int8",
+        native_work=ANY,
     )
     create_voice_router_mock.assert_called_once_with(
         reset_response_engine,
@@ -558,6 +559,7 @@ def test_main_builds_application_and_starts_polling(
         sticker_service=ANY,
         audio_understanding=None,
         music_recognition=None,
+        native_work=ANY,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
