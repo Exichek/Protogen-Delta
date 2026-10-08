@@ -22,7 +22,7 @@ async function main() {
   const context = await browser.newContext({viewport: {width: 430, height: 932}});
   // Block every external request; these tests never access an actual clipboard or bot.
   await context.route('**/*', route => route.abort());
-  async function fresh(saved = false) {
+  async function fresh(saved = false, loadState = 'ready') {
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     const setup = `<script>
@@ -33,9 +33,12 @@ async function main() {
       window.thumbnail=canvas.toDataURL('image/jpeg');
       if(${saved})Object.assign(window.testProfile,{delta_appearance:'Сергал',delta_appearance_thumbnail:window.thumbnail});
       window.calls=[]; window.failStatus=0; window.failMessage='';
+      window.loadState=${JSON.stringify(loadState)};
       window.fetch=async(url,options)=>{
         window.calls.push({url,method:options.method,headers:options.headers,
           name:options.body?.name,type:options.body?.type,size:options.body?.size});
+        if(options.method==='GET' && window.loadState==='pending')await new Promise(resolve=>window.finishProfileLoad=resolve);
+        if(options.method==='GET' && window.loadState==='failed'){window.failStatus=401;window.failMessage='initData просрочен';}
         if(!window.failStatus && options.method==='POST' && url==='/api/profile/appearance')
           Object.assign(window.testProfile,{delta_appearance:'Новый облик',delta_appearance_thumbnail:window.thumbnail});
         if(!window.failStatus && options.method==='DELETE' && url==='/api/profile/appearance')
@@ -63,13 +66,28 @@ async function main() {
       };
     </script>`;
     await page.setContent(html.replace(/<script src="https:\/\/telegram.org[^>]+><\/script>/, setup));
-    await page.waitForFunction(() => !document.querySelector('#paste-appearance').disabled);
+    if(loadState==='ready')await page.waitForFunction(() => !document.querySelector('#paste-appearance').disabled);
+    else if(loadState==='failed')await page.waitForFunction(() => document.querySelector('#appearance-status').className==='error');
+    else await page.waitForFunction(() => Boolean(window.finishProfileLoad));
     return page;
   }
   const selected = page => page.locator('#appearance-file-name').textContent();
   const message = page => page.locator('#appearance-status').textContent();
   const waitClipboard = page => page.waitForFunction(() => !document.querySelector('#paste-appearance').disabled);
   try {
+    let loading = await fresh(true, 'pending');
+    assert.equal(await loading.locator('#appearance').textContent(), 'Загружаю облик…');
+    assert.equal(await loading.locator('#appearance-empty-hint').isVisible(), false);
+    await loading.evaluate(() => window.finishProfileLoad());
+    await waitClipboard(loading);
+    assert.equal(await loading.locator('#appearance').textContent(), 'Сергал');
+    assert.equal(await loading.locator('#appearance-empty-hint').isVisible(), false);
+    await loading.close(); checks++;
+    loading = await fresh(true, 'failed');
+    assert.equal(await loading.locator('#appearance').textContent(), 'Не удалось загрузить облик.');
+    assert.equal(await loading.locator('#appearance-empty-hint').isVisible(), false);
+    assert.match(await message(loading), /Срок доступа к панели истёк/);
+    await loading.close(); checks++;
     for (const [mime, ext] of [['image/png','png'], ['image/jpeg','jpg'], ['image/webp','webp']]) {
       const page = await fresh();
       await page.evaluate(type => window.setClipboard('image',type), mime);
@@ -92,6 +110,7 @@ async function main() {
       assert.equal(await page.locator('#appearance-preview').isVisible(), false);
       await page.waitForFunction(() => document.querySelector('#saved-appearance-image').naturalWidth > 0);
       assert.equal(await page.locator('#saved-appearance').isVisible(), true);
+      assert.equal(await page.locator('#appearance-empty-hint').isVisible(), false);
       await page.close(); checks++;
     }
     let page = await fresh();
@@ -152,6 +171,7 @@ async function main() {
     page = await fresh(true);
     await page.waitForFunction(() => document.querySelector('#saved-appearance-image').naturalWidth > 0);
     assert.equal(await page.locator('#saved-appearance').isVisible(), true, 'Saved thumbnail restores on opening');
+    assert.equal(await page.locator('#appearance-empty-hint').isVisible(), false);
     assert.equal(await page.evaluate(() => document.querySelector('#saved-appearance').compareDocumentPosition(document.querySelector('#appearance-mode')) & Node.DOCUMENT_POSITION_FOLLOWING), 4);
     await page.evaluate(() => {window.paste();window.failStatus=401;window.failMessage='initData просрочен';});
     await page.locator('#apply-appearance').click();
@@ -162,6 +182,8 @@ async function main() {
     await page.locator('#reset-appearance').click();
     await page.waitForFunction(() => document.querySelector('#appearance-status').textContent.includes('возвращён'));
     assert.equal(await page.locator('#saved-appearance').isVisible(), false);
+    assert.equal(await page.locator('#appearance-empty-hint').isVisible(), true);
+    assert.equal(await page.locator('#appearance').textContent(), 'Базовый облик');
     assert.equal(await selected(page), '');
     await page.close(); checks+=3;
 
