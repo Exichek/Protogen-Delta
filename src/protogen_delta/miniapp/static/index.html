@@ -82,8 +82,8 @@
   </section>
   <section class="card" aria-labelledby="appearance-title">
     <b id="appearance-title">Текущий облик Дельты</b>
-    <p class="muted" id="appearance">Базовый облик</p>
-    <p class="muted">Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
+    <p class="muted" id="appearance">Загружаю облик…</p>
+    <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
     <figure id="saved-appearance" class="saved-appearance" hidden>
       <img id="saved-appearance-image" alt="Сохранённый облик Дельты">
       <figcaption class="muted">Сохранённый облик</figcaption>
@@ -99,7 +99,7 @@
     <p id="appearance-image-hint" class="muted">JPEG, PNG или WebP до 20 МБ.</p>
     <div id="appearance-species-panel">
       <p class="muted" id="appearance-species-status"></p>
-      <label for="appearance-species">Вид персонажа, если знаешь</label>
+      <label for="appearance-species">Вид персонажа</label>
       <input id="appearance-species" type="text" maxlength="80" placeholder="Например, сергал. Можно оставить пустым">
       <label><input id="appearance-same-character" type="checkbox"> Обновить картинку того же персонажа</label>
       <p class="muted">Указанный тобой вид сохраняется отдельно. При обновлении того же персонажа он остаётся прежним; новая картинка уточняет внешность.</p>
@@ -198,6 +198,7 @@
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+    document.querySelector("#appearance-empty-hint").hidden = customAppearance;
     const thumbnail = p.delta_appearance && p.delta_appearance_thumbnail;
     const savedImage = document.querySelector("#saved-appearance-image");
     // The server produces only bounded JPEG data URLs; do not load external URLs.
@@ -342,7 +343,11 @@
   document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
   const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
   updateAppearanceButtons();
-  api().then(render).catch(fail);
+  api().then(render).catch(error => {
+    fail(error);
+    document.querySelector("#appearance").textContent = "Не удалось загрузить облик.";
+    appearanceFail(error);
+  });
   document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
   document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });
 </script>
