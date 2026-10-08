@@ -39,6 +39,11 @@ _TWITTER_HOSTS = frozenset(
     for domain in ("x.com", "twitter.com")
     for prefix in ("", "www.", "m.", "mobile.")
 )
+_TWITTER_EMBED_HOSTS = frozenset(
+    f"{prefix}{domain}"
+    for domain in ("fixupx.com", "fxtwitter.com")
+    for prefix in ("", "www.")
+)
 _TWITTER_PATH = re.compile(
     r"/(?:(?:i/web|[A-Za-z0-9_]+)/status|statuses)/\d+(?:/video/\d+)?/?"
 )
@@ -61,6 +66,7 @@ _HOSTS = (
     )
     | _VK_HOSTS
     | _TWITTER_HOSTS
+    | _TWITTER_EMBED_HOSTS
 )
 
 
@@ -75,6 +81,7 @@ class DownloadedMedia:
     path: Path
     title: str
     compressed: bool = False
+    animation: bool = False
 
 
 def validate_media_url(url: str) -> str:
@@ -91,7 +98,7 @@ def validate_media_url(url: str) -> str:
             and parsed.password is None
             and bool(parsed.path.strip("/"))
             and (
-                parsed.hostname not in _TWITTER_HOSTS
+                parsed.hostname not in _TWITTER_HOSTS | _TWITTER_EMBED_HOSTS
                 or bool(_TWITTER_PATH.fullmatch(parsed.path))
             )
         )
@@ -102,6 +109,9 @@ def validate_media_url(url: str) -> str:
             "Нужна HTTPS-ссылка на одно публичное видео YouTube, Instagram, "
             "TikTok, Vimeo, VK/VK Видео или X/Twitter (ссылка на пост)."
         )
+    if parsed.hostname in _TWITTER_EMBED_HOSTS:
+        # Normalize the post without contacting the embedding service.
+        return parsed._replace(netloc="x.com").geturl()
     if parsed.hostname in _VK_HOSTS | _TWITTER_HOSTS:
         # Экстрактор VK не принимает www; стандартный HTTPS-порт можно опустить.
         return parsed._replace(netloc=parsed.hostname.removeprefix("www.")).geturl()
@@ -142,6 +152,7 @@ class MediaDownloader:
                     result,
                     str(metadata["title"])[:150],
                     metadata.get("compressed") is True,
+                    metadata.get("animation") is True,
                 )
 
     async def _run(self, url: str, directory: Path) -> None:

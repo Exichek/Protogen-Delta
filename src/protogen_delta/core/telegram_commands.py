@@ -28,7 +28,7 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
         BotCommand(command="rp", description="🎭 Управление RP — /rp off"),
         BotCommand(command="adult", description="🔞 Выбрать возрастной режим"),
         BotCommand(command="id", description="🪪 Узнать Telegram ID"),
-        BotCommand(command="download", description="📥 Скачать видео по ссылке"),
+        BotCommand(command="download", description="📥 Скачать видео или GIF из X"),
         BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
         BotCommand(command="memory", description="🧠 Мой постоянный профиль"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),

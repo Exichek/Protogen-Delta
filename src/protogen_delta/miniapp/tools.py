@@ -82,7 +82,9 @@ class MiniAppTools:
                     "\nСжато для отправки в Telegram." if media.compressed else ""
                 )
                 try:
-                    if media.path.suffix.lower() == ".mp4":
+                    if media.animation:
+                        await self._bot.send_animation(user_id, file, caption=caption)
+                    elif media.path.suffix.lower() == ".mp4":
                         await self._bot.send_video(
                             user_id, file, caption=caption, supports_streaming=True
                         )
@@ -92,4 +94,10 @@ class MiniAppTools:
                     raise ValueError(
                         "Telegram не принял файл. Открой чат с ботом и попробуй позже."
                     ) from error
-        return {"message": "Видео отправлено тебе в чат с Дельтой."}
+        return {
+            "message": (
+                "GIF отправлен тебе в чат с Дельтой."
+                if media.animation
+                else "Видео отправлено тебе в чат с Дельтой."
+            )
+        }
