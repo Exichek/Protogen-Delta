@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
+from appearance_fixtures import observation, verified
 from test_response_engine import _create_engine
 
 from protogen_delta.config.prompt_loader import load_prompt
@@ -37,14 +38,23 @@ def test_appearance_extraction_receives_species_reference() -> None:
     engine, _, model, _, _, _ = _create_engine()
     guide = load_prompt("furry_species_reference.txt")
     engine._config = replace(engine._config, species_prompt=guide)
-    model.chat.return_value = "Сергал с голубой шерстью и клиновидной головой."
+    model.analyze_visual_features.return_value = observation(
+        "head_wedge", "fur", "tail_long"
+    )
+    model.chat.return_value = verified(
+        "Голубая шерсть, клиновидная голова.", "sergal", "probable"
+    )
     asyncio.run(
         engine.set_delta_appearance_from_image(
             42, ImageInput(b"image", "image/png", "референс")
         )
     )
     sent = model.chat.await_args.kwargs["system_prompt"]
-    assert guide in sent
-    assert "не порода волка и не акула" in sent
-    assert "Гибрид" in sent
-    assert sent.endswith(load_prompt("appearance_identification.txt"))
+    assert guide not in sent
+    assert "Карточки содержат ориентиры" in sent
+    assert load_prompt("appearance_identification.txt") in sent
+    assert '"sergal"' in model.chat.await_args.kwargs["user_message"]
+    assert (
+        model.analyze_visual_features.await_args.kwargs["images"]
+        == model.chat.await_args.kwargs["images"]
+    )

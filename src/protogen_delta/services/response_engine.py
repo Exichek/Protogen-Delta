@@ -2,10 +2,11 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
-from protogen_delta.config.prompt_loader import load_prompt
+from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.roleplay import (
@@ -25,8 +26,12 @@ from protogen_delta.core.user_state import (
     UserStateStore,
 )
 from protogen_delta.repositories.user_facts import FactsUpdate
+from protogen_delta.services.appearance_analysis import (
+    AppearanceAnalyzer,
+    declared_species,
+    validate_species_hint,
+)
 from protogen_delta.services.appearance_description import (
-    APPEARANCE_LIMIT,
     validate_description,
 )
 from protogen_delta.services.deepseek import (
@@ -81,7 +86,6 @@ RP_SETUP_REPLY = (
     "кто ты, где мы находимся и с чего начинаем. Можно указать только важные "
     "детали — остальное подхватим по ходу."
 )
-_APPEARANCE_LIMIT = APPEARANCE_LIMIT
 
 
 class ResponseBusyError(Exception):
@@ -819,7 +823,12 @@ class ResponseEngine:
         )
 
     async def set_delta_appearance_from_image(
-        self, user_id: int, image: ImageInput
+        self,
+        user_id: int,
+        image: ImageInput,
+        *,
+        species_hint: str = "",
+        update_existing: bool = False,
     ) -> str:
         """Назначить внешность через Mini App без запуска RP и генерации реплики."""
         if user_id in self._delivering_users:
@@ -828,7 +837,11 @@ class ResponseEngine:
         try:
             async with self._user_states.use_conversation(user_id) as state:
                 result = await self._update_delta_appearance(
-                    "Хочу тебя видеть в таком облике", state, (image,)
+                    "Хочу тебя видеть в таком облике",
+                    state,
+                    (image,),
+                    species_hint=species_hint,
+                    update_existing=update_existing,
                 )
                 if result != "updated":
                     raise AppearanceAnalysisError
@@ -845,6 +858,12 @@ class ResponseEngine:
         try:
             async with self._user_states.use_conversation(user_id) as state:
                 state.delta_appearance = description
+                hint = declared_species(description)
+                state.delta_species = (
+                    AppearanceSpecies(hint, None, "user", "declared").encode()
+                    if hint
+                    else ""
+                )
             return description
         finally:
             self._delivering_users.remove(user_id)
@@ -854,10 +873,14 @@ class ResponseEngine:
         user_message: str,
         user_state: UserState,
         images: Sequence[ImageInput],
+        *,
+        species_hint: str = "",
+        update_existing: bool = False,
     ) -> str | None:
         """Сохранить или сбросить назначенный по изображению облик Дельты."""
         if has_delta_appearance_reset(user_message):
             user_state.delta_appearance = ""
+            user_state.delta_species = ""
             return "cleared"
         if not images or not has_delta_appearance_intent(user_message):
             return None
@@ -867,36 +890,30 @@ class ResponseEngine:
             if user_state.content_mode == "adult"
             else "Не включай в карточку откровенные сексуальные подробности."
         )
-        prompt = load_prompt("appearance_extraction").format(
-            limit=_APPEARANCE_LIMIT, content_rules=adult_details
-        )
-        if self._config.species_prompt:
-            prompt += "\n\n" + self._config.species_prompt
-        prompt += "\n\n" + load_prompt("appearance_identification")
-        try:
-            description = await self._deepseek.chat(
-                system_prompt=prompt,
-                user_message=(
-                    "Составь карточку внешности персонажа, которого пользователь "
-                    f"назначает новым обликом Дельты. Его подпись: {user_message!r}"
-                ),
-                images=images,
-                tool_names=frozenset(),
+        hint = validate_species_hint(species_hint) or declared_species(user_message)
+        previous = AppearanceSpecies.decode(user_state.delta_species)
+        same_character = update_existing or bool(
+            re.search(
+                r"(?:тот же|того же|этот же|того самого)\s+(?:персонаж|облик)",
+                user_message,
+                re.I,
             )
-        except DeepSeekError:
+        )
+        if not hint and same_character and previous and previous.source == "user":
+            hint = previous.name
+        try:
+            result = await AppearanceAnalyzer(self._deepseek).analyze(
+                images, user_message, adult_details, species_hint=hint
+            )
+        except DeepSeekError, ValueError, TimeoutError, RecursionError:
             logger.warning(
                 "Не удалось извлечь назначенный облик Дельты из изображения",
                 exc_info=True,
             )
             return None
 
-        description = " ".join(description.split()).strip()
-        if not description or description in {
-            "НЕОДНОЗНАЧНЫЙ_РЕФЕРЕНС",
-            "НЕЧИТАЕМЫЙ_РЕФЕРЕНС",
-        }:
-            return None
-        user_state.delta_appearance = description[:_APPEARANCE_LIMIT]
+        user_state.delta_appearance = result.description
+        user_state.delta_species = result.species.encode()
         return "updated"
 
     def _register_reply(

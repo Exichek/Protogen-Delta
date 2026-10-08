@@ -12,6 +12,7 @@
     main { width: min(100%, 720px); margin: 0 auto; padding: max(20px,env(safe-area-inset-top)) 16px max(32px,env(safe-area-inset-bottom)); }
     header { display:flex; gap:14px; align-items:center; margin-bottom:20px; }
     .visor { width:56px; height:56px; border-radius:18px; display:grid; place-items:center; font-size:28px; background:linear-gradient(145deg,#25234c,#00b6d6); box-shadow:0 10px 28px #00b6d633; }
+    #appearance-same-character { width:auto; margin-right:6px; padding:0; }
     h1 { margin:0; font-size:24px; } .muted { color:var(--tg-theme-hint-color,#95a4b8); margin:4px 0 0; }
     .card { background:var(--tg-theme-secondary-bg-color,#162333); border:1px solid #ffffff12; border-radius:18px; padding:16px; margin:12px 0; box-shadow:0 12px 30px #0003; }
     .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
@@ -82,6 +83,13 @@
       <details><summary>Пример JSON</summary><pre>{"species":"Дракон", "colors":"Бирюзовая чешуя", "hair":"Белая грива", "tail":"Длинный, белый кончик"}</pre><p class="muted">Можно также {"appearance":"Полное описание внешности"}.</p></details>
     </div>
     <p id="appearance-image-hint" class="muted">JPEG, PNG или WebP до 20 МБ.</p>
+    <div id="appearance-species-panel">
+      <p class="muted" id="appearance-species-status"></p>
+      <label for="appearance-species">Вид персонажа, если знаешь</label>
+      <input id="appearance-species" type="text" maxlength="80" placeholder="Например, сергал. Можно оставить пустым">
+      <label><input id="appearance-same-character" type="checkbox"> Обновить картинку того же персонажа</label>
+      <p class="muted">Указанный тобой вид сохраняется отдельно. При обновлении того же персонажа он остаётся прежним; новая картинка уточняет внешность.</p>
+    </div>
     <input id="appearance-file" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
     <img id="appearance-preview" class="appearance-preview" alt="Выбранный арт для облика" hidden>
     <p id="appearance-file-name" class="muted"></p>
@@ -118,9 +126,9 @@
 <script>
   const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
   const initData = tg?.initData || ""; const status = document.querySelector("#status");
-  const api = async (method="GET", body=null, path="/api/profile") => {
+  const api = async (method="GET", body=null, path="/api/profile", extraHeaders={}) => {
     const file = body instanceof File;
-    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":file ? (body.type || "application/octet-stream") : "application/json"}, body:file ? body : body?JSON.stringify(body):null});
+    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":file ? (body.type || "application/octet-stream") : "application/json",...extraHeaders}, body:file ? body : body?JSON.stringify(body):null});
     if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`); return response.json();
   };
   const render = p => {
@@ -148,11 +156,15 @@
     fileInput.disabled = appearanceBusy || !appearanceEnabled;
     appearanceMode.disabled = appearanceBusy;
     descriptionInput.disabled = appearanceBusy || !appearanceEnabled;
+    document.querySelector("#appearance-species").disabled = appearanceBusy || !appearanceEnabled;
+    document.querySelector("#appearance-same-character").disabled = appearanceBusy || !appearanceEnabled || !customAppearance;
   };
   const renderAppearance = p => {
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+    const species = p.delta_species;
+    document.querySelector("#appearance-species-status").textContent = species ? `${species.source === "user" ? "Вид со слов пользователя" : species.status === "probable" ? "Предполагаемый вид" : "Определение вида"}: ${species.name}` : "";
     updateAppearanceButtons();
   };
   const clearSelection = () => {
@@ -168,6 +180,7 @@
     const text = appearanceMode.value === "text";
     document.querySelector("#appearance-text-panel").hidden = !text;
     document.querySelector("#appearance-image-hint").hidden = text;
+    document.querySelector("#appearance-species-panel").hidden = text;
     document.querySelector("#choose-appearance").textContent = text ? "Загрузить TXT/JSON" : "Выбрать картинку";
     fileInput.accept = text ? ".txt,.json,text/plain,application/json" : "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
     updateAppearanceButtons();
@@ -190,8 +203,10 @@
     if (appearanceBusy || (!selectedFile && !descriptionInput.value.trim())) return;
     appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent=appearanceMode.value === "text" ? "Сохраняю описание…" : "Разбираю внешность…";
     try {
-      const profile = await api(appearanceMode.value === "text" ? "PUT" : "POST", selectedFile || {appearance:descriptionInput.value}, "/api/profile/appearance");
+      const headers = appearanceMode.value === "image" ? {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#appearance-species").value.trim(),update_existing:document.querySelector("#appearance-same-character").checked}))} : {};
+      const profile = await api(appearanceMode.value === "text" ? "PUT" : "POST", selectedFile || {appearance:descriptionInput.value}, "/api/profile/appearance", headers);
       renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
+      document.querySelector("#appearance-species").value="";
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
@@ -202,6 +217,7 @@
     try {
       const profile = await api("DELETE", null, "/api/profile/appearance");
       renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
+      document.querySelector("#appearance-species").value=""; document.querySelector("#appearance-same-character").checked=false;
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }

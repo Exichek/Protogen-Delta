@@ -296,6 +296,42 @@ class DeepSeekService:
                 await (client or self._client).chat.completions.create(**kwargs),
             )
 
+    async def analyze_visual_features(
+        self,
+        system_prompt: str,
+        user_message: str,
+        images: Sequence[ImageInput],
+    ) -> str:
+        """Первый проход внешности без истории и внешних инструментов."""
+        started_at = perf_counter()
+        content: list[dict[str, Any]] = [{"type": "text", "text": user_message}]
+        content.extend(
+            {"type": "image_url", "image_url": {"url": image.data_url()}}
+            for image in images
+        )
+        try:
+            response = await self._complete(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": content},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=4096,
+                **self._provider_options,
+            )
+        except OpenAIError as error:
+            raise _translate_openai_error(error) from error
+        _log_request_metrics(
+            request_type="appearance_observation",
+            started_at=started_at,
+            response=response,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=0,
+        )
+        return _chat_reply(response)
+
     async def chat(
         self,
         system_prompt: str,
