@@ -138,6 +138,7 @@ async def main() -> None:
     proactive_task: asyncio.Task[None] | None = None
     mini_app_server: MiniAppServer | None = None
     audio_understanding: AudioUnderstandingService | None = None
+    transcriber: SpeechTranscriber | None = None
 
     try:
         if settings.audio_understanding_enabled:
@@ -522,6 +523,8 @@ async def main() -> None:
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if transcriber is not None:
+            await transcriber.close()
         if menu_task is not None:
             menu_task.cancel()
             with suppress(asyncio.CancelledError):

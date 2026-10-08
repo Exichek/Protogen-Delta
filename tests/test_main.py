@@ -241,6 +241,7 @@ def test_main_builds_application_and_starts_polling(
         return_value=voice_router,
     )
     speech_transcriber = Mock(name="speech_transcriber")
+    speech_transcriber.close = AsyncMock()
     speech_transcriber_constructor_mock = Mock(return_value=speech_transcriber)
 
     set_commands_mock = AsyncMock()

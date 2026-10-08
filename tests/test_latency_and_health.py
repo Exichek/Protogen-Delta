@@ -31,6 +31,7 @@ from protogen_delta.services.menu_sync import synchronize_menus
 from protogen_delta.services.music import MusicRecognitionService, audio_tags
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.speech import (
+    SpeechInference,
     SpeechRecognitionError,
     SpeechTranscriber,
     Transcript,
@@ -345,7 +346,11 @@ def test_speech_receives_prepared_pcm_before_model_inference(
         data = prepare_speech_audio(wav_data())
         work = AsyncMock()
         work.run.return_value = data
-        transcriber = SpeechTranscriber(native_work=cast(WorkRunner, work))
+        inference = AsyncMock(spec=SpeechInference)
+        transcriber = SpeechTranscriber(
+            native_work=cast(WorkRunner, work),
+            inference=cast(SpeechInference, inference),
+        )
 
         class Model:
             def transcribe(self, source: io.BytesIO, **kwargs: Any) -> Any:
@@ -357,7 +362,9 @@ def test_speech_receives_prepared_pcm_before_model_inference(
                     language="en"
                 )
 
-        monkeypatch.setattr(transcriber, "_load_model", lambda: Model())
+        inference.transcribe.side_effect = (
+            lambda data: SpeechTranscriber._transcribe_sync(Model(), data)
+        )
         result = await transcriber.transcribe(b"compressed input")
         assert result.text == "Recognized"
         work.run.assert_awaited_once_with(prepare_speech_audio, b"compressed input")

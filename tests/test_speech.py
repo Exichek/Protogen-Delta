@@ -26,10 +26,7 @@ def test_transcriber_collects_segments_and_language() -> None:
         ),
         SimpleNamespace(language="ru"),
     )
-    transcriber = SpeechTranscriber()
-    transcriber._model = model
-
-    result = asyncio.run(transcriber.transcribe(b"audio"))
+    result = SpeechTranscriber._transcribe_sync(model, b"audio")
 
     assert result.text == "Привет как дела?"
     assert result.language == "ru"
@@ -58,11 +55,8 @@ def test_transcriber_reports_missing_speech() -> None:
     """Тишина не должна превращаться в пустой запрос к Дельте."""
     model = Mock()
     model.transcribe.return_value = (iter([]), SimpleNamespace(language=None))
-    transcriber = SpeechTranscriber()
-    transcriber._model = model
-
     with pytest.raises(SpeechRecognitionError, match="речь"):
-        asyncio.run(transcriber.transcribe(b"silence"))
+        SpeechTranscriber._transcribe_sync(model, b"silence")
 
 
 def test_transcriber_limits_long_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,10 +67,7 @@ def test_transcriber_limits_long_transcript(monkeypatch: pytest.MonkeyPatch) -> 
         iter([SimpleNamespace(text="123456789")]),
         SimpleNamespace(language="ru"),
     )
-    transcriber = SpeechTranscriber()
-    transcriber._model = model
-
-    result = asyncio.run(transcriber.transcribe(b"audio"))
+    result = SpeechTranscriber._transcribe_sync(model, b"audio")
 
     assert result.text == "12345"
     assert result.truncated is True
@@ -89,28 +80,28 @@ def test_model_is_loaded_once(monkeypatch: pytest.MonkeyPatch) -> None:
         iter([SimpleNamespace(text="текст")]),
         SimpleNamespace(language="ru"),
     )
+    from test_audio_understanding import wav_data
+
+    import protogen_delta.services.whisper_worker as worker_module
+    from protogen_delta.services.speech_audio import prepare_speech_audio
+
     loader = Mock(return_value=model)
-    transcriber = SpeechTranscriber("tiny")
-    monkeypatch.setattr(transcriber, "_load_model", loader)
-
-    async def scenario() -> None:
-        await transcriber.transcribe(b"one")
-        await transcriber.transcribe(b"two")
-
-    asyncio.run(scenario())
-
-    loader.assert_called_once_with()
+    monkeypatch.setattr(worker_module, "load_model", loader)
+    worker = worker_module.WhisperWorker(
+        {"model_size": "tiny", "device": "cpu", "compute_type": "int8"}
+    )
+    data = prepare_speech_audio(wav_data())
+    assert worker.reply(data, 1)["text"] == "текст"
+    assert worker.reply(data, 2)["text"] == "текст"
+    loader.assert_called_once()
 
 
 def test_inference_error_is_translated() -> None:
     """Ошибка декодера должна превращаться в доменное исключение."""
     model = Mock()
     model.transcribe.side_effect = RuntimeError("decoder failed")
-    transcriber = SpeechTranscriber()
-    transcriber._model = model
-
     with pytest.raises(SpeechRecognitionError, match="распознать"):
-        asyncio.run(transcriber.transcribe(b"audio"))
+        SpeechTranscriber._transcribe_sync(model, b"audio")
 
 
 @pytest.mark.parametrize(
@@ -131,8 +122,6 @@ def test_decoder_uncertainty_is_preserved_without_rewriting_words(
         ),
         SimpleNamespace(language="ru"),
     )
-    transcriber = SpeechTranscriber()
-    transcriber._model = model
-    result = asyncio.run(transcriber.transcribe(b"audio"))
+    result = SpeechTranscriber._transcribe_sync(model, b"audio")
     assert result.text == "Моя любимая"
     assert result.uncertain is uncertain
