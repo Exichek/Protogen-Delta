@@ -11,6 +11,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, Message
 
+from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.state import BotState
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.user_statistics import (
@@ -86,6 +87,8 @@ def create_admin_router(
     bot_state: BotState,
     admin_ids: frozenset[int],
     user_statistics: UserStatisticsRepository | None = None,
+    *,
+    runtime_health: RuntimeHealth | None = None,
 ) -> Router:
     """Создать роутер административных команд."""
     router = Router(name=__name__)
@@ -282,6 +285,35 @@ def create_admin_router(
             f"• Пользователей: {users_repository.count()}\n"
             f"• Ответов отправлено: {bot_state.reply_count}"
         )
+
+        if runtime_health is not None:
+            health = runtime_health.snapshot()
+            reply += "\n• Telegram polling: " + (
+                "работает" if health["polling"] else "нет свежего подтверждения"
+            )
+            names = {
+                "llm": "Модель диалога",
+                "audio": "Аудиомодель",
+                "native": "Декодеры",
+                "whisper": "Whisper",
+            }
+            outcomes = {
+                "unknown": "ещё нет запросов",
+                "ok": "успех",
+                "failed": "ошибка",
+                "cancelled": "отмена",
+            }
+            for name, data in health.get("diagnostics", {}).items():
+                capacity = data["capacity"]
+                active = str(data["active"]) + (f"/{capacity}" if capacity else "")
+                reply += (
+                    f"\n• {names[name]}: выполняется {active}, очередь {data['waiting']}; "
+                    f"завершено {data['completed']}, ошибок {data['failed']}; "
+                    f"последний исход — {outcomes[data['last_result']]}"
+                )
+                if data["recent_p95_ms"] is not None:
+                    reply += f"; p95 {data['recent_p95_ms']} мс, ожидание {data['queue_p95_ms']} мс"
+            reply += "\nМетрики с запуска; задержки по последним 128 операциям. Проверочных API-запросов нет."
 
         await message.answer(reply)
 

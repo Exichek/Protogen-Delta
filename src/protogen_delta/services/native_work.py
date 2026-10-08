@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.documents import (
     DocumentReadError,
@@ -92,6 +93,10 @@ class NativeWorkPool:
             raise ValueError("Нужны положительные limit и timeout")
         self._slots = asyncio.Semaphore(limit)
         self._timeout = timeout
+        self._metrics = OperationMetrics(capacity=limit)
+
+    def snapshot(self) -> OperationSnapshot:
+        return self._metrics.snapshot()
 
     async def run[T](
         self, function: Callable[..., T], data: bytes, *args: Any, **kwargs: Any
@@ -108,10 +113,12 @@ class NativeWorkPool:
                 raise DocumentTooLargeError("Документ превышает 20 МБ")
             raise NativeWorkError("Файл превышает 20 МБ.")
         try:
-            async with asyncio.timeout(self._timeout):
-                async with self._slots:
-                    value = await self._execute(operation, data, args, kwargs)
-                    return cast(T, self._decode(operation, value))
+            with self._metrics.measure(queued=True) as measurement:
+                async with asyncio.timeout(self._timeout):
+                    async with self._slots:
+                        measurement.start()
+                        value = await self._execute(operation, data, args, kwargs)
+                        return cast(T, self._decode(operation, value))
         except TimeoutError as error:
             raise NativeWorkError(
                 "Обработка файла заняла слишком много времени. Пришли меньший фрагмент."

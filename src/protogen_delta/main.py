@@ -134,6 +134,7 @@ async def main() -> None:
     deepseek: DeepSeekService | None = None
     proactive_messenger: ProactiveMessenger | None = None
     native_work = NativeWorkPool(2)
+    health.add_diagnostics("native", native_work.snapshot)
     proactive_task: asyncio.Task[None] | None = None
     mini_app_server: MiniAppServer | None = None
     audio_understanding: AudioUnderstandingService | None = None
@@ -151,6 +152,7 @@ async def main() -> None:
                 input_data_url=settings.audio_input_data_url,
                 native_work=native_work,
             )
+            health.add_diagnostics("audio", audio_understanding.snapshot)
         dispatcher = Dispatcher()
         register_error_handler(dispatcher)
 
@@ -226,6 +228,7 @@ async def main() -> None:
             ),
         )
 
+        health.add_diagnostics("llm", deepseek.snapshot)
         memory = MemoryService(
             memories_repository, facts=UserFactsService(facts_repository, deepseek)
         )
@@ -353,6 +356,7 @@ async def main() -> None:
             bot_state=bot_state,
             admin_ids=effective_admin_ids,
             user_statistics=statistics_repository,
+            runtime_health=health,
         )
         sticker_admin_router = create_sticker_admin_router(
             stickers_repository,
@@ -420,15 +424,17 @@ async def main() -> None:
             native_work=native_work,
             ocr_enabled=settings.pdf_ocr_enabled,
         )
+        transcriber = SpeechTranscriber(
+            model_size=settings.whisper_model_size,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            native_work=native_work,
+        )
+        health.add_diagnostics("whisper", transcriber.snapshot)
         voice_router = create_voice_router(
             response_engine,
             bot,
-            SpeechTranscriber(
-                model_size=settings.whisper_model_size,
-                device=settings.whisper_device,
-                compute_type=settings.whisper_compute_type,
-                native_work=native_work,
-            ),
+            transcriber,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
             native_work=native_work,
