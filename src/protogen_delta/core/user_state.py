@@ -5,7 +5,7 @@ import logging
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import isfinite
 from time import monotonic, time
 from typing import Literal, Protocol
@@ -37,6 +37,7 @@ class ConversationTurn:
 
     user_message: str
     assistant_message: str
+    context_closed: bool = False
 
 
 @dataclass(slots=True)
@@ -238,6 +239,19 @@ class UserState:
     def register_reply(self) -> None:
         """Увеличить счётчик ответов этому пользователю."""
         self.reply_count += 1
+
+    def stop_roleplay(self) -> bool:
+        """Закрыть текущий контекст, сохранив историю и постоянный профиль."""
+        was_active = self.roleplay_active
+        self.roleplay_active = False
+        self.roleplay_fetishes = ()
+        self.emotions.arousal = 0.0
+        # Повторный stop тоже закрывает контекст: модель могла продолжить
+        # старую сцену уже после отключения режима.
+        closed = [replace(turn, context_closed=True) for turn in self.history]
+        self.history.clear()
+        self.history.extend(closed)
+        return was_active
 
     def reset_context(self) -> None:
         """Сбросить контекст диалога пользователя к начальному состоянию."""

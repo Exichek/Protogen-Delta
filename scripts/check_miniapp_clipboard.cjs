@@ -43,6 +43,10 @@ async function main() {
           Object.assign(window.testProfile,{delta_appearance:'Новый облик',delta_appearance_thumbnail:window.thumbnail});
         if(!window.failStatus && options.method==='DELETE' && url==='/api/profile/appearance')
           Object.assign(window.testProfile,{delta_appearance:'',delta_appearance_thumbnail:''});
+        if(!window.failStatus && options.method==='PATCH' && url==='/api/profile/appearance') {
+          window.lastEdit=JSON.parse(options.body);
+          window.testProfile.delta_appearance=window.lastEdit.appearance.trim();
+        }
         return {ok:!window.failStatus,status:window.failStatus||200,
           text:async()=>window.failMessage,json:async()=>window.testProfile};
       };
@@ -75,6 +79,34 @@ async function main() {
   const message = page => page.locator('#appearance-status').textContent();
   const waitClipboard = page => page.waitForFunction(() => !document.querySelector('#paste-appearance').disabled);
   try {
+    let editor = await fresh(true);
+    await editor.locator('#edit-appearance').click();
+    assert.equal(await editor.locator('#appearance-edit-text').inputValue(), 'Сергал');
+    await editor.locator('#appearance-edit-text').fill('Белая чёлка закрывает один глаз');
+    assert.equal(await editor.locator('#apply-appearance').isDisabled(), true);
+    if(process.env.MINIAPP_SCREENSHOTS) {
+      fs.mkdirSync(process.env.MINIAPP_SCREENSHOTS,{recursive:true});
+      await editor.setViewportSize({width:430,height:932});
+      await editor.locator('section[aria-labelledby="appearance-title"]').screenshot({path:path.join(process.env.MINIAPP_SCREENSHOTS,'appearance-editor.png')});
+    }
+    await editor.locator('#cancel-appearance-edit').click();
+    assert.equal(await editor.locator('#appearance').textContent(), 'Сергал');
+    assert.equal(await editor.evaluate(() => window.calls.length), 1);
+    await editor.locator('#edit-appearance').click();
+    await editor.locator('#appearance-edit-text').fill('Белая чёлка закрывает один глаз');
+    await editor.evaluate(() => {window.failStatus=401;window.failMessage='initData просрочен';});
+    await editor.locator('#save-appearance-edit').click();
+    await editor.waitForFunction(() => document.querySelector('#appearance-status').className==='error');
+    assert.equal(await editor.locator('#appearance-edit-text').inputValue(), 'Белая чёлка закрывает один глаз');
+    assert.equal(await editor.locator('#appearance-editor').isVisible(), true);
+    await editor.evaluate(() => window.failStatus=0);
+    await editor.locator('#save-appearance-edit').click();
+    await editor.waitForFunction(() => document.querySelector('#appearance-status').textContent.includes('Описание исправлено'));
+    assert.equal(await editor.locator('#appearance').textContent(), 'Белая чёлка закрывает один глаз');
+    assert.equal(await editor.locator('#saved-appearance').isVisible(), true);
+    assert.equal(await editor.locator('#appearance-editor').isVisible(), false);
+    assert.deepEqual(await editor.evaluate(() => window.lastEdit), {appearance:'Белая чёлка закрывает один глаз',expected_appearance:'Сергал'});
+    await editor.close(); checks++;
     let loading = await fresh(true, 'pending');
     assert.equal(await loading.locator('#appearance').textContent(), 'Загружаю облик…');
     assert.equal(await loading.locator('#appearance-empty-hint').isVisible(), false);

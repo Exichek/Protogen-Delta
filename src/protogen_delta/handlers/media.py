@@ -31,6 +31,7 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TOO_LARGE_REPLY = "Картинка слишком большая: сейчас могу скачать до 20 МБ."
 IMAGE_DOWNLOAD_ERROR_REPLY = "Не смог скачать картинку из Telegram. Попробуй ещё раз."
 UNSUPPORTED_IMAGE_REPLY = "Этот формат изображения я пока не умею смотреть."
+ALBUM_ERROR_REPLY = "Не получилось обработать альбом. Попробуй отправить его ещё раз."
 
 _EXTENSION_MIME_TYPES = {
     ".gif": "image/gif",
@@ -177,7 +178,7 @@ def create_media_router(
         tuple[int, str],
         list[tuple[Message, asyncio.Task[ImageInput]]],
     ] = {}
-    album_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
+    album_events: dict[tuple[int, str], asyncio.Event] = {}
 
     async def respond_with_images(
         message: Message,
@@ -211,12 +212,17 @@ def create_media_router(
 
     async def flush_album(key: tuple[int, str]) -> None:
         """Дождаться конца альбома и отправить все изображения одним ходом."""
+        entries = albums[key]
+        event = album_events[key]
         try:
-            await asyncio.sleep(album_delay_seconds)
-            entries = albums.pop(key, [])
-            album_tasks.pop(key, None)
-            if not entries:
-                return
+            while True:
+                event.clear()
+                try:
+                    await asyncio.wait_for(event.wait(), album_delay_seconds)
+                except TimeoutError:
+                    break
+            albums.pop(key, None)
+            album_events.pop(key, None)
             results = await asyncio.gather(
                 *(download for _, download in entries),
                 return_exceptions=True,
@@ -239,6 +245,10 @@ def create_media_router(
                     failed,
                     len(entries),
                 )
+                await representative.answer(
+                    f"Не удалось прочитать {failed} из {len(entries)} картинок. "
+                    "Посмотрю остальные."
+                )
             label = f"альбом из {len(images)} изображений"
             logger.info("Собран Telegram-альбом: images=%d", len(images))
             await respond_with_images(
@@ -249,22 +259,35 @@ def create_media_router(
         except asyncio.CancelledError:
             raise
         except Exception:
-            albums.pop(key, None)
-            album_tasks.pop(key, None)
             logger.exception("Не удалось обработать Telegram-альбом")
+            await entries[0][0].answer(ALBUM_ERROR_REPLY)
+        finally:
+            if albums.get(key) is entries:
+                albums.pop(key, None)
+                album_events.pop(key, None)
+            for _, download in entries:
+                if not download.done():
+                    download.cancel()
+            await asyncio.gather(
+                *(download for _, download in entries), return_exceptions=True
+            )
 
-    def queue_album(
+    async def queue_album(
         message: Message,
         download: asyncio.Task[ImageInput],
         group_id: str,
     ) -> None:
         """Сразу учесть элемент альбома и параллельно скачать его содержимое."""
         key = (message.chat.id, group_id)
-        albums.setdefault(key, []).append((message, download))
-        previous = album_tasks.get(key)
-        if previous is not None:
-            previous.cancel()
-        album_tasks[key] = asyncio.create_task(flush_album(key))
+        if key in albums:
+            albums[key].append((message, download))
+            album_events[key].set()
+            return
+        albums[key] = [(message, download)]
+        album_events[key] = asyncio.Event()
+        # Коллектор живёт внутри первого обработчика: middleware сброса
+        # и shutdown видят его вместе с загрузками и доставкой ответа.
+        await flush_album(key)
 
     async def handle_image(
         message: Message,
@@ -280,7 +303,7 @@ def create_media_router(
             return
         media_group_id = message.media_group_id
         if media_group_id:
-            queue_album(
+            await queue_album(
                 message,
                 asyncio.create_task(
                     _download_image(

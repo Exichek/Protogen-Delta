@@ -1967,6 +1967,7 @@ def test_response_engine_disables_only_roleplay() -> None:
         ConversationTurn(
             user_message="*подошёл ближе*",
             assistant_message="RP ответ",
+            context_closed=True,
         )
     ]
 
@@ -2088,7 +2089,7 @@ def test_mixed_stop_answers_question_without_restarting_scene() -> None:
     assert call.kwargs["user_message"] == "объясни *TCP*"
     assert "RP выключен" in call.kwargs["system_prompt"]
     assert "женская" not in call.kwargs["system_prompt"]
-    assert len(call.kwargs["history"]) == 1
+    assert call.kwargs["history"] == ()
 
 
 def test_scene_configuration_survives_history_window_and_is_isolated() -> None:
