@@ -49,6 +49,7 @@ from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -58,6 +59,7 @@ from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
+from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.fetishes import FetishRoleClassifier
@@ -166,6 +168,7 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
         memories_repository = MemoriesRepository(settings.data_dir)
+        creator_messages_repository = CreatorMessagesRepository(settings.data_dir)
         stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
         facts_repository = UserFactsRepository(settings.data_dir)
@@ -177,6 +180,9 @@ async def main() -> None:
             history_ttl_seconds=settings.conversation_history_ttl_seconds,
             retention_seconds=settings.user_state_retention_seconds,
             persistence=user_state_repository,
+        )
+        creator_messages = CreatorMessageService(
+            bot, creator_messages_repository, user_states
         )
         input_operations = InputOperations()
         dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
@@ -240,7 +246,9 @@ async def main() -> None:
 
         health.add_diagnostics("llm", deepseek.snapshot)
         memory = MemoryService(
-            memories_repository, facts=UserFactsService(facts_repository, deepseek)
+            memories_repository,
+            facts=UserFactsService(facts_repository, deepseek),
+            creator_messages=creator_messages_repository,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -263,6 +271,7 @@ async def main() -> None:
             protogen_lore_prompt=protogen_lore_prompt,
             body_prompt=body_prompt,
             species_prompt=load_prompt("furry_species_reference"),
+            adult_conversation_prompt=load_prompt("adult_conversation_style"),
             capabilities_context=(
                 "Читаю PDF, DOCX, XLSX и текстовые файлы/код. Рассматриваю фото, "
                 "стикеры, GIF, TGS, MP4 и WebM: приложение извлекает несколько "
@@ -309,6 +318,7 @@ async def main() -> None:
             config=response_engine_config,
             memory=memory,
             creator_id=settings.creator_id,
+            creator_messages=creator_messages,
             reply_transform=sticker_service.correct_reply,
             interaction_classifier=InteractionClassifier(
                 deepseek, mood_prompt, insult_prompt
@@ -379,6 +389,7 @@ async def main() -> None:
             bot=bot,
             users_repository=users_repository,
             creator_id=settings.creator_id,
+            creator_messages=creator_messages,
         )
 
         adult_router = create_adult_router(user_states, on_mode_change)

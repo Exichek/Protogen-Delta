@@ -14,18 +14,30 @@ from aiogram.types import (
     Message,
 )
 
+from protogen_delta.repositories.creator_messages import CreatorMessageKind
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.creator_messages import CreatorMessageService
 
 logger = logging.getLogger(__name__)
 _BROADCAST_PREFIX = "broadcast"
 
 
 def create_creator_router(
-    *, bot: Bot, users_repository: UsersRepository, creator_id: int | None
+    *,
+    bot: Bot,
+    users_repository: UsersRepository,
+    creator_id: int | None,
+    creator_messages: CreatorMessageService | None = None,
 ) -> Router:
     """Создать доступные только создателю команды отправки."""
     router = Router(name=__name__)
     pending: dict[str, str] = {}
+
+    async def send(target: int, text: str, kind: CreatorMessageKind) -> bool:
+        if creator_messages is not None:
+            return await creator_messages.send(target, text, kind)
+        await bot.send_message(target, text)
+        return True
 
     def allowed(message: Message) -> bool:
         return message.from_user is not None and message.from_user.id == creator_id
@@ -44,14 +56,21 @@ def create_creator_router(
             return
         target = int(parts[1])
         try:
-            await bot.send_message(target, parts[2])
+            recorded = await send(target, parts[2], "message")
         except TelegramAPIError:
             logger.warning(
                 "Не удалось отправить сообщение пользователю %s", target, exc_info=True
             )
             await message.answer("⚠️ Telegram не принял сообщение.")
             return
-        await message.answer(f"✅ Сообщение отправлено пользователю {target}.")
+        await message.answer(
+            f"✅ Сообщение отправлено пользователю {target}."
+            + (
+                ""
+                if recorded
+                else "\n⚠️ Доставка не записана в память. Повторно отправлять не нужно."
+            )
+        )
 
     @router.message(Command("broadcast"))
     async def prepare_broadcast(message: Message) -> None:
@@ -90,6 +109,9 @@ def create_creator_router(
             await callback.answer("Нет доступа.", show_alert=True)
             return
         _, action, token = callback.data.split(":", maxsplit=2)
+        if action not in {"confirm", "cancel"}:
+            await callback.answer("Неизвестное действие.", show_alert=True)
+            return
         text = pending.pop(token, None)
         if text is None:
             await callback.answer("Подтверждение устарело.", show_alert=True)
@@ -99,10 +121,11 @@ def create_creator_router(
             if isinstance(callback.message, Message):
                 await callback.message.edit_text("Рассылка отменена.")
             return
-        sent = failed = 0
+        sent = failed = unrecorded = 0
         for user_id in users_repository.get_all():
             try:
-                await bot.send_message(user_id, text)
+                if not await send(user_id, text, "broadcast"):
+                    unrecorded += 1
                 sent += 1
             except TelegramAPIError:
                 failed += 1
@@ -111,6 +134,10 @@ def create_creator_router(
                 )
             await asyncio.sleep(0.05)
         result = f"✅ Рассылка завершена. Отправлено: {sent}, ошибок: {failed}."
+        if unrecorded:
+            result += (
+                f" Без записи в память: {unrecorded}. Повторять рассылку не нужно."
+            )
         await callback.answer()
         if isinstance(callback.message, Message):
             await callback.message.edit_text(result)
