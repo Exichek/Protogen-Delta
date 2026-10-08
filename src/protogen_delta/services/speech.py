@@ -1,12 +1,12 @@
 """Локальное распознавание речи через faster-whisper."""
 
-import asyncio
 import io
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from protogen_delta.core.operation_metrics import OperationSnapshot
-from protogen_delta.services.blocking_work import BlockingWorkPool, WorkRunner
+from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.speech_audio import prepare_speech_audio
 
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
@@ -28,6 +28,12 @@ class Transcript:
     uncertain: bool = False
 
 
+class SpeechInference(Protocol):
+    async def transcribe(self, data: bytes) -> Transcript: ...
+    def snapshot(self) -> OperationSnapshot: ...
+    async def close(self) -> None: ...
+
+
 class SpeechTranscriber:
     """Лениво загружать Whisper и выполнять распознавание вне event loop."""
 
@@ -37,48 +43,22 @@ class SpeechTranscriber:
         device: str = "cpu",
         compute_type: str = "int8",
         native_work: WorkRunner | None = None,
+        inference: SpeechInference | None = None,
     ) -> None:
         """Сохранить параметры модели без её немедленной загрузки."""
-        self._model_size = model_size
-        self._device = device
-        self._compute_type = compute_type
-        self._model: Any | None = None
-        self._model_lock = asyncio.Lock()
-        self._work = BlockingWorkPool()
-        self._native_work = native_work
+        if inference is None:
+            from protogen_delta.services.whisper_process import WhisperProcess
+
+            inference = WhisperProcess(model_size, device, compute_type)
+        self._inference = inference
+        self._native_work = native_work or NativeWorkPool()
 
     def snapshot(self) -> OperationSnapshot:
-        """Показывать реально работающий поток, даже после отмены его ожидания."""
-        return self._work.snapshot()
+        """Показывать очередь и фактическую занятость процесса."""
+        return self._inference.snapshot()
 
-    async def _ensure_model(self) -> Any:
-        """Создать единственный экземпляр модели при первом голосовом сообщении."""
-        if self._model is not None:
-            return self._model
-        async with self._model_lock:
-            if self._model is None:
-                self._model = await self._work.run(self._load_and_cache_model)
-        return self._model
-
-    def _load_and_cache_model(self) -> Any:
-        if self._model is None:
-            self._model = self._load_model()
-        return self._model
-
-    def _load_model(self) -> Any:
-        """Импортировать faster-whisper и загрузить выбранную модель."""
-        try:
-            from faster_whisper import WhisperModel  # type: ignore[import-untyped]
-
-            return WhisperModel(
-                self._model_size,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
-        except Exception as error:
-            raise SpeechRecognitionError(
-                "Не удалось загрузить модель Whisper"
-            ) from error
+    async def close(self) -> None:
+        await self._inference.close()
 
     async def transcribe(self, data: bytes) -> Transcript:
         """Распознать речь из Telegram-аудио и вернуть компактный текст."""
@@ -86,15 +66,13 @@ class SpeechTranscriber:
             raise SpeechRecognitionError("Аудиофайл пуст")
         if len(data) > MAX_AUDIO_BYTES:
             raise SpeechRecognitionError("Аудиофайл превышает 20 МБ")
-        if self._native_work is not None:
-            try:
-                data = await self._native_work.run(prepare_speech_audio, data)
-            except (ValueError, OSError) as error:
-                raise SpeechRecognitionError(
-                    "Не удалось подготовить аудио для Whisper"
-                ) from error
-        model = await self._ensure_model()
-        return await self._work.run(self._transcribe_sync, model, data)
+        try:
+            data = await self._native_work.run(prepare_speech_audio, data)
+        except (ValueError, OSError) as error:
+            raise SpeechRecognitionError(
+                "Не удалось подготовить аудио для Whisper"
+            ) from error
+        return await self._inference.transcribe(data)
 
     @staticmethod
     def _transcribe_sync(model: Any, data: bytes) -> Transcript:
