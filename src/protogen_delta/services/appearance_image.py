@@ -1,5 +1,6 @@
 """Проверка и подготовка загруженного референса внешности."""
 
+import base64
 from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -32,3 +33,16 @@ def prepare_appearance_image(data: bytes) -> ImageInput:
             "Не удалось прочитать картинку. Выбери JPEG, PNG или WebP."
         ) from error
     return ImageInput(output.getvalue(), "image/jpeg", "референс облика из Mini App")
+
+
+def prepare_appearance_upload(data: bytes) -> tuple[ImageInput, str]:
+    """Подготовить vision-референс и маленькую JPEG-миниатюру без метаданных."""
+    image = prepare_appearance_image(data)
+    with Image.open(BytesIO(image.data)) as thumbnail:
+        thumbnail.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        output = BytesIO()
+        thumbnail.save(output, "JPEG", quality=65)
+    data = output.getvalue()
+    if len(data) > 64 * 1024:
+        raise ValueError("Не удалось подготовить миниатюру картинки.")
+    return image, "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")

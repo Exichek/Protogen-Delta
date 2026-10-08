@@ -42,6 +42,10 @@ _OPERATIONS = {
         "protogen_delta.services.appearance_image",
         "prepare_appearance_image",
     ): "appearance",
+    (
+        "protogen_delta.services.appearance_image",
+        "prepare_appearance_upload",
+    ): "appearance_upload",
 }
 
 
@@ -296,9 +300,24 @@ class NativeWorkPool:
                     value["truncated"],
                     tuple(ExtractedImage(i.data, i.mime_type, i.label) for i in images),
                 )
-            if operation == "appearance":
+            if operation in {"appearance", "appearance_upload"}:
                 if len(images) != 1:
                     raise ValueError("appearance")
+                if operation == "appearance_upload":
+                    thumbnail = value.get("thumbnail")
+                    prefix = "data:image/jpeg;base64,"
+                    if (
+                        not isinstance(thumbnail, str)
+                        or not thumbnail.startswith(prefix)
+                        or len(thumbnail) > 90000
+                    ):
+                        raise ValueError("thumbnail")
+                    decoded = base64.b64decode(
+                        thumbnail.removeprefix(prefix), validate=True
+                    )
+                    if not decoded.startswith(b"\xff\xd8") or len(decoded) > 64 * 1024:
+                        raise ValueError("thumbnail")
+                    return images[0], thumbnail
                 return images[0]
             return images
         except (KeyError, TypeError, ValueError, wave.Error) as error:

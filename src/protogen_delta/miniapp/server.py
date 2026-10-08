@@ -25,7 +25,7 @@ from protogen_delta.services.appearance_analysis import validate_species_hint
 from protogen_delta.services.appearance_description import parse_description_file
 from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
-    prepare_appearance_image,
+    prepare_appearance_upload,
 )
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.native_work import NativeWorkPool
@@ -53,6 +53,9 @@ def _profile(
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
         "delta_appearance": state.delta_appearance,
+        "delta_appearance_thumbnail": (
+            state.delta_appearance_thumbnail if state.delta_appearance else ""
+        ),
         "delta_species": (
             asdict(species)
             if (species := AppearanceSpecies.decode(state.delta_species))
@@ -331,7 +334,9 @@ class MiniAppServer:
                     client_max_size=MAX_APPEARANCE_BYTES + 1
                 ).read()
                 try:
-                    image = await self._native_work.run(prepare_appearance_image, data)
+                    image, thumbnail = await self._native_work.run(
+                        prepare_appearance_upload, data
+                    )
                 except ValueError as error:
                     raise web.HTTPBadRequest(text=str(error)) from error
                 if not self._appearance_limiter.allow(user.id):
@@ -343,12 +348,13 @@ class MiniAppServer:
                     await self._response_engine.set_delta_appearance_from_image(
                         user.id,
                         image,
+                        thumbnail=thumbnail,
                         species_hint=options.get("species", ""),
                         update_existing=options.get("update_existing", False),
                     )
                 else:
                     await self._response_engine.set_delta_appearance_from_image(
-                        user.id, image
+                        user.id, image, thumbnail=thumbnail
                     )
                 async with self._user_states.use(user.id) as state:
                     payload = self._profile(state, user)
@@ -380,6 +386,7 @@ class MiniAppServer:
         async with self._user_states.use(user.id) as state:
             state.delta_appearance = ""
             state.delta_species = ""
+            state.delta_appearance_thumbnail = ""
             payload = self._profile(state, user)
         return web.json_response(payload, headers={"Cache-Control": "no-store"})
 

@@ -17,7 +17,10 @@ from test_tgs_frames import _tgs
 import protogen_delta.services.native_work as native
 import protogen_delta.services.native_worker as worker
 from protogen_delta.services.animation_frames import extract_animation_frames
-from protogen_delta.services.appearance_image import prepare_appearance_image
+from protogen_delta.services.appearance_image import (
+    prepare_appearance_image,
+    prepare_appearance_upload,
+)
 from protogen_delta.services.documents import (
     DocumentReadError,
     DocumentTooLargeError,
@@ -47,6 +50,9 @@ def test_real_worker_reads_document_and_images() -> None:
         assert doc.text == "Hello world" and doc.kind == "TXT"
         image = await pool.run(prepare_appearance_image, _image())
         assert image.mime_type == "image/jpeg" and image.data.startswith(b"\xff\xd8")
+        image, thumbnail = await pool.run(prepare_appearance_upload, _image())
+        assert image.mime_type == "image/jpeg"
+        assert thumbnail.startswith("data:image/jpeg;base64,")
         frames = await pool.run(extract_animation_frames, _image("GIF"), label="GIF")
         assert frames and frames[0].data.startswith(b"\x89PNG")
         tgs = await pool.run(extract_tgs_frames, _tgs())
@@ -197,10 +203,42 @@ def test_invalid_image_protocol_is_rejected(value: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize(
+    "thumbnail",
+    [
+        None,
+        "https://example.com/private.jpg",
+        "data:image/jpeg;base64,!",
+        "data:image/jpeg;base64,eA==",
+        "data:image/jpeg;base64," + "a" * 90000,
+        "data:image/jpeg;base64,"
+        + base64.b64encode(b"\xff\xd8" + b"x" * 65536).decode(),
+    ],
+    ids=[
+        "missing",
+        "external-url",
+        "bad-base64",
+        "not-jpeg",
+        "long-string",
+        "large-jpeg",
+    ],
+)
+def test_thumbnail_worker_protocol_rejects_invalid_or_oversized_data(
+    thumbnail: object,
+) -> None:
+    value = worker.perform(
+        _image(), {"operation": "appearance_upload", "args": [], "kwargs": {}}
+    )
+    value["thumbnail"] = thumbnail
+    with pytest.raises(NativeWorkError):
+        NativeWorkPool._decode("appearance_upload", value)
+
+
+@pytest.mark.parametrize(
     "operation,data,args,kwargs",
     [
         ("document", b"hi", ["x.txt", None], {}),
         ("appearance", _image(), [], {}),
+        ("appearance_upload", _image(), [], {}),
         ("animation", _image("GIF"), [], {"label": "GIF"}),
         ("tgs", _tgs(), [], {}),
     ],

@@ -77,6 +77,14 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
 
             images = (prepare_appearance_image(data),)
             value = {}
+        elif operation == "appearance_upload":
+            from protogen_delta.services.appearance_image import (
+                prepare_appearance_upload,
+            )
+
+            image, thumbnail = prepare_appearance_upload(data)
+            images = (image,)
+            value = {"thumbnail": thumbnail}
         else:
             raise ValueError("operation")
         value["images"] = [
