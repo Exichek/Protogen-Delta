@@ -75,7 +75,7 @@ class _SilentLogger:
 
     def warning(self, message: str) -> None:
         code = classify_failure(RuntimeError(message))
-        if code != "unknown":
+        if code != "unknown" and (self.failure_code is None or code != "formats"):
             self.failure_code = code
 
     def error(self, message: str) -> None:
@@ -214,7 +214,13 @@ def download_one(
             if too_large:
                 raise DownloadFailure("too_large")
             reported = getattr(diagnostics, "failure_code", None)
-            if reported in {"youtube_age", "youtube_bot", "login", "unavailable"}:
+            if reported in {
+                "youtube_age",
+                "youtube_bot",
+                "login",
+                "unavailable",
+                "runtime",
+            }:
                 raise DownloadFailure(reported)
             if youtube and (info.get("age_limit") or 0) >= 18:
                 raise DownloadFailure("youtube_age")

@@ -53,7 +53,15 @@ def classify_failure(error: Exception) -> str:
         return "rate_limited"
     if "http error 404" in message:
         return "unavailable"
-    if "javascript runtime" in message or "running deno process" in message:
+    if any(
+        text in message
+        for text in (
+            "javascript runtime",
+            "running deno process",
+            "challenge solving failed",
+            "javascript heap out of memory",
+        )
+    ):
         return "runtime"
     if any(text in message for text in ("timed out", "connection")):
         return "network"
