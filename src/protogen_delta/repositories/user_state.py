@@ -241,6 +241,7 @@ class UserStateRepository:
                 {
                     "user": turn.user_message[:8000],
                     "assistant": turn.assistant_message[:16000],
+                    "context_closed": turn.context_closed,
                 }
                 for turn in (history or ())
             ],
@@ -510,7 +511,11 @@ class UserStateRepository:
         if not isinstance(items, list):
             return ()
         return tuple(
-            ConversationTurn(item["user"][:8000], item["assistant"][:16000])
+            ConversationTurn(
+                item["user"][:8000],
+                item["assistant"][:16000],
+                context_closed=item.get("context_closed") is True,
+            )
             for item in items
             if isinstance(item, dict)
             and isinstance(item.get("user"), str)

@@ -312,12 +312,7 @@ class ResponseEngine:
     ) -> bool:
         """Выключить RP-режим пользователя, сохранив остальное состояние."""
         async with self._user_states.use_conversation(user_id, chat_id) as user_state:
-            was_active = user_state.roleplay_active
-            user_state.roleplay_active = False
-            user_state.roleplay_fetishes = ()
-            user_state.emotions.arousal = 0.0
-
-            return was_active
+            return user_state.stop_roleplay()
 
     async def _respond_for_user(
         self,
@@ -337,9 +332,7 @@ class ResponseEngine:
         stopped = remaining is not None
         was_roleplay_active = user_state.roleplay_active
         if stopped:
-            user_state.roleplay_active = False
-            user_state.roleplay_fetishes = ()
-            user_state.emotions.arousal = 0.0
+            user_state.stop_roleplay()
             if not remaining:
                 return PreparedReply("RP-режим завершён.")
             user_message = remaining
@@ -896,7 +889,9 @@ class ResponseEngine:
         finally:
             self._delivering_users.remove(user_id)
 
-    async def set_delta_appearance_from_text(self, user_id: int, text: str) -> str:
+    async def set_delta_appearance_from_text(
+        self, user_id: int, text: str, *, expected_appearance: str | None = None
+    ) -> str:
         """Применить декларативное описание, не генерируя новые признаки."""
         description = validate_description(text)
         if user_id in self._delivering_users:
@@ -904,14 +899,23 @@ class ResponseEngine:
         self._delivering_users.add(user_id)
         try:
             async with self._user_states.use_conversation(user_id) as state:
+                if expected_appearance is not None and (
+                    not state.delta_appearance
+                    or state.delta_appearance != expected_appearance
+                ):
+                    raise ValueError(
+                        "Облик уже изменился. Открой панель заново перед редактированием."
+                    )
                 state.delta_appearance = description
-                state.delta_appearance_thumbnail = ""
+                if expected_appearance is None:
+                    state.delta_appearance_thumbnail = ""
                 hint = declared_species(description)
-                state.delta_species = (
-                    AppearanceSpecies(hint, None, "user", "declared").encode()
-                    if hint
-                    else ""
-                )
+                if hint or expected_appearance is None:
+                    state.delta_species = (
+                        AppearanceSpecies(hint, None, "user", "declared").encode()
+                        if hint
+                        else ""
+                    )
             return description
         finally:
             self._delivering_users.remove(user_id)

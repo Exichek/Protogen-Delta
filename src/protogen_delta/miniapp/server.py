@@ -117,6 +117,7 @@ class MiniAppServer:
                 web.delete("/api/profile/roleplay", self._delete_roleplay_profile),
                 web.post("/api/profile/appearance", self._upload_appearance),
                 web.put("/api/profile/appearance", self._set_text_appearance),
+                web.patch("/api/profile/appearance", self._set_text_appearance),
                 web.delete("/api/profile/appearance", self._reset_appearance),
                 web.get("/health", self._health),
                 web.post("/api/tools/{tool}", self._run_tool),
@@ -247,7 +248,10 @@ class MiniAppServer:
             if content_mode is not None:
                 state.content_mode = cast(ContentMode, content_mode)
             if roleplay_active is not None:
-                state.roleplay_active = roleplay_active
+                if roleplay_active:
+                    state.roleplay_active = True
+                else:
+                    state.stop_roleplay()
             if configuration is not None:
                 state.roleplay_configuration = configuration
             if character is not None:
@@ -266,7 +270,7 @@ class MiniAppServer:
         """Удалить RP-профиль пользователя, сохранив прочую память и настройки."""
         user = self._authenticate(request)
         async with self._user_states.use(user.id) as state:
-            state.roleplay_active = False
+            state.stop_roleplay()
             state.roleplay_configuration = "male"
             state.roleplay_character = ""
             state.roleplay_fetishes = ()
@@ -400,7 +404,19 @@ class MiniAppServer:
         self._appearance_pending.add(user.id)
         try:
             try:
-                if request.content_type == "application/json":
+                if request.method == "PATCH":
+                    payload = await request.json()
+                    if (
+                        not isinstance(payload, dict)
+                        or set(payload) != {"appearance", "expected_appearance"}
+                        or not isinstance(payload["appearance"], str)
+                        or not isinstance(payload["expected_appearance"], str)
+                        or not payload["expected_appearance"]
+                        or len(payload["expected_appearance"]) > 2000
+                    ):
+                        raise ValueError("Нужны описание и его исходная версия.")
+                    description = payload["appearance"]
+                elif request.content_type == "application/json":
                     description = parse_description_file(
                         await request.read(), json_file=True
                     )
@@ -411,7 +427,13 @@ class MiniAppServer:
                 else:
                     raise ValueError("Нужен текст, TXT или JSON.")
                 await self._response_engine.set_delta_appearance_from_text(
-                    user.id, description
+                    user.id,
+                    description,
+                    **(
+                        {"expected_appearance": payload["expected_appearance"]}
+                        if request.method == "PATCH"
+                        else {}
+                    ),
                 )
             except ValueError as error:
                 raise web.HTTPBadRequest(text=str(error)) from error

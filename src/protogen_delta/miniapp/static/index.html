@@ -84,6 +84,16 @@
     <b id="appearance-title">Текущий облик Дельты</b>
     <p class="muted" id="appearance">Загружаю облик…</p>
     <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
+    <button id="edit-appearance" class="clipboard-button" type="button" hidden>Редактировать описание</button>
+    <div id="appearance-editor" hidden>
+      <label for="appearance-edit-text">Исправь описание облика</label>
+      <textarea id="appearance-edit-text" maxlength="2000" rows="10"></textarea>
+      <p class="muted">До 2000 знаков. Исправления сохранятся без повторного анализа, картинка останется прежней.</p>
+      <div class="appearance-actions">
+        <button id="save-appearance-edit" type="button">Сохранить исправления</button>
+        <button id="cancel-appearance-edit" class="clipboard-button" type="button">Отмена</button>
+      </div>
+    </div>
     <figure id="saved-appearance" class="saved-appearance" hidden>
       <img id="saved-appearance-image" alt="Сохранённый облик Дельты">
       <figcaption class="muted">Сохранённый облик</figcaption>
@@ -179,9 +189,17 @@
   const appearanceInputArea = document.querySelector("#appearance-input-area");
   const pasteAppearance = document.querySelector("#paste-appearance");
   const imageTypes = ["image/png", "image/jpeg", "image/webp"];
+  const appearanceEditor = document.querySelector("#appearance-editor");
+  const editText = document.querySelector("#appearance-edit-text");
+  let appearanceEditing = false, savedDescription = "", editOriginal = "";
   let appearanceBusy = false, clipboardBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null, selectionRevision = 0;
   const updateAppearanceButtons = () => {
-    const busy = appearanceBusy || clipboardBusy;
+    const busy = appearanceBusy || clipboardBusy || appearanceEditing;
+    document.querySelector("#edit-appearance").hidden = !customAppearance || appearanceEditing;
+    document.querySelector("#edit-appearance").disabled = busy || !appearanceEnabled;
+    document.querySelector("#save-appearance-edit").disabled = appearanceBusy || !editText.value.trim() || editText.value.trim() === editOriginal;
+    document.querySelector("#cancel-appearance-edit").disabled = appearanceBusy;
+    editText.disabled = appearanceBusy;
     document.querySelector("#choose-appearance").disabled = busy || !appearanceEnabled;
     document.querySelector("#apply-appearance").disabled = busy || !appearanceEnabled || !(selectedFile || (appearanceMode.value === "text" && descriptionInput.value.trim()));
     document.querySelector("#reset-appearance").disabled = busy || !customAppearance;
@@ -195,6 +213,7 @@
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
   };
   const renderAppearance = p => {
+    savedDescription = p.delta_appearance || "";
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
@@ -217,6 +236,30 @@
     document.querySelector("#appearance-file-name").textContent = "";
   };
   const appearanceFail = error => { appearanceStatus.className="error"; appearanceStatus.textContent = initData ? `Ошибка: ${error.message}` : "Открой панель кнопкой внутри Telegram."; };
+  document.querySelector("#edit-appearance").addEventListener("click", () => {
+    if (appearanceBusy || clipboardBusy || !customAppearance || !appearanceEnabled) return;
+    editOriginal = savedDescription; editText.value = savedDescription;
+    appearanceEditing = true; appearanceEditor.hidden = false;
+    appearanceStatus.textContent = ""; updateAppearanceButtons(); editText.focus();
+  });
+  editText.addEventListener("input", updateAppearanceButtons);
+  document.querySelector("#cancel-appearance-edit").addEventListener("click", () => {
+    if (appearanceBusy) return;
+    appearanceEditing = false; appearanceEditor.hidden = true; editText.value = "";
+    appearanceStatus.textContent = ""; updateAppearanceButtons();
+  });
+  document.querySelector("#save-appearance-edit").addEventListener("click", async () => {
+    if (appearanceBusy || !appearanceEditing || !editText.value.trim()) return;
+    appearanceBusy = true; updateAppearanceButtons();
+    appearanceStatus.className = ""; appearanceStatus.textContent = "Сохраняю исправления…";
+    try {
+      const profile = await api("PATCH", {appearance:editText.value, expected_appearance:editOriginal}, "/api/profile/appearance");
+      appearanceEditing = false; appearanceEditor.hidden = true; editText.value = "";
+      renderAppearance(profile); appearanceStatus.className = "ok";
+      appearanceStatus.textContent = "Описание исправлено. Дельта будет учитывать изменения.";
+    } catch (error) { appearanceFail(error); }
+    finally { appearanceBusy = false; updateAppearanceButtons(); }
+  });
   document.querySelector("#choose-appearance").addEventListener("click", () => fileInput.click());
   appearanceMode.addEventListener("change", () => {
     clearSelection(); appearanceStatus.textContent = "";
@@ -232,7 +275,7 @@
   });
   descriptionInput.addEventListener("input", () => { if (selectedFile) clearSelection(); updateAppearanceButtons(); });
   const selectAppearanceFile = file => {
-    if (!file || appearanceBusy || !appearanceEnabled) return false;
+    if (!file || appearanceBusy || appearanceEditing || !appearanceEnabled) return false;
     if (appearanceMode.value === "text") {
       if (!/\.(txt|json)$/i.test(file.name) || file.size > 64 * 1024) { appearanceFail(new Error("Выбери TXT/JSON до 64 КБ.")); return false; }
     } else {
@@ -250,7 +293,7 @@
     return true;
   };
   fileInput.addEventListener("change", () => selectAppearanceFile(fileInput.files[0]));
-  const canPasteImage = () => appearanceEnabled && !appearanceBusy && !clipboardBusy && appearanceMode.value === "image" && !document.querySelector("#rp-panel").hidden;
+  const canPasteImage = () => appearanceEnabled && !appearanceBusy && !clipboardBusy && !appearanceEditing && appearanceMode.value === "image" && !document.querySelector("#rp-panel").hidden;
   const pasteImageFile = file => {
     if (selectAppearanceFile(file)) { appearanceStatus.className="ok"; appearanceStatus.textContent="Картинка добавлена. Проверь превью и нажми «Применить облик»."; }
   };

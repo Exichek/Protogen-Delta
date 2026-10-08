@@ -170,7 +170,7 @@ class PromptComposer:
         """Сжать старые ходы без отдельного запроса к модели."""
         if live_turns <= 0 or summary_chars <= 0 or history_chars <= 0:
             raise ValueError("Лимиты истории должны быть больше нуля")
-        turns = list(history)
+        turns = [turn for turn in history if not turn.context_closed]
         older = turns[:-live_turns]
         recent = turns[-live_turns:]
 

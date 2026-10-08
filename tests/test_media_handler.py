@@ -10,8 +10,10 @@ import pytest
 from aiogram import Bot, Router
 from aiogram.types import Message
 
+from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.media import (
+    ALBUM_ERROR_REPLY,
     IMAGE_DOWNLOAD_ERROR_REPLY,
     IMAGE_TOO_LARGE_REPLY,
     MAX_IMAGE_BYTES,
@@ -488,9 +490,10 @@ def test_album_is_combined_into_one_multimodal_turn() -> None:
     second, _ = _message(photo=[second_photo], media_group_id="album-1")
 
     async def scenario() -> None:
-        await router.message.handlers[0].callback(first)
-        await router.message.handlers[0].callback(second)
-        await asyncio.sleep(0.03)
+        await asyncio.gather(
+            router.message.handlers[0].callback(first),
+            router.message.handlers[0].callback(second),
+        )
 
     asyncio.run(scenario())
 
@@ -520,6 +523,7 @@ def test_album_counts_slow_last_download_before_reply() -> None:
     )
 
     async def scenario() -> None:
+        tasks = []
         for number in range(1, 7):
             photo = SimpleNamespace(
                 file_id="six" if number == 6 else str(number),
@@ -530,8 +534,8 @@ def test_album_counts_slow_last_download_before_reply() -> None:
                 caption="Сколько их?" if number == 1 else None,
                 media_group_id="album-six",
             )
-            await router.message.handlers[0].callback(message)
-        await asyncio.sleep(0.06)
+            tasks.append(router.message.handlers[0].callback(message))
+        await asyncio.gather(*tasks)
 
     asyncio.run(scenario())
 
@@ -566,9 +570,10 @@ def test_album_keeps_valid_images_when_one_download_is_invalid() -> None:
     )
 
     async def scenario() -> None:
-        await router.message.handlers[0].callback(valid)
-        await router.message.handlers[0].callback(invalid)
-        await asyncio.sleep(0.03)
+        await asyncio.gather(
+            router.message.handlers[0].callback(valid),
+            router.message.handlers[0].callback(invalid),
+        )
 
     asyncio.run(scenario())
 
@@ -588,3 +593,75 @@ def test_album_delay_must_be_positive() -> None:
             cast(Bot, bot),
             album_delay_seconds=0,
         )
+
+
+def test_album_unexpected_failure_reports_error_instead_of_silence() -> None:
+    router, engine, _ = _router(JPEG_DATA)
+    engine.respond_and_deliver.side_effect = RuntimeError("synthetic")
+    message, answer = _message(
+        photo=[SimpleNamespace(file_id="one", file_size=10)], media_group_id="error"
+    )
+    asyncio.run(router.message.handlers[0].callback(message))
+    answer.assert_awaited_once_with(ALBUM_ERROR_REPLY)
+
+
+def test_reset_cancels_album_download_and_prevents_late_reply() -> None:
+    router, engine, bot = _router(JPEG_DATA)
+    operations = InputOperations()
+    message, answer = _message(
+        photo=[SimpleNamespace(file_id="one", file_size=10)], media_group_id="reset"
+    )
+
+    async def scenario() -> None:
+        downloading = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def download(*args: Any, **kwargs: Any) -> None:
+            downloading.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        bot.download.side_effect = download
+
+        async def receive() -> None:
+            async with operations.receive(TEST_USER_ID) as ticket:
+                assert operations.start_memory(ticket)
+                await router.message.handlers[0].callback(message)
+
+        task = asyncio.create_task(receive())
+        await downloading.wait()
+        async with operations.resetting(TEST_USER_ID):
+            assert task.cancelled()
+            assert cancelled.is_set()
+        engine.respond_and_deliver.assert_not_awaited()
+        answer.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_album_extends_collection_for_late_arrivals_and_delivers_once() -> None:
+    engine = AsyncMock(spec=ResponseEngine)
+    bot = AsyncMock(spec=Bot)
+
+    async def download(file_id: str, *, destination: io.BytesIO) -> None:
+        destination.write(JPEG_DATA)
+
+    bot.download.side_effect = download
+    router = create_media_router(engine, bot, album_delay_seconds=0.08)
+
+    async def scenario() -> None:
+        async def send(number: int) -> None:
+            await asyncio.sleep(number * 0.04)
+            message, _ = _message(
+                photo=[SimpleNamespace(file_id=str(number), file_size=10)],
+                media_group_id="late",
+            )
+            await router.message.handlers[0].callback(message)
+
+        await asyncio.gather(*(send(i) for i in range(3)))
+        engine.respond_and_deliver.assert_awaited_once()
+        assert len(engine.respond_and_deliver.await_args.kwargs["images"]) == 3
+
+    asyncio.run(scenario())
