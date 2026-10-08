@@ -21,6 +21,7 @@ from openai import (
 )
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
+from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import ToolExecutor, get_current_time
@@ -275,12 +276,25 @@ class DeepSeekService:
             max_retries=max_retries,
         )
         self._model = model
+        self._metrics = OperationMetrics()
         self._tools = tools
         self._provider_options: dict[str, Any] = (
             {"extra_body": {"thinking": {"type": "disabled"}}}
             if disable_thinking
             else {}
         )
+
+    def snapshot(self) -> OperationSnapshot:
+        return self._metrics.snapshot()
+
+    async def _complete(
+        self, *, client: AsyncOpenAI | None = None, **kwargs: Any
+    ) -> ChatCompletion:
+        with self._metrics.measure():
+            return cast(
+                ChatCompletion,
+                await (client or self._client).chat.completions.create(**kwargs),
+            )
 
     async def chat(
         self,
@@ -372,7 +386,7 @@ class DeepSeekService:
                         len(history),
                         tool_names=tool_names,
                     )
-            response = await self._client.chat.completions.create(
+            response = await self._complete(
                 model=self._model,
                 messages=messages,
                 max_tokens=4096,
@@ -469,7 +483,7 @@ class DeepSeekService:
         schemas = self._tools.registry.schemas(available_tools)
         if not schemas:
             started = perf_counter()
-            response = await self._client.chat.completions.create(
+            response = await self._complete(
                 model=self._model,
                 messages=messages,
                 max_tokens=4096,
@@ -493,7 +507,7 @@ class DeepSeekService:
                     "function": {"name": forced_tool},
                 }
             started = perf_counter()
-            response = await self._client.chat.completions.create(
+            response = await self._complete(
                 model=self._model,
                 messages=messages,
                 tools=cast(Any, schemas),
@@ -539,7 +553,8 @@ class DeepSeekService:
         client = self._client.with_options(timeout=6.0, max_retries=0)
         started_at = perf_counter()
         try:
-            response = await client.chat.completions.create(
+            response = await self._complete(
+                client=client,
                 model=self._model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -567,7 +582,8 @@ class DeepSeekService:
         client = self._client.with_options(timeout=_CLASSIFY_TIMEOUT, max_retries=0)
         started_at = perf_counter()
         try:
-            response = await client.chat.completions.create(
+            response = await self._complete(
+                client=client,
                 model=self._model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -604,7 +620,8 @@ class DeepSeekService:
         started_at = perf_counter()
 
         try:
-            response = await client.chat.completions.create(
+            response = await self._complete(
+                client=client,
                 model=self._model,
                 messages=[
                     {

@@ -5,6 +5,7 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
+from protogen_delta.core.operation_metrics import OperationSnapshot
 from protogen_delta.services.blocking_work import BlockingWorkPool, WorkRunner
 from protogen_delta.services.speech_audio import prepare_speech_audio
 
@@ -45,6 +46,10 @@ class SpeechTranscriber:
         self._model_lock = asyncio.Lock()
         self._work = BlockingWorkPool()
         self._native_work = native_work
+
+    def snapshot(self) -> OperationSnapshot:
+        """Показывать реально работающий поток, даже после отмены его ожидания."""
+        return self._work.snapshot()
 
     async def _ensure_model(self) -> Any:
         """Создать единственный экземпляр модели при первом голосовом сообщении."""
