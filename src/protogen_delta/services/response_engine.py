@@ -872,6 +872,7 @@ class ResponseEngine:
         user_id: int,
         image: ImageInput,
         *,
+        thumbnail: str = "",
         species_hint: str = "",
         update_existing: bool = False,
     ) -> str:
@@ -890,6 +891,7 @@ class ResponseEngine:
                 )
                 if result != "updated":
                     raise AppearanceAnalysisError
+                state.delta_appearance_thumbnail = thumbnail
                 return state.delta_appearance
         finally:
             self._delivering_users.remove(user_id)
@@ -903,6 +905,7 @@ class ResponseEngine:
         try:
             async with self._user_states.use_conversation(user_id) as state:
                 state.delta_appearance = description
+                state.delta_appearance_thumbnail = ""
                 hint = declared_species(description)
                 state.delta_species = (
                     AppearanceSpecies(hint, None, "user", "declared").encode()
@@ -926,6 +929,7 @@ class ResponseEngine:
         if has_delta_appearance_reset(user_message):
             user_state.delta_appearance = ""
             user_state.delta_species = ""
+            user_state.delta_appearance_thumbnail = ""
             return "cleared"
         if not images or not has_delta_appearance_intent(user_message):
             return None
@@ -959,6 +963,7 @@ class ResponseEngine:
 
         user_state.delta_appearance = result.description
         user_state.delta_species = result.species.encode()
+        user_state.delta_appearance_thumbnail = ""
         return "updated"
 
     def _register_reply(

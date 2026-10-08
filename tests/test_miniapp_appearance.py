@@ -1,6 +1,7 @@
 """Загрузка референса, изоляция профиля и восстановление базовой внешности."""
 
 import asyncio
+import base64
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_image,
+    prepare_appearance_upload,
 )
 from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.deepseek import DeepSeekConnectionError, ImageInput
@@ -63,6 +65,17 @@ def test_appearance_image_rotates_exif_and_flattens_transparency() -> None:
         assert not rotated.getexif()
 
 
+def test_saved_thumbnail_is_small_metadata_free_and_preserves_frame() -> None:
+    _, thumbnail = prepare_appearance_upload(_image(size=(2000, 1000)))
+    assert thumbnail.startswith("data:image/jpeg;base64,")
+    data = base64.b64decode(thumbnail.split(",", 1)[1], validate=True)
+    assert len(data) <= 64 * 1024
+    with Image.open(BytesIO(data)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (256, 128)
+        assert not image.getexif()
+
+
 @pytest.mark.parametrize(
     "data",
     [b"", b"bad", _image("GIF"), b"x" * (MAX_APPEARANCE_BYTES + 1)],
@@ -98,6 +111,7 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
     async def scenario() -> None:
         async with states.use(42) as state:
             state.delta_appearance = "Прежний облик"
+            state.delta_appearance_thumbnail = "previous-thumbnail"
             state.roleplay_character = "Мой персонаж"
             state.roleplay_preferences = "Юмор"
             state.roleplay_boundaries = "Без унижения"
@@ -113,6 +127,8 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
             profile = await response.json()
             assert profile["delta_appearance"] == "Вероятно, Дракон. " + description
             assert profile["appearance_upload_enabled"]
+            thumbnail = profile["delta_appearance_thumbnail"]
+            assert thumbnail.startswith("data:image/jpeg;base64,")
             assert not profile["roleplay_active"]
             assert profile["roleplay_configuration"] == "female"
             assert profile["roleplay_character"] == "Мой персонаж"
@@ -126,16 +142,27 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
             restored = UserStateStore(persistence=repository)
             async with restored.use(42) as state:
                 assert state.delta_appearance == "Вероятно, Дракон. " + description
+                assert state.delta_appearance_thumbnail == thumbnail
+            # Reopening the panel restores the thumbnail; another signed user cannot see it.
+            reopened = await client.get("/api/profile", headers=headers)
+            assert (await reopened.json())["delta_appearance_thumbnail"] == thumbnail
+            another = await client.get(
+                "/api/profile",
+                headers={"X-Telegram-Init-Data": _signed_init_data(user_id=7)},
+            )
+            assert not (await another.json())["delta_appearance_thumbnail"]
             reset = await client.delete("/api/profile/appearance", headers=headers)
             assert reset.status == 200
             profile = await reset.json()
             assert not profile["delta_appearance"]
+            assert not profile["delta_appearance_thumbnail"]
             assert profile["roleplay_character"] == "Мой персонаж"
             assert profile["roleplay_preferences"] == "Юмор"
             assert profile["roleplay_boundaries"] == "Без унижения"
             restored = UserStateStore(persistence=repository)
             async with restored.use(42) as state:
                 assert not state.delta_appearance
+                assert not state.delta_appearance_thumbnail
 
     asyncio.run(scenario())
 
@@ -147,6 +174,7 @@ def test_analysis_failure_keeps_previous_appearance_and_releases_lock(
     engine, _, model, *_ = _create_engine()
     state = engine._user_states.get(42)
     state.delta_appearance = "Прежний облик"
+    state.delta_appearance_thumbnail = "previous-thumbnail"
     if isinstance(reply, Exception):
         model.chat.side_effect = reply
     else:
@@ -158,6 +186,7 @@ def test_analysis_failure_keeps_previous_appearance_and_releases_lock(
             )
         )
     assert state.delta_appearance == "Прежний облик"
+    assert state.delta_appearance_thumbnail == "previous-thumbnail"
     assert not engine._delivering_users
 
 
@@ -170,6 +199,34 @@ def test_appearance_change_does_not_overlap_chat_delivery() -> None:
                 42, ImageInput(b"image", "image/png")
             )
         )
+
+
+def test_text_appearance_and_full_reset_remove_saved_thumbnail(tmp_path: Path) -> None:
+    engine, *_ = _create_engine()
+    repository = UserStateRepository(tmp_path)
+    states = UserStateStore(persistence=repository)
+    engine._user_states = states
+
+    async def scenario() -> None:
+        async with states.use(42) as state:
+            state.delta_appearance = "Первый облик"
+            state.delta_appearance_thumbnail = "private-thumbnail"
+        async with states.use((-100, 42)) as group:
+            group.delta_appearance = "Облик в группе"
+            group.delta_appearance_thumbnail = "group-thumbnail"
+        await engine.set_delta_appearance_from_text(42, "Новый облик текстом")
+        restored = UserStateStore(persistence=UserStateRepository(tmp_path))
+        async with restored.use(42) as state:
+            assert state.delta_appearance == "Новый облик текстом"
+            assert not state.delta_appearance_thumbnail
+        async with restored.use((-100, 42)) as group:
+            assert group.delta_appearance_thumbnail == "group-thumbnail"
+        await restored.reset_user(42)
+        assert await repository.load(42) is None
+        assert await repository.load((-100, 42)) is None
+        assert not restored.get(42).delta_appearance_thumbnail
+
+    asyncio.run(scenario())
 
 
 def test_appearance_api_authenticates_before_accepting_upload_or_reset() -> None:
@@ -268,7 +325,7 @@ def test_concurrent_uploads_and_rate_limit_are_bounded(
         release = asyncio.Event()
         calls = 0
 
-        async def analyze(user_id: int, image: ImageInput) -> str:
+        async def analyze(user_id: int, image: ImageInput, *, thumbnail: str) -> str:
             nonlocal calls
             calls += 1
             if calls == 2:

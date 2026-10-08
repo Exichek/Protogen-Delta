@@ -58,6 +58,7 @@ class UserStateRepository:
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         delta_species: str = "",
+        delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
@@ -78,6 +79,7 @@ class UserStateRepository:
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             delta_species=delta_species,
+            delta_appearance_thumbnail=delta_appearance_thumbnail,
             content_mode=content_mode,
             history=history,
             history_updated_at=history_updated_at,
@@ -129,6 +131,7 @@ class UserStateRepository:
                         roleplay_boundaries,
                         delta_appearance,
                         delta_species,
+                        delta_appearance_thumbnail,
                         content_mode,
                         history,
                         history_updated_at
@@ -163,6 +166,7 @@ class UserStateRepository:
             roleplay_boundaries,
             delta_appearance,
             delta_species,
+            delta_appearance_thumbnail,
             content_mode,
             history,
             history_updated_at,
@@ -192,6 +196,7 @@ class UserStateRepository:
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
             delta_species=delta_species,
+            delta_appearance_thumbnail=delta_appearance_thumbnail,
             content_mode=self._decode_content_mode(content_mode),
             history=self._decode_history(history),
             history_updated_at=history_updated_at,
@@ -212,6 +217,7 @@ class UserStateRepository:
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         delta_species: str = "",
+        delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
@@ -264,11 +270,12 @@ class UserStateRepository:
                         roleplay_boundaries,
                         delta_appearance,
                         delta_species,
+                        delta_appearance_thumbnail,
                         content_mode,
                         history,
                         history_updated_at
                     )
-                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -287,6 +294,7 @@ class UserStateRepository:
                         roleplay_boundaries = excluded.roleplay_boundaries,
                         delta_appearance = excluded.delta_appearance,
                         delta_species = excluded.delta_species,
+                        delta_appearance_thumbnail = excluded.delta_appearance_thumbnail,
                         content_mode = excluded.content_mode
                         {history_update}
                     """,
@@ -309,6 +317,7 @@ class UserStateRepository:
                         roleplay_boundaries,
                         delta_appearance,
                         delta_species,
+                        delta_appearance_thumbnail,
                         content_mode,
                         encoded_history,
                         history_updated_at,
@@ -398,6 +407,7 @@ class UserStateRepository:
                 }
                 for name, declaration in (
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
+                    ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
                     ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
                 ):

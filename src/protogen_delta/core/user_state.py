@@ -127,6 +127,7 @@ class PersistentUserState:
     roleplay_boundaries: str = ""
     delta_appearance: str = ""
     delta_species: str = ""
+    delta_appearance_thumbnail: str = ""
     content_mode: ContentMode = "unselected"
     history: tuple[ConversationTurn, ...] = ()
     history_updated_at: float = 0.0
@@ -161,6 +162,7 @@ class UserStatePersistence(Protocol):
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
         delta_species: str = "",
+        delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
@@ -200,6 +202,7 @@ class UserState:
     roleplay_boundaries: str = ""
     delta_appearance: str = ""
     delta_species: str = ""
+    delta_appearance_thumbnail: str = ""
     content_mode: ContentMode = "unselected"
     history_updated_at: float = 0.0
     emotions_updated_at: float = field(
@@ -257,6 +260,7 @@ class UserState:
         self.roleplay_boundaries = ""
         self.delta_appearance = ""
         self.delta_species = ""
+        self.delta_appearance_thumbnail = ""
         self.content_mode = "unselected"
 
 
@@ -399,6 +403,7 @@ class UserStateStore:
                                     roleplay_boundaries=state.roleplay_boundaries,
                                     delta_appearance=state.delta_appearance,
                                     delta_species=state.delta_species,
+                                    delta_appearance_thumbnail=state.delta_appearance_thumbnail,
                                     content_mode=state.content_mode,
                                     history=tuple(state.history),
                                     history_updated_at=state.history_updated_at,
@@ -535,6 +540,9 @@ class UserStateStore:
             state.roleplay_boundaries = persistent_state.roleplay_boundaries
             state.delta_appearance = persistent_state.delta_appearance
             state.delta_species = persistent_state.delta_species
+            state.delta_appearance_thumbnail = (
+                persistent_state.delta_appearance_thumbnail
+            )
             state.content_mode = persistent_state.content_mode
             state.history = deque(persistent_state.history, maxlen=self._history_limit)
             state.history_updated_at = persistent_state.history_updated_at
