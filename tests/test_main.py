@@ -467,6 +467,21 @@ def test_main_builds_application_and_starts_polling(
 
     assert reset_router_call is not None
     assert len(reset_router_call.args) == 3
+    inputs = reset_router_call.kwargs["input_operations"]
+    assert isinstance(inputs, main_module.InputOperations)
+    outer = dispatcher_mock.message.outer_middleware.call_args_list
+    assert len(outer) == 2
+    assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
+    assert outer[0].args[0]._operations is inputs
+    assert isinstance(outer[1].args[0], main_module.UserStatisticsMiddleware)
+    assert outer[1].args[0]._input_operations is inputs
+    for router in (text_router, media_router, document_router, voice_router):
+        router.message.middleware.assert_called_once()
+        inner = router.message.middleware.call_args.args[0]
+        assert isinstance(inner, main_module.MemoryInputsMiddleware)
+        assert inner._operations is inputs
+    for router in (start_router, art_router, adult_router, reset_router, rp_router):
+        router.message.middleware.assert_not_called()
 
     reset_response_engine = reset_router_call.args[0]
     reset_users_repository = reset_router_call.args[1]

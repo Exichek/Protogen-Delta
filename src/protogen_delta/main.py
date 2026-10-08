@@ -13,6 +13,11 @@ from openai import AsyncOpenAI
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import Settings, load_settings
+from protogen_delta.core.input_operations import (
+    InputOperations,
+    MemoryInputsMiddleware,
+    ReceiveInputsMiddleware,
+)
 from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import PollingHealthMiddleware, RuntimeHealth
@@ -165,9 +170,6 @@ async def main() -> None:
         e621_history = E621HistoryRepository(settings.data_dir)
         facts_repository = UserFactsRepository(settings.data_dir)
         statistics_repository = UserStatisticsRepository(settings.data_dir)
-        dispatcher.message.outer_middleware(
-            UserStatisticsMiddleware(statistics_repository)
-        )
 
         bot_state = BotState()
         user_states = UserStateStore(
@@ -175,6 +177,13 @@ async def main() -> None:
             history_ttl_seconds=settings.conversation_history_ttl_seconds,
             retention_seconds=settings.user_state_retention_seconds,
             persistence=user_state_repository,
+        )
+        input_operations = InputOperations()
+        dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        dispatcher.message.outer_middleware(
+            UserStatisticsMiddleware(
+                statistics_repository, user_states, input_operations
+            )
         )
 
         fetish_triggers = _require_string_lists(
@@ -396,6 +405,7 @@ async def main() -> None:
             memory,
             on_mode_change=on_mode_change,
             user_statistics=statistics_repository,
+            input_operations=input_operations,
         )
 
         rp_router = create_rp_router(
@@ -448,6 +458,9 @@ async def main() -> None:
                 else None
             ),
         )
+
+        for router in (text_router, media_router, document_router, voice_router):
+            router.message.middleware(MemoryInputsMiddleware(input_operations))
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(menu_router)

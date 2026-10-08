@@ -328,6 +328,12 @@ class UserStateStore:
                 yield state
 
     @asynccontextmanager
+    async def use_activity(self, user_id: int) -> AsyncIterator[None]:
+        """Согласовать внешнюю запись со сбросом, не блокируя отдельный диалог."""
+        async with self._coordinate(user_id, exclusive=False):
+            yield
+
+    @asynccontextmanager
     async def _coordinate(
         self, key: StateKey, *, exclusive: bool
     ) -> AsyncIterator[UserState]:
