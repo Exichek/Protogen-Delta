@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.core.user_state import ContentMode, UserState, UserStateStore
 from protogen_delta.miniapp.auth import (
@@ -21,6 +22,8 @@ from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_image,
 )
+from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
     ResponseBusyError,
@@ -66,6 +69,8 @@ class MiniAppServer:
         response_engine: ResponseEngine | None = None,
         on_mode_change: ModeChange | None = None,
         tools: MiniAppTools | None = None,
+        native_work: WorkRunner | None = None,
+        runtime_health: RuntimeHealth | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -81,6 +86,8 @@ class MiniAppServer:
         self._response_engine = response_engine
         self._on_mode_change = on_mode_change
         self._tools = tools
+        self._native_work = native_work or NativeWorkPool(2)
+        self._runtime_health = runtime_health
         self._appearance_pending: set[int] = set()
         self._appearance_slots = asyncio.Semaphore(2)
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
@@ -146,7 +153,10 @@ class MiniAppServer:
 
     async def _health(self, request: web.Request) -> web.Response:
         del request
-        return web.json_response({"ok": True})
+        if self._runtime_health is None:
+            return web.json_response({"ok": True})
+        state = self._runtime_health.snapshot()
+        return web.json_response(state, status=200 if state["ok"] else 503)
 
     def _authenticate(self, request: web.Request) -> MiniAppUser:
         init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -289,7 +299,7 @@ class MiniAppServer:
                     client_max_size=MAX_APPEARANCE_BYTES + 1
                 ).read()
                 try:
-                    image = await asyncio.to_thread(prepare_appearance_image, data)
+                    image = await self._native_work.run(prepare_appearance_image, data)
                 except ValueError as error:
                     raise web.HTTPBadRequest(text=str(error)) from error
                 if not self._appearance_limiter.allow(user.id):

@@ -199,20 +199,16 @@ def create_reset_router(
             await callback.answer()
             return
 
-        await response_engine.reset_user(
-            expected_user_id,
-        )
+        async def clear_related_memory() -> None:
+            if memory is not None:
+                await memory.delete_user(expected_user_id)
+            if user_statistics is not None:
+                await user_statistics.delete_user(expected_user_id)
+            users_repository.remove(expected_user_id)
+
+        await response_engine.reset_user(expected_user_id, cleanup=clear_related_memory)
         if on_mode_change is not None:
             await on_mode_change(expected_user_id, "unselected")
-
-        if memory is not None:
-            await memory.delete_user(expected_user_id)
-        if user_statistics is not None:
-            await user_statistics.delete_user(expected_user_id)
-
-        users_repository.remove(
-            expected_user_id,
-        )
 
         await _edit_callback_message(
             callback,

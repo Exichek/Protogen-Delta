@@ -415,6 +415,7 @@ def test_main_builds_application_and_starts_polling(
 
     user_state_store_constructor_mock.assert_called_once_with(
         history_limit=12,
+        history_ttl_seconds=604800.0,
         retention_seconds=3600.0,
         persistence=user_state_repository,
     )
@@ -534,6 +535,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        native_work=ANY,
     )
     create_document_router_mock.assert_called_once_with(
         reset_response_engine,
@@ -541,11 +543,13 @@ def test_main_builds_application_and_starts_polling(
         rate_limiter=ANY,
         sticker_service=ANY,
         ocr_enabled=False,
+        native_work=ANY,
     )
     speech_transcriber_constructor_mock.assert_called_once_with(
         model_size="small",
         device="cpu",
         compute_type="int8",
+        native_work=ANY,
     )
     create_voice_router_mock.assert_called_once_with(
         reset_response_engine,
@@ -555,6 +559,7 @@ def test_main_builds_application_and_starts_polling(
         sticker_service=ANY,
         audio_understanding=None,
         music_recognition=None,
+        native_work=ANY,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(

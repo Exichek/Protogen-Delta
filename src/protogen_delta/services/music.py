@@ -9,6 +9,8 @@ import av
 
 from protogen_delta.services.audio_analysis import AudioAnalysisError
 from protogen_delta.services.audio_understanding import audio_excerpt
+from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.native_work import NativeWorkPool
 
 
 def is_audio_file(mime_type: str | None, filename: str | None) -> bool:
@@ -29,7 +31,9 @@ def audio_tags(data: bytes) -> dict[str, str]:
     if not data or len(data) > 20 * 1024 * 1024:
         return {}
     try:
-        with av.open(io.BytesIO(data), mode="r") as container:
+        with av.open(
+            io.BytesIO(data), mode="r", options={"protocol_whitelist": "pipe"}
+        ) as container:
             metadata = dict(container.metadata)
             for stream in container.streams.audio:
                 metadata.update(stream.metadata)
@@ -50,14 +54,17 @@ class MusicRecognitionError(RuntimeError):
 class MusicRecognitionService:
     """Отправлять в AudD 12 секунд WAV, без истории чата и Telegram-ссылок."""
 
-    def __init__(self, api_token: str) -> None:
+    def __init__(
+        self, api_token: str, *, native_work: WorkRunner | None = None
+    ) -> None:
         self._api_token = api_token
+        self._native_work = native_work or NativeWorkPool(2)
         self._slots = asyncio.Semaphore(2)
 
     async def recognize(self, data: bytes) -> str | None:
         async with self._slots:
             try:
-                excerpt = await asyncio.to_thread(audio_excerpt, data, seconds=12)
+                excerpt = await self._native_work.run(audio_excerpt, data, seconds=12)
                 form = aiohttp.FormData()
                 form.add_field("api_token", self._api_token)
                 form.add_field(

@@ -19,7 +19,7 @@ def test_short_audio_quote_stays_file_content(
     monkeypatch: pytest.MonkeyPatch, semantic: bool
 ) -> None:
     monkeypatch.setattr(
-        "protogen_delta.handlers.voice.analyze_audio",
+        "protogen_delta.services.audio_pipeline.analyze_audio",
         lambda data: (_ for _ in ()).throw(AudioAnalysisError("no metrics")),
     )
     router, engine, bot, transcriber = _router(Transcript("Моя любимая", "ru"))

@@ -20,6 +20,7 @@ from protogen_delta.core.roleplay import (
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
     ConversationTurn,
+    StateKey,
     UserState,
     UserStateStore,
 )
@@ -45,6 +46,7 @@ from protogen_delta.services.fetishes import (
     detect_fetishes,
 )
 from protogen_delta.services.insults import InsultClassifier, InsultType
+from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.interaction_state import (
     apply_interaction_effects,
 )
@@ -134,6 +136,7 @@ class ResponseEngine:
         memory: MemoryService | None = None,
         creator_id: int | None = None,
         reply_transform: Callable[[int, str], str] | None = None,
+        interaction_classifier: InteractionClassifier | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -161,7 +164,8 @@ class ResponseEngine:
         self._memory = memory
         self._creator_id = creator_id
         self._reply_transform = reply_transform
-        self._delivering_users: set[int] = set()
+        self._interaction_classifier = interaction_classifier
+        self._delivering_users: set[StateKey] = set()
 
     async def respond_and_deliver(
         self,
@@ -178,9 +182,10 @@ class ResponseEngine:
         chat_id: int | None = None,
     ) -> None:
         """Отклонить повторный запрос и удержать lock до конца доставки."""
-        if user_id in self._delivering_users:
+        key: StateKey = user_id if chat_id is None else (chat_id, user_id)
+        if key in self._delivering_users:
             raise ResponseBusyError
-        self._delivering_users.add(user_id)
+        self._delivering_users.add(key)
         try:
             await self.respond(
                 user_id,
@@ -195,7 +200,7 @@ class ResponseEngine:
                 chat_id=chat_id,
             )
         finally:
-            self._delivering_users.remove(user_id)
+            self._delivering_users.remove(key)
 
     async def respond(
         self,
@@ -247,6 +252,7 @@ class ResponseEngine:
                                 else reply
                             ),
                         )
+                        self._user_states.mark_history_updated(user_state)
                 return reply
 
     async def reset_user_context(
@@ -262,9 +268,11 @@ class ResponseEngine:
     async def reset_user(
         self,
         user_id: int,
+        *,
+        cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Полностью забыть состояние конкретного пользователя."""
-        await self._user_states.reset_user(user_id)
+        await self._user_states.reset_user(user_id, cleanup=cleanup)
 
     async def disable_roleplay(
         self,
@@ -339,15 +347,21 @@ class ResponseEngine:
         ):
             return PreparedReply(RP_SETUP_REPLY, user_message)
 
-        insult_type, mood = await asyncio.gather(
-            self._insult_classifier.classify(
-                user_message,
-            ),
-            self._update_mood(
-                user_message,
-                user_state,
-            ),
-        )
+        if self._interaction_classifier is not None:
+            interaction = await self._interaction_classifier.classify(user_message)
+            insult_type, mood = interaction.insult, interaction.mood
+            if mood is not None:
+                user_state.mood = mood
+        else:
+            insult_type, mood = await asyncio.gather(
+                self._insult_classifier.classify(
+                    user_message,
+                ),
+                self._update_mood(
+                    user_message,
+                    user_state,
+                ),
+            )
 
         apply_interaction_effects(
             user_state,
@@ -812,7 +826,7 @@ class ResponseEngine:
             raise ResponseBusyError
         self._delivering_users.add(user_id)
         try:
-            async with self._user_states.use(user_id) as state:
+            async with self._user_states.use_conversation(user_id) as state:
                 result = await self._update_delta_appearance(
                     "Хочу тебя видеть в таком облике", state, (image,)
                 )
@@ -829,7 +843,7 @@ class ResponseEngine:
             raise ResponseBusyError
         self._delivering_users.add(user_id)
         try:
-            async with self._user_states.use(user_id) as state:
+            async with self._user_states.use_conversation(user_id) as state:
                 state.delta_appearance = description
             return description
         finally:

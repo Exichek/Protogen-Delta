@@ -46,7 +46,9 @@ def analyze_audio(data: bytes) -> AudioAnalysis:
     if not data:
         raise AudioAnalysisError("Аудиофайл пуст")
     try:
-        with av.open(io.BytesIO(data), mode="r") as container:
+        with av.open(
+            io.BytesIO(data), mode="r", options={"protocol_whitelist": "pipe"}
+        ) as container:
             stream = next(iter(container.streams.audio), None)
             if stream is None:
                 raise AudioAnalysisError("В файле нет аудиопотока")

@@ -20,7 +20,9 @@ def extract_animation_frames(
     if max_frames <= 0:
         raise ValueError("max_frames должен быть больше нуля")
     try:
-        opened = av.open(io.BytesIO(data), mode="r")
+        opened = av.open(
+            io.BytesIO(data), mode="r", options={"protocol_whitelist": "pipe"}
+        )
         container = cast(av.container.InputContainer, opened)
         with container:
             stream = next(
@@ -29,6 +31,7 @@ def extract_animation_frames(
             )
             if stream is None:
                 return ()
+            stream.codec_context.thread_count = 1
             duration = _duration_seconds(container, stream)
             targets = [index / max_frames for index in range(max_frames)]
             selected: list[ImageInput] = []
