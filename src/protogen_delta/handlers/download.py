@@ -26,7 +26,8 @@ def create_download_router(downloader: MediaDownloader) -> Router:
                 "📥 /download <ссылка на видео>\n\n"
                 "YouTube, Instagram, TikTok, Vimeo, VK и VK Видео (включая клипы), X/Twitter. "
                 "Одно публичное видео "
-                "до 10 минут и 45 МБ. Скачивание может зависеть от ограничений сайта."
+                "до 10 минут и 100 МБ. Крупные файлы сжимаются для Telegram; "
+                "обработка — до четырёх минут. Доступ зависит от ограничений сайта."
             )
             return
         user_id = message.from_user.id
@@ -40,12 +41,15 @@ def create_download_router(downloader: MediaDownloader) -> Router:
         try:
             async with downloader.download(url) as media:
                 file = FSInputFile(media.path)
+                caption = media.title + (
+                    "\nСжато для отправки в Telegram." if media.compressed else ""
+                )
                 if media.path.suffix.lower() == ".mp4":
                     await message.answer_video(
-                        file, caption=media.title, supports_streaming=True
+                        file, caption=caption, supports_streaming=True
                     )
                 else:
-                    await message.answer_document(file, caption=media.title)
+                    await message.answer_document(file, caption=caption)
         except MediaDownloadError as error:
             await message.answer(str(error))
         except TelegramAPIError:

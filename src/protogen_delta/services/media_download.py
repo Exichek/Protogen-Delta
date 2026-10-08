@@ -12,9 +12,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
-MAX_DOWNLOAD_BYTES = 45 * 1024 * 1024
+from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.services.download_compression import MAX_UPLOAD_BYTES
+
+MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_DOWNLOAD_SECONDS = 600
-DOWNLOAD_TIMEOUT_SECONDS = 120
+DOWNLOAD_TIMEOUT_SECONDS = 240
 _VK_HOSTS = frozenset(
     {
         "vk.com",
@@ -71,6 +74,7 @@ class DownloadedMedia:
 
     path: Path
     title: str
+    compressed: bool = False
 
 
 def validate_media_url(url: str) -> str:
@@ -128,9 +132,17 @@ class MediaDownloader:
                     raise MediaDownloadError("Сайт не отдал один доступный видеофайл.")
                 result = candidates[0]
                 if not 0 < result.stat().st_size <= MAX_DOWNLOAD_BYTES:
-                    raise MediaDownloadError("Видео превышает лимит 45 МБ.")
-                title = json.loads((path / "result.json").read_text("utf-8"))["title"]
-                yield DownloadedMedia(result, str(title)[:150])
+                    raise MediaDownloadError("Видео превышает лимит 100 МБ.")
+                if result.stat().st_size > MAX_UPLOAD_BYTES:
+                    raise MediaDownloadError(
+                        "Не удалось сжать видео для отправки в Telegram."
+                    )
+                metadata = json.loads((path / "result.json").read_text("utf-8"))
+                yield DownloadedMedia(
+                    result,
+                    str(metadata["title"])[:150],
+                    metadata.get("compressed") is True,
+                )
 
     async def _run(self, url: str, directory: Path) -> None:
         # В дочерний процесс не передаются токены бота и провайдеров.
@@ -161,7 +173,7 @@ class MediaDownloader:
                     )
                     # Во время remux одновременно существуют исходники и результат.
                     if total > 2 * MAX_DOWNLOAD_BYTES + 1024 * 1024:
-                        raise MediaDownloadError("Видео превышает лимит 45 МБ.")
+                        raise MediaDownloadError("Видео превышает лимит 100 МБ.")
                     try:
                         await asyncio.wait_for(process.wait(), timeout=0.2)
                     except TimeoutError:
@@ -169,13 +181,18 @@ class MediaDownloader:
                 if process.returncode != 0:
                     raise MediaDownloadError(
                         "Не смог скачать видео: оно недоступно, требует входа, "
-                        "превышает 10 минут/45 МБ или сайт ограничил загрузку."
+                        "превышает 10 минут/100 МБ, сайт ограничил загрузку "
+                        "или файл не удалось сжать для Telegram."
                     )
         except TimeoutError as error:
             raise MediaDownloadError(
-                "Сайт не успел отдать видео за две минуты."
+                "Загрузка или сжатие видео не завершились за четыре минуты."
             ) from error
         finally:
-            if process.returncode is None:
-                process.kill()
-            await process.wait()
+
+            async def stop() -> None:
+                if process.returncode is None:
+                    process.kill()
+                await process.wait()
+
+            await finish_operation(stop())
