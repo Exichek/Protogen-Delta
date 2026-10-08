@@ -47,3 +47,4 @@ def test_appearance_extraction_receives_species_reference() -> None:
     assert guide in sent
     assert "не порода волка и не акула" in sent
     assert "Гибрид" in sent
+    assert sent.endswith(load_prompt("appearance_identification.txt"))

@@ -872,6 +872,7 @@ class ResponseEngine:
         )
         if self._config.species_prompt:
             prompt += "\n\n" + self._config.species_prompt
+        prompt += "\n\n" + load_prompt("appearance_identification")
         try:
             description = await self._deepseek.chat(
                 system_prompt=prompt,
