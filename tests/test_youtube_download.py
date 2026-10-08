@@ -50,6 +50,8 @@ def _cookies(path: Path) -> bytes:
         ("HTTP Error 403", "access_denied"),
         ("HTTP Error 404", "unavailable"),
         ("No supported JavaScript runtime could be found", "runtime"),
+        ("n challenge solving failed", "runtime"),
+        ("Reached heap limit - JavaScript heap out of memory", "runtime"),
         ("Connection timed out", "network"),
         ("opaque token=synthetic", "unknown"),
     ],
@@ -139,6 +141,53 @@ print('sandbox_ok')
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "sandbox_ok"
+
+
+def test_deno_heap_handles_larger_player_workload_under_guard() -> None:
+    code = """
+import subprocess
+from protogen_delta.services.youtube_download import deno_binary,DENO_RUN_FLAGS,limit_extraction_process
+from protogen_delta.services.media_download_worker import install_network_guard
+runtime=deno_binary()
+install_network_guard(runtime)
+limit_extraction_process()
+js=(
+ 'const blocks=[];for(let i=0;i<20;i++)blocks.push(new Array(1000000).fill(i));'
+ 'console.log(blocks.reduce((n,b)=>n+b.length,0));'
+)
+result=subprocess.run([runtime,'run',*sorted(DENO_RUN_FLAGS),'-'],input=js,text=True,capture_output=True,timeout=20)
+assert result.returncode==0,result.stderr
+assert result.stdout.strip()=='20000000'
+print('bounded_heap_ok')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "bounded_heap_ok"
+
+
+def test_runtime_failure_survives_missing_formats_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yt_dlp  # type: ignore[import-untyped]
+
+    def client(options: dict[str, Any]) -> Mock:
+        connection = Mock()
+        connection.__enter__ = Mock(return_value=connection)
+        connection.__exit__ = Mock(return_value=None)
+
+        def extract(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            options["logger"].warning("n challenge solving failed")
+            options["logger"].warning("No video formats found")
+            return {"duration": 10, "formats": [{"vcodec": "images"}]}
+
+        connection.extract_info.side_effect = extract
+        return connection
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", client)
+    with pytest.raises(DownloadFailure, match="^runtime$"):
+        worker.download_one(tmp_path, "https://youtu.be/synthetic")
 
 
 def test_cookie_snapshot_filters_domains_expiry_and_preserves_source(
@@ -290,7 +339,7 @@ def test_v8_limits_are_data_cpu_and_core_not_virtual_address_space(
 def test_restricted_youtube_without_formats_reports_age(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import yt_dlp  # type: ignore[import-untyped]
+    import yt_dlp
 
     client = Mock()
     client.__enter__ = Mock(return_value=client)

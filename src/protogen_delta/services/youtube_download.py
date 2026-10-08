@@ -11,7 +11,7 @@ from typing import Any
 from protogen_delta.services.download_errors import DownloadFailure
 
 _COOKIE_BYTES = 256 * 1024
-DENO_HEAP_FLAG = "--v8-flags=--max-old-space-size=128"
+DENO_HEAP_FLAG = "--v8-flags=--max-old-space-size=256"
 DENO_RUN_FLAGS = frozenset(
     {
         "--ext=js",
