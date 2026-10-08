@@ -41,6 +41,7 @@ class Settings:
     music_audd_api_token: str | None = None
     saucenao_api_key: str | None = None
     telegram_proxy_url: str | None = None
+    youtube_cookies_file: Path | None = None
     log_level: str = "INFO"
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
@@ -360,6 +361,11 @@ def load_settings() -> Settings:
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,
         telegram_proxy_url=telegram_proxy_url or None,
+        youtube_cookies_file=(
+            Path(os.environ["YOUTUBE_COOKIES_FILE"].strip())
+            if os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+            else None
+        ),
         log_level=os.getenv(
             "LOG_LEVEL",
             "INFO",

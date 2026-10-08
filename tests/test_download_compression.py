@@ -14,6 +14,7 @@ import av
 import numpy as np
 import pytest
 from aiogram.types import Message
+from test_media_download import _stop_fake_download
 
 import protogen_delta.services.download_compression as compression
 import protogen_delta.services.media_download as download
@@ -249,6 +250,8 @@ def test_exact_100_mib_is_accepted_and_larger_input_rejected(
 def test_repeated_cancellation_waits_for_worker_reap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(download, "_stop_worker", _stop_fake_download)
+
     async def scenario() -> None:
         started, killed, reap = asyncio.Event(), asyncio.Event(), asyncio.Event()
         process = SimpleNamespace(returncode=None, kill=Mock(side_effect=killed.set))

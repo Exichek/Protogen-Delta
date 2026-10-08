@@ -3,6 +3,7 @@
 import ipaddress
 import json
 import math
+import signal
 import socket
 import sys
 from pathlib import Path
@@ -16,13 +17,22 @@ from protogen_delta.services.download_compression import (
     compress_download,
     limit_compression_process,
 )
+from protogen_delta.services.download_errors import DownloadFailure, classify_failure
 from protogen_delta.services.media_download import (
     _TWITTER_HOSTS,
     MAX_DOWNLOAD_BYTES,
     MAX_DOWNLOAD_SECONDS,
+    directory_bytes,
+    is_youtube_url,
     validate_media_url,
 )
 from protogen_delta.services.media_remux import remux_streams
+from protogen_delta.services.youtube_download import (
+    allowed_deno_command,
+    deno_binary,
+    limit_extraction_process,
+    youtube_options,
+)
 
 
 def require_public_address(address: Any) -> None:
@@ -37,12 +47,18 @@ def require_public_address(address: Any) -> None:
         raise OSError("Non-public destination blocked")
 
 
-def install_network_guard() -> None:
+def install_network_guard(runtime: str | None = None) -> None:
     """Системный audit hook работает только в отдельном worker-процессе."""
 
     def audit(event: str, arguments: tuple[Any, ...]) -> None:
         if event == "socket.connect":
             require_public_address(arguments[1])
+        if (
+            event in {"subprocess.Popen", "os.posix_spawn"}
+            and len(arguments) >= 2
+            and allowed_deno_command(arguments[0], arguments[1], runtime)
+        ):
+            return
         if event in {"subprocess.Popen", "os.system", "os.posix_spawn"}:
             raise OSError("External downloaders are disabled")
 
@@ -51,14 +67,19 @@ def install_network_guard() -> None:
 
 
 class _SilentLogger:
+    def __init__(self) -> None:
+        self.failure_code: str | None = None
+
     def debug(self, message: str) -> None:
         pass
 
     def warning(self, message: str) -> None:
-        pass
+        code = classify_failure(RuntimeError(message))
+        if code != "unknown":
+            self.failure_code = code
 
     def error(self, message: str) -> None:
-        pass
+        self.warning(message)
 
 
 def _twitter_gif(info: dict[str, Any]) -> bool:
@@ -99,23 +120,29 @@ def _check_animation(directory: Path) -> None:
             raise ValueError("Unsupported animation format")
 
 
-def download_one(directory: Path, url: str) -> None:
-    """Только один готовый AV-файл; cookies, DRM и внешние процессы не используются."""
+def download_one(
+    directory: Path,
+    url: str,
+    cookies: Path | None = None,
+    *,
+    limit_resources: bool = False,
+) -> None:
+    """Один AV-файл; сессия и локальный EJS разрешены только для YouTube."""
     from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
     url = validate_media_url(url)
     twitter = urlsplit(url).hostname in _TWITTER_HOSTS
+    youtube = is_youtube_url(url)
 
     def progress(status: dict[str, Any]) -> None:
-        total = sum(
-            item.stat().st_size for item in directory.rglob("*") if item.is_file()
-        )
+        total = directory_bytes(directory)
         if (
             int(status.get("downloaded_bytes") or 0) > MAX_DOWNLOAD_BYTES
             or total > MAX_DOWNLOAD_BYTES
         ):
-            raise ValueError("Too large")
+            raise DownloadFailure("too_large")
 
+    diagnostics = _SilentLogger()
     options = {
         "outtmpl": str(directory / "video.%(ext)s"),
         "format": (
@@ -144,12 +171,17 @@ def download_one(directory: Path, url: str) -> None:
         "fixup": "never",
         "quiet": True,
         "no_warnings": True,
-        "logger": _SilentLogger(),
+        "logger": diagnostics,
         "progress_hooks": [progress],
         "proxy": "",
         "cachedir": False,
         "enable_file_urls": False,
+        "ignore_no_formats_error": True,
     }
+    if youtube:
+        options.update(youtube_options())
+        if cookies:
+            options["cookiefile"] = str(cookies)
     with YoutubeDL(options) as downloader:
         info = downloader.extract_info(url, download=False)
         if twitter and info and info.get("_type") == "playlist":
@@ -167,8 +199,29 @@ def download_one(directory: Path, url: str) -> None:
         if not missing_gif_duration and (
             not math.isfinite(duration) or not 0 < duration <= MAX_DOWNLOAD_SECONDS
         ):
-            raise ValueError("Duration missing or too long")
+            raise DownloadFailure(
+                "too_long" if duration > MAX_DOWNLOAD_SECONDS else "formats"
+            )
         formats = info.get("requested_formats")
+        choices = info.get("formats")
+        if isinstance(choices, list) and not formats and not info.get("url"):
+            videos = [f for f in choices if f.get("vcodec") not in {"none", "images"}]
+            too_large = bool(videos) and all(
+                isinstance(f.get("filesize"), (int, float))
+                and f["filesize"] > MAX_DOWNLOAD_BYTES
+                for f in videos
+            )
+            if too_large:
+                raise DownloadFailure("too_large")
+            reported = getattr(diagnostics, "failure_code", None)
+            if reported in {"youtube_age", "youtube_bot", "login", "unavailable"}:
+                raise DownloadFailure(reported)
+            if youtube and (info.get("age_limit") or 0) >= 18:
+                raise DownloadFailure("youtube_age")
+            raise DownloadFailure("formats")
+        if youtube and limit_resources:
+            # EJS has finished. Restore strict AS limits before native parsing.
+            limit_compression_process()
         if formats:
             if len(formats) != 2:
                 raise ValueError("Expected exactly two AV streams")
@@ -211,8 +264,10 @@ def prepare_upload(directory: Path) -> bool:
     if len(candidates) != 1:
         raise ValueError("Expected one downloaded video")
     source = candidates[0]
-    if not 0 < source.stat().st_size <= MAX_DOWNLOAD_BYTES:
-        raise ValueError("Downloaded video too large")
+    if source.stat().st_size == 0:
+        raise DownloadFailure("formats")
+    if source.stat().st_size > MAX_DOWNLOAD_BYTES:
+        raise DownloadFailure("too_large")
     if source.stat().st_size <= MAX_UPLOAD_BYTES:
         return False
     target = directory / "telegram.mp4"
@@ -223,16 +278,35 @@ def prepare_upload(directory: Path) -> bool:
 
 def main() -> None:
     """Worker не выводит URL/секреты в лог; процесс сообщает только exit code."""
+    directory = Path(sys.argv[1])
     try:
-        install_network_guard()
-        limit_compression_process()
-        directory = Path(sys.argv[1])
-        download_one(directory, sys.argv[2])
-        compressed = prepare_upload(directory)
+        youtube = is_youtube_url(sys.argv[2])
+        install_network_guard(deno_binary() if youtube else None)
+        if sys.platform != "win32":
+
+            def terminate(signum: int, frame: Any) -> None:
+                raise SystemExit(1)
+
+            signal.signal(signal.SIGTERM, terminate)
+        if youtube:
+            limit_extraction_process()
+        else:
+            limit_compression_process()
+        cookies = Path(sys.argv[3]) if len(sys.argv) == 4 and youtube else None
+        download_one(directory, sys.argv[2], cookies, limit_resources=True)
+        try:
+            compressed = prepare_upload(directory)
+        except DownloadFailure:
+            raise
+        except Exception:
+            raise DownloadFailure("compression") from None
         metadata = json.loads((directory / "result.json").read_text("utf-8"))
         metadata["compressed"] = compressed
         (directory / "result.json").write_text(json.dumps(metadata), "utf-8")
-    except Exception:
+    except Exception as error:
+        (directory / "error.json").write_text(
+            json.dumps({"error": classify_failure(error)}), "utf-8"
+        )
         sys.exit(1)
 
 

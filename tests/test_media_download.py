@@ -27,6 +27,11 @@ from protogen_delta.services.media_download_worker import (
 )
 
 
+async def _stop_fake_download(process: Any) -> None:
+    process.kill()
+    await process.wait()
+
+
 def test_real_remux_and_separate_stream_download(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -236,12 +241,16 @@ def test_worker_guard_and_entrypoint_contract(
     with pytest.raises(OSError):
         audit("subprocess.Popen", ())
 
-    def write_download(directory: Path, url: str) -> None:
+    def write_download(
+        directory: Path, url: str, cookies: Path | None, **kwargs: Any
+    ) -> None:
         (directory / "video.mp4").write_bytes(b"video")
         (directory / "result.json").write_text(json.dumps({"title": "Test"}), "utf-8")
 
     download = Mock(side_effect=write_download)
     monkeypatch.setattr(worker, "limit_compression_process", Mock())
+    monkeypatch.setattr(worker, "limit_extraction_process", Mock())
+    monkeypatch.setattr(worker.signal, "signal", Mock())
     monkeypatch.setattr(worker, "download_one", download)
     monkeypatch.setattr(
         worker.sys, "argv", ["worker", str(tmp_path), "https://youtu.be/abc"]
@@ -290,6 +299,7 @@ def test_worker_process_cleanup_and_secret_isolation(
 
     process.wait.side_effect = wait
     factory = AsyncMock(return_value=process)
+    monkeypatch.setattr(module, "_stop_worker", _stop_fake_download)
     monkeypatch.setattr(module.asyncio, "create_subprocess_exec", factory)
     monkeypatch.setenv("TELEGRAM_TOKEN", "secret-not-for-worker")
     asyncio.run(MediaDownloader()._run("https://youtu.be/abc", tmp_path))
@@ -310,6 +320,7 @@ def test_worker_timeout_kills_process(
     process = SimpleNamespace(
         returncode=None, wait=AsyncMock(side_effect=wait), kill=Mock()
     )
+    monkeypatch.setattr(module, "_stop_worker", _stop_fake_download)
     monkeypatch.setattr(
         module.asyncio, "create_subprocess_exec", AsyncMock(return_value=process)
     )
