@@ -266,7 +266,10 @@
         const type = imageTypes.find(type => item.types.includes(type));
         if (type) { image = {blob:await item.getType(type),type}; break; }
       }
-      if (revision !== selectionRevision || appearanceMode.value !== "image" || !appearanceEnabled || document.querySelector("#rp-panel").hidden) return;
+      if (revision !== selectionRevision || appearanceMode.value !== "image" || !appearanceEnabled || document.querySelector("#rp-panel").hidden) {
+        if (revision === selectionRevision) { appearanceStatus.className=""; appearanceStatus.textContent="Вставка отменена. Вернись к облику и повтори её."; }
+        return;
+      }
       if (!image) throw new Error("В буфере нет картинки JPEG, PNG или WebP. Скопируй само изображение, а не ссылку на него.");
       const extension = {"image/png":"png","image/jpeg":"jpg","image/webp":"webp"}[image.type];
       pasteImageFile(new File([image.blob], `Картинка из буфера.${extension}`, {type:image.type}));

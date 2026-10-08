@@ -146,6 +146,7 @@ async function main() {
     await page.evaluate(() => window.finishRead());
     await waitClipboard(page);
     assert.equal(await selected(page), '', 'Discard delayed clipboard after leaving RP tab');
+    assert.match(await message(page), /Вставка отменена/);
     await page.close(); checks++;
 
     page = await fresh(true);
