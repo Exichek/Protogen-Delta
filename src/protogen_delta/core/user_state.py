@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
@@ -11,6 +11,7 @@ from time import monotonic, time
 from typing import Literal, Protocol
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.conversation_gate import ConversationGate
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,10 @@ class UserState:
         repr=False,
         compare=False,
     )
+    coordinating_operations: int = field(default=0, repr=False, compare=False)
+    conversation_gate: ConversationGate = field(
+        default_factory=ConversationGate, repr=False, compare=False
+    )
     persistence_loaded: bool = field(
         default=False,
         repr=False,
@@ -318,6 +323,29 @@ class UserStateStore:
         user_id: StateKey,
     ) -> AsyncIterator[UserState]:
         """Безопасно предоставить состояние для пользовательской операции."""
+        async with self._coordinate(user_id, exclusive=isinstance(user_id, int)):
+            async with self._use_state(user_id) as state:
+                yield state
+
+    @asynccontextmanager
+    async def _coordinate(
+        self, key: StateKey, *, exclusive: bool
+    ) -> AsyncIterator[UserState]:
+        user_id = key if isinstance(key, int) else key[1]
+        private = self.get(user_id)
+        # Очередь и активные чаты удерживают один и тот же gate в кеше.
+        private.coordinating_operations += 1
+        gate = private.conversation_gate
+        try:
+            async with gate.exclusive() if exclusive else gate.shared():
+                yield private
+        finally:
+            private.last_accessed_at = self._clock()
+            self._states.move_to_end(user_id)
+            private.coordinating_operations -= 1
+
+    @asynccontextmanager
+    async def _use_state(self, user_id: StateKey) -> AsyncIterator[UserState]:
         state = self.get(user_id)
         state.active_operations += 1
 
@@ -394,15 +422,18 @@ class UserStateStore:
     async def use_conversation(
         self, user_id: int, chat_id: int | None = None
     ) -> AsyncIterator[UserState]:
-        """Изолировать групповые поля; общий lock также защищает полный reset."""
-        async with self.use(user_id) as private:
-            if chat_id is None:
-                yield private
-            else:
-                async with self.use((chat_id, user_id)) as state:
-                    # Из лички переносится только выбранный возрастной режим.
+        """Блокировать только этот чат; общие изменения ждут все активные чаты."""
+        async with self._coordinate(user_id, exclusive=False) as private:
+            # Первое восстановление возраста короткое и однократное. После него
+            # группам не нужен lock личного диалога на время генерации/доставки.
+            if not private.persistence_loaded:
+                async with private.lock:
+                    await self._load_persistent_state(user_id, private)
+            key: StateKey = user_id if chat_id is None else (chat_id, user_id)
+            async with self._use_state(key) as state:
+                if chat_id is not None:
                     state.content_mode = private.content_mode
-                    yield state
+                yield state
 
     def remove(self, user_id: StateKey) -> bool:
         """Безопасно удалить состояние пользователя, если оно не используется."""
@@ -421,20 +452,33 @@ class UserStateStore:
     async def reset_user(
         self,
         user_id: StateKey,
+        *,
+        cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Полностью забыть состояние конкретного пользователя."""
+        async with self._coordinate(user_id, exclusive=isinstance(user_id, int)):
+            await self._reset_state(user_id, cleanup)
+
+    async def _reset_state(
+        self, user_id: StateKey, cleanup: Callable[[], Awaitable[None]] | None
+    ) -> None:
         state = self.get(user_id)
         state.active_operations += 1
 
         try:
             async with state.lock:
-                await finish_operation(self._reset_locked(user_id, state))
+                await finish_operation(self._reset_locked(user_id, state, cleanup))
         finally:
             state.last_accessed_at = self._clock()
             self._states.move_to_end(user_id)
             state.active_operations -= 1
 
-    async def _reset_locked(self, user_id: StateKey, state: UserState) -> None:
+    async def _reset_locked(
+        self,
+        user_id: StateKey,
+        state: UserState,
+        cleanup: Callable[[], Awaitable[None]] | None,
+    ) -> None:
         """Завершить удаление и сброс RAM вместе, даже при отмене ожидающего запроса."""
         if self._persistence is not None:
             await self._persistence.delete(user_id)
@@ -447,6 +491,10 @@ class UserStateStore:
         state.reset_all()
         state.emotions_updated_at = self._wall_clock()
         state.persistence_loaded = True
+        # Связанные хранилища очищаются под тем же барьером. Callback не должен
+        # повторно входить в UserStateStore; обновление меню выполняется позже.
+        if cleanup is not None:
+            await cleanup()
 
     @property
     def tracked_users_count(self) -> int:
@@ -500,7 +548,11 @@ class UserStateStore:
     @staticmethod
     def _is_state_in_use(state: UserState) -> bool:
         """Проверить, выполняется ли операция с состоянием."""
-        return state.active_operations > 0 or state.lock.locked()
+        return (
+            state.active_operations > 0
+            or state.coordinating_operations > 0
+            or state.lock.locked()
+        )
 
     def _remove_stale_states(
         self,

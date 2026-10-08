@@ -1,8 +1,9 @@
 """Тесты безопасного полного сброса памяти пользователя."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 from aiogram import Router
@@ -95,6 +96,13 @@ async def _call_callback_handler(
     await handler.callback(callback)
 
 
+async def _reset_with_cleanup(
+    user_id: int, *, cleanup: Callable[[], Awaitable[None]] | None = None
+) -> None:
+    if cleanup is not None:
+        await cleanup()
+
+
 def _create_router() -> tuple[
     Router,
     AsyncMock,
@@ -102,6 +110,7 @@ def _create_router() -> tuple[
 ]:
     """Создать reset-router с тестовыми зависимостями."""
     engine_mock = AsyncMock(spec=ResponseEngine)
+    engine_mock.reset_user.side_effect = _reset_with_cleanup
     users_repository_mock = Mock(spec=UsersRepository)
 
     router = create_reset_router(
@@ -122,6 +131,7 @@ def test_confirmed_reset_deletes_episodic_memory(
     """Полный сброс должен удалять и новую долговременную память."""
     monkeypatch.setattr(reset_module, "time", lambda: float(TEST_TIMESTAMP))
     engine = AsyncMock(spec=ResponseEngine)
+    engine.reset_user.side_effect = _reset_with_cleanup
     users = Mock(spec=UsersRepository)
     memory = AsyncMock(spec=MemoryService)
     statistics = AsyncMock(spec=UserStatisticsRepository)
@@ -235,6 +245,7 @@ def test_reset_confirmation_performs_full_reset(
 
     engine_mock.reset_user.assert_awaited_once_with(
         TEST_USER_ID,
+        cleanup=ANY,
     )
 
     users_repository_mock.remove.assert_called_once_with(
