@@ -235,7 +235,13 @@ def test_worker_guard_and_entrypoint_contract(
         audit("socket.connect", (None, ("127.0.0.1", 80)))
     with pytest.raises(OSError):
         audit("subprocess.Popen", ())
-    download = Mock()
+
+    def write_download(directory: Path, url: str) -> None:
+        (directory / "video.mp4").write_bytes(b"video")
+        (directory / "result.json").write_text(json.dumps({"title": "Test"}), "utf-8")
+
+    download = Mock(side_effect=write_download)
+    monkeypatch.setattr(worker, "limit_compression_process", Mock())
     monkeypatch.setattr(worker, "download_one", download)
     monkeypatch.setattr(
         worker.sys, "argv", ["worker", str(tmp_path), "https://youtu.be/abc"]
@@ -264,7 +270,7 @@ def test_download_file_lifetime_and_invalid_outputs(
             assert path.exists() and result.title == "Тест"
         assert not path.exists()
         monkeypatch.setattr(module, "MAX_DOWNLOAD_BYTES", 2)
-        with pytest.raises(MediaDownloadError, match="45"):
+        with pytest.raises(MediaDownloadError, match="100"):
             async with service.download("https://youtu.be/abc"):
                 pass
 
@@ -368,4 +374,4 @@ def test_download_handler_sends_file_inside_context(tmp_path: Path) -> None:
     message.answer.assert_awaited_once()
     message.text = "/download"
     asyncio.run(router.message.handlers[0].callback(message))
-    assert "45 МБ" in message.answer.await_args.args[0]
+    assert "100 МБ" in message.answer.await_args.args[0]

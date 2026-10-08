@@ -7,8 +7,15 @@ import socket
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from protogen_delta.services.download_compression import (
+    MAX_UPLOAD_BYTES,
+    compress_download,
+    limit_compression_process,
+)
 from protogen_delta.services.media_download import (
+    _TWITTER_HOSTS,
     MAX_DOWNLOAD_BYTES,
     MAX_DOWNLOAD_SECONDS,
     validate_media_url,
@@ -57,6 +64,7 @@ def download_one(directory: Path, url: str) -> None:
     from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
     validate_media_url(url)
+    twitter = urlsplit(url).hostname in _TWITTER_HOSTS
 
     def progress(status: dict[str, Any]) -> None:
         total = sum(
@@ -71,10 +79,18 @@ def download_one(directory: Path, url: str) -> None:
     options = {
         "outtmpl": str(directory / "video.%(ext)s"),
         "format": (
-            f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]/"
-            f"bestvideo[ext=mp4][height<=720][filesize<=?{MAX_DOWNLOAD_BYTES}]"
-            f"+bestaudio[ext=m4a][filesize<=?{MAX_DOWNLOAD_BYTES}]/"
-            f"best[filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]"
+            # X's direct MP4 variants often omit codec metadata. Strict
+            # acodec/vcodec filters reject these files and silent videos.
+            f"best[ext=mp4][protocol=https][filesize<=?{MAX_DOWNLOAD_BYTES}]"
+            "[vcodec!=?none]/"
+            f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=?none]"
+            if twitter
+            else (
+                f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]/"
+                f"bestvideo[ext=mp4][height<=720][filesize<=?{MAX_DOWNLOAD_BYTES}]"
+                f"+bestaudio[ext=m4a][filesize<=?{MAX_DOWNLOAD_BYTES}]/"
+                f"best[filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]"
+            )
         ),
         "noplaylist": True,
         "playlist_items": "1",
@@ -96,6 +112,13 @@ def download_one(directory: Path, url: str) -> None:
     }
     with YoutubeDL(options) as downloader:
         info = downloader.extract_info(url, download=False)
+        if twitter and info and info.get("_type") == "playlist":
+            # A post may contain several videos; playlist_items=1 already
+            # selects one. Explicit /video/N links select their own entry.
+            entries = info.get("entries")
+            if not isinstance(entries, (list, tuple)) or len(entries) != 1:
+                raise ValueError("Expected one selected video from the X post")
+            info = entries[0]
         if not info or info.get("_type", "video") != "video" or info.get("is_live"):
             raise ValueError("Not one recorded video")
         duration = float(info.get("duration") or 0)
@@ -124,11 +147,39 @@ def download_one(directory: Path, url: str) -> None:
         )
 
 
+def prepare_upload(directory: Path) -> bool:
+    """После загрузки сжать только большой файл и оставить один результат."""
+    candidates = [
+        item
+        for item in directory.iterdir()
+        if item.suffix.lower() in {".mp4", ".webm", ".mov", ".mkv"}
+        and item.is_file()
+        and not item.is_symlink()
+    ]
+    if len(candidates) != 1:
+        raise ValueError("Expected one downloaded video")
+    source = candidates[0]
+    if not 0 < source.stat().st_size <= MAX_DOWNLOAD_BYTES:
+        raise ValueError("Downloaded video too large")
+    if source.stat().st_size <= MAX_UPLOAD_BYTES:
+        return False
+    target = directory / "telegram.mp4"
+    compress_download(source, target)
+    source.unlink()
+    return True
+
+
 def main() -> None:
     """Worker не выводит URL/секреты в лог; процесс сообщает только exit code."""
     try:
         install_network_guard()
-        download_one(Path(sys.argv[1]), sys.argv[2])
+        directory = Path(sys.argv[1])
+        download_one(directory, sys.argv[2])
+        limit_compression_process()
+        compressed = prepare_upload(directory)
+        metadata = json.loads((directory / "result.json").read_text("utf-8"))
+        metadata["compressed"] = compressed
+        (directory / "result.json").write_text(json.dumps(metadata), "utf-8")
     except Exception:
         sys.exit(1)
 

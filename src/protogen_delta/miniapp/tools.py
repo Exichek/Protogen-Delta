@@ -78,15 +78,16 @@ class MiniAppTools:
         async with self._download_slot(user_id):
             async with self._downloader.download(url) as media:
                 file = FSInputFile(media.path)
+                caption = media.title + (
+                    "\nСжато для отправки в Telegram." if media.compressed else ""
+                )
                 try:
                     if media.path.suffix.lower() == ".mp4":
                         await self._bot.send_video(
-                            user_id, file, caption=media.title, supports_streaming=True
+                            user_id, file, caption=caption, supports_streaming=True
                         )
                     else:
-                        await self._bot.send_document(
-                            user_id, file, caption=media.title
-                        )
+                        await self._bot.send_document(user_id, file, caption=caption)
                 except TelegramAPIError as error:
                     raise ValueError(
                         "Telegram не принял файл. Открой чат с ботом и попробуй позже."

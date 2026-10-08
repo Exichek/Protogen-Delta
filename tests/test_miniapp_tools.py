@@ -57,7 +57,7 @@ def test_download_uses_own_chat_and_cleans_up(
         async def download(url: str) -> AsyncIterator[SimpleNamespace]:
             assert url == "https://youtu.be/abc"
             try:
-                yield SimpleNamespace(path=path, title="Video")
+                yield SimpleNamespace(path=path, title="Video", compressed=False)
             finally:
                 cleaned.append(True)
 
