@@ -284,7 +284,8 @@ async def main() -> None:
                     else ""
                 )
                 + "Входящие медиа ограничены 20 МБ. /download скачивает публичные "
-                "видео до 10 минут/45 МБ. /e6 ищет арты; /id показывает Telegram ID. "
+                "видео до 10 минут/100 МБ и GIF из X. Крупные файлы сжимаются "
+                "для отправки в Telegram. /e6 ищет арты; /id показывает Telegram ID. "
                 "При вопросах о форматах описывай эти реальные возможности, "
                 "а не ограничения отдельно взятой языковой модели."
             ),
@@ -475,7 +476,7 @@ async def main() -> None:
         dispatcher.include_router(reset_router)
         dispatcher.include_router(create_memory_router(memory, user_states))
         dispatcher.include_router(rp_router)
-        downloader = MediaDownloader()
+        downloader = MediaDownloader(settings.youtube_cookies_file)
         dispatcher.include_router(create_download_router(downloader))
         dispatcher.include_router(
             create_image_source_router(

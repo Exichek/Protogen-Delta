@@ -637,6 +637,22 @@ numpy = "*"
 pyyaml = ">=5.3,<7"
 
 [[package]]
+name = "deno"
+version = "2.9.7"
+description = "Python redistribution of Deno binaries"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "deno-2.9.7-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:826634a6719f0183d85ef33f702de4388adb47d1f097b0732f70e033599a43c2"},
+    {file = "deno-2.9.7-py3-none-macosx_11_0_arm64.whl", hash = "sha256:adc015b5630572c06d04d28741e6ac9eed8b053c501d0ae776bfb155f5b7204b"},
+    {file = "deno-2.9.7-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:d8f4622774a5bed3a6b6305340495abe699f09c99b70d2882f52abc1ff23321a"},
+    {file = "deno-2.9.7-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:836f2ab5918723b47b638a05bc4fdac99fc35e69b49a6771c24e32b19dff5d8a"},
+    {file = "deno-2.9.7-py3-none-win_amd64.whl", hash = "sha256:80b90a0aad3f167ffbfefe55830b7b14e9d49865eed741c013bb48f1c5996681"},
+    {file = "deno-2.9.7.tar.gz", hash = "sha256:79f4b7acdd9a37e98a4d1e0ca08d71c4e55f6c0cb13bd1e0946fa9b5497be2d9"},
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 description = "An implementation of lxml.xmlfile for the standard library"
@@ -3151,7 +3167,19 @@ pin-deno = ["deno (==2.9.5)"]
 pin-secretstorage = ["cffi (==2.1.1) ; platform_python_implementation != \"PyPy\"", "cryptography (==50.0.0)", "jeepney (==0.9.0)", "pycparser (==3.0) ; implementation_name != \"PyPy\" and platform_python_implementation != \"PyPy\"", "secretstorage (==3.5.0)", "typing-extensions (==4.16.0) ; python_full_version < \"3.11.0\""]
 secretstorage = ["secretstorage"]
 
+[[package]]
+name = "yt-dlp-ejs"
+version = "0.8.0"
+description = "External JavaScript for yt-dlp supporting many runtimes"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "yt_dlp_ejs-0.8.0-py3-none-any.whl", hash = "sha256:79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4"},
+    {file = "yt_dlp_ejs-0.8.0.tar.gz", hash = "sha256:d5fa1639f63b5c4af8d932495f60689d5370f1a095782c944f7f62a303eb104e"},
+]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<3.15"
-content-hash = "1a7dc87ca4d34f8b027d16cce85fdc24b97300ec4ccb1b2e42efce3e1c95a54d"
+content-hash = "755044e761e47d02bc453c271b79d12e5973033611bd68c7d79b04580df4cdd5"

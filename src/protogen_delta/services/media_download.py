@@ -2,8 +2,11 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
+import signal
+import stat
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,6 +17,12 @@ from urllib.parse import urlsplit
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.services.download_compression import MAX_UPLOAD_BYTES
+from protogen_delta.services.download_errors import ERROR_MESSAGES, read_failure
+from protogen_delta.services.youtube_download import (
+    snapshot_youtube_cookies,
+)
+
+logger = logging.getLogger(__name__)
 
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_DOWNLOAD_SECONDS = 600
@@ -68,10 +77,63 @@ _HOSTS = (
     | _TWITTER_HOSTS
     | _TWITTER_EMBED_HOSTS
 )
+_YOUTUBE_HOSTS = frozenset(
+    {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+)
+
+
+def is_youtube_url(url: str) -> bool:
+    return urlsplit(url).hostname in _YOUTUBE_HOSTS
+
+
+def directory_bytes(directory: Path) -> int:
+    total = 0
+    for item in directory.rglob("*"):
+        if item.name == "youtube-cookies.txt":
+            continue
+        try:
+            metadata = item.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            # A completed fragment or remux input can disappear during scanning.
+            continue
+        if stat.S_ISREG(metadata.st_mode):
+            total += metadata.st_size
+    return total
 
 
 class MediaDownloadError(ValueError):
     """Ссылка или доступное видео не соответствуют ограничениям загрузки."""
+
+
+async def _stop_worker(process: asyncio.subprocess.Process) -> None:
+    if sys.platform != "win32":
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(process.wait(), 2.0)
+        except TimeoutError:
+            pass
+        # Kill descendants even if their parent has already exited.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.returncode is None:
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/PID",
+            str(process.pid),
+            "/T",
+            "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await killer.wait()
+        if process.returncode is None:
+            process.kill()
+    await process.wait()
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,8 +183,9 @@ def validate_media_url(url: str) -> str:
 class MediaDownloader:
     """Ограничить параллелизм, время, размер и время жизни файлов."""
 
-    def __init__(self) -> None:
+    def __init__(self, youtube_cookies_file: Path | None = None) -> None:
         self._slots = asyncio.Semaphore(2)
+        self._youtube_cookies_file = youtube_cookies_file
 
     @asynccontextmanager
     async def download(self, url: str) -> AsyncIterator[DownloadedMedia]:
@@ -130,6 +193,19 @@ class MediaDownloader:
         async with self._slots:
             with TemporaryDirectory(prefix="delta-video-") as directory:
                 path = Path(directory)
+                if is_youtube_url(url) and self._youtube_cookies_file:
+                    from protogen_delta.services.download_errors import DownloadFailure
+
+                    try:
+                        await finish_operation(
+                            asyncio.to_thread(
+                                snapshot_youtube_cookies,
+                                self._youtube_cookies_file,
+                                path / "youtube-cookies.txt",
+                            )
+                        )
+                    except DownloadFailure as error:
+                        raise MediaDownloadError(ERROR_MESSAGES[error.code]) from None
                 await self._run(url, path)
                 candidates = [
                     item
@@ -141,7 +217,9 @@ class MediaDownloader:
                 if len(candidates) != 1:
                     raise MediaDownloadError("Сайт не отдал один доступный видеофайл.")
                 result = candidates[0]
-                if not 0 < result.stat().st_size <= MAX_DOWNLOAD_BYTES:
+                if result.stat().st_size == 0:
+                    raise MediaDownloadError(ERROR_MESSAGES["formats"])
+                if result.stat().st_size > MAX_DOWNLOAD_BYTES:
                     raise MediaDownloadError("Видео превышает лимит 100 МБ.")
                 if result.stat().st_size > MAX_UPLOAD_BYTES:
                     raise MediaDownloadError(
@@ -164,24 +242,34 @@ class MediaDownloader:
             in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL"}
         }
         environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
-        process = await asyncio.create_subprocess_exec(
+        args = [
             sys.executable,
             "-m",
             "protogen_delta.services.media_download_worker",
             str(directory),
             url,
-            env=environment,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        ]
+        if is_youtube_url(url) and (directory / "youtube-cookies.txt").is_file():
+            args.append(str(directory / "youtube-cookies.txt"))
+        start = asyncio.create_task(
+            asyncio.create_subprocess_exec(
+                *args,
+                env=environment,
+                start_new_session=os.name == "posix",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
         )
+        try:
+            process = await finish_operation(start)
+        except asyncio.CancelledError:
+            if not start.cancelled() and start.exception() is None:
+                await finish_operation(_stop_worker(start.result()))
+            raise
         try:
             async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS):
                 while process.returncode is None:
-                    total = sum(
-                        item.stat().st_size
-                        for item in directory.rglob("*")
-                        if item.is_file()
-                    )
+                    total = directory_bytes(directory)
                     # Во время remux одновременно существуют исходники и результат.
                     if total > 2 * MAX_DOWNLOAD_BYTES + 1024 * 1024:
                         raise MediaDownloadError("Видео превышает лимит 100 МБ.")
@@ -190,20 +278,12 @@ class MediaDownloader:
                     except TimeoutError:
                         continue
                 if process.returncode != 0:
-                    raise MediaDownloadError(
-                        "Не смог скачать видео: оно недоступно, требует входа, "
-                        "превышает 10 минут/100 МБ, сайт ограничил загрузку "
-                        "или файл не удалось сжать для Telegram."
-                    )
+                    code = read_failure(directory)
+                    logger.warning("Video download failed | code=%s", code)
+                    raise MediaDownloadError(ERROR_MESSAGES[code])
         except TimeoutError as error:
             raise MediaDownloadError(
                 "Загрузка или сжатие видео не завершились за четыре минуты."
             ) from error
         finally:
-
-            async def stop() -> None:
-                if process.returncode is None:
-                    process.kill()
-                await process.wait()
-
-            await finish_operation(stop())
+            await finish_operation(_stop_worker(process))
