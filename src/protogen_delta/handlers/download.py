@@ -25,7 +25,8 @@ def create_download_router(downloader: MediaDownloader) -> Router:
             await message.answer(
                 "📥 /download <ссылка на видео>\n\n"
                 "YouTube, Instagram, TikTok, Vimeo, VK и VK Видео (включая клипы), X/Twitter. "
-                "Одно публичное видео "
+                "GIF из X тоже поддерживаются, включая ссылки fixupx/fxtwitter. "
+                "Одно публичное видео или GIF "
                 "до 10 минут и 100 МБ. Крупные файлы сжимаются для Telegram; "
                 "обработка — до четырёх минут. Доступ зависит от ограничений сайта."
             )
@@ -44,7 +45,9 @@ def create_download_router(downloader: MediaDownloader) -> Router:
                 caption = media.title + (
                     "\nСжато для отправки в Telegram." if media.compressed else ""
                 )
-                if media.path.suffix.lower() == ".mp4":
+                if media.animation:
+                    await message.answer_animation(file, caption=caption)
+                elif media.path.suffix.lower() == ".mp4":
                     await message.answer_video(
                         file, caption=caption, supports_streaming=True
                     )

@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import av
+
 from protogen_delta.services.download_compression import (
     MAX_UPLOAD_BYTES,
     compress_download,
@@ -59,11 +61,49 @@ class _SilentLogger:
         pass
 
 
+def _twitter_gif(info: dict[str, Any]) -> bool:
+    """X exposes GIF media as silent MP4 under its tweet_video path."""
+    formats = [info, *(info.get("formats") or [])]
+    for item in formats:
+        url = item.get("url", "")
+        if not isinstance(url, str):
+            continue
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname == "video.twimg.com"
+            and parsed.path.startswith("/tweet_video/")
+            and parsed.path.endswith(".mp4")
+        ):
+            return True
+    return False
+
+
+def _check_animation(directory: Path) -> None:
+    """Check missing X duration against the local file before delivery."""
+    paths = [p for p in directory.glob("*.mp4") if p.is_file() and not p.is_symlink()]
+    if len(paths) != 1 or not 0 < paths[0].stat().st_size <= MAX_DOWNLOAD_BYTES:
+        raise ValueError("Expected one bounded animation")
+    with av.open(str(paths[0]), options={"protocol_whitelist": "file"}) as video:
+        duration = (video.duration or 0) / av.time_base
+        if not math.isfinite(duration) or not 0 < duration <= MAX_DOWNLOAD_SECONDS:
+            raise ValueError("Animation duration missing or too long")
+        if len(video.streams.video) != 1 or video.streams.audio:
+            raise ValueError("Animation must have one video and no audio")
+        stream = video.streams.video[0]
+        if (
+            stream.codec_context.name != "h264"
+            or not 0 < stream.width <= 4096
+            or not 0 < stream.height <= 4096
+        ):
+            raise ValueError("Unsupported animation format")
+
+
 def download_one(directory: Path, url: str) -> None:
     """Только один готовый AV-файл; cookies, DRM и внешние процессы не используются."""
     from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
-    validate_media_url(url)
+    url = validate_media_url(url)
     twitter = urlsplit(url).hostname in _TWITTER_HOSTS
 
     def progress(status: dict[str, Any]) -> None:
@@ -121,8 +161,12 @@ def download_one(directory: Path, url: str) -> None:
             info = entries[0]
         if not info or info.get("_type", "video") != "video" or info.get("is_live"):
             raise ValueError("Not one recorded video")
+        animation = twitter and _twitter_gif(info)
         duration = float(info.get("duration") or 0)
-        if not math.isfinite(duration) or not 0 < duration <= MAX_DOWNLOAD_SECONDS:
+        missing_gif_duration = animation and info.get("duration") is None
+        if not missing_gif_duration and (
+            not math.isfinite(duration) or not 0 < duration <= MAX_DOWNLOAD_SECONDS
+        ):
             raise ValueError("Duration missing or too long")
         formats = info.get("requested_formats")
         if formats:
@@ -142,8 +186,16 @@ def download_one(directory: Path, url: str) -> None:
                 path.unlink()
         else:
             downloader.process_info(info)
+        if animation:
+            _check_animation(directory)
         (directory / "result.json").write_text(
-            json.dumps({"title": str(info.get("title") or "Видео")[:150]}), "utf-8"
+            json.dumps(
+                {
+                    "title": str(info.get("title") or "Видео")[:150],
+                    "animation": animation,
+                }
+            ),
+            "utf-8",
         )
 
 
@@ -173,9 +225,9 @@ def main() -> None:
     """Worker не выводит URL/секреты в лог; процесс сообщает только exit code."""
     try:
         install_network_guard()
+        limit_compression_process()
         directory = Path(sys.argv[1])
         download_one(directory, sys.argv[2])
-        limit_compression_process()
         compressed = prepare_upload(directory)
         metadata = json.loads((directory / "result.json").read_text("utf-8"))
         metadata["compressed"] = compressed
