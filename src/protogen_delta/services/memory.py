@@ -4,6 +4,7 @@ import re
 from time import time
 from typing import Callable
 
+from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository, MemoryKind
 from protogen_delta.repositories.user_facts import FactsUpdate
 from protogen_delta.services.insults import InsultType
@@ -20,10 +21,12 @@ class MemoryService:
         *,
         clock: Callable[[], float] = time,
         facts: UserFactsService | None = None,
+        creator_messages: CreatorMessagesRepository | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock
         self.facts = facts
+        self._creator_messages = creator_messages
 
     async def observe_facts(self, user_id: int, text: str) -> FactsUpdate:
         if self.facts is None:
@@ -116,5 +119,7 @@ class MemoryService:
     async def delete_user(self, user_id: int) -> None:
         """Полностью удалить эпизодическую память и настройки пользователя."""
         await self._repository.delete_user(user_id)
+        if self._creator_messages is not None:
+            await self._creator_messages.delete_user(user_id)
         if self.facts is not None:
             await self.facts.repository.clear(user_id)

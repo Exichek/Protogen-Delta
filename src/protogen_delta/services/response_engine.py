@@ -20,6 +20,7 @@ from protogen_delta.core.roleplay import (
 )
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import (
+    ContentMode,
     ConversationTurn,
     StateKey,
     UserState,
@@ -34,6 +35,7 @@ from protogen_delta.services.appearance_analysis import (
 from protogen_delta.services.appearance_description import (
     validate_description,
 )
+from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -58,6 +60,7 @@ from protogen_delta.services.interaction_state import (
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier, MoodType
 from protogen_delta.services.prompt_composer import PromptComposer, PromptSections
+from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.state_context import build_state_context
 
 logger = logging.getLogger(__name__)
@@ -85,6 +88,10 @@ RP_SETUP_REPLY = (
     "Давай. Только сначала набросай одним сообщением своего персонажа и завязку: "
     "кто ты, где мы находимся и с чего начинаем. Можно указать только важные "
     "детали — остальное подхватим по ходу."
+)
+RP_SAVED_PROFILE_REPLY = (
+    "Твой RP-персонаж уже сохранён. С какой ситуации начинаем: "
+    "где мы и что происходит?"
 )
 
 
@@ -123,6 +130,7 @@ class ResponseEngineConfig:
     history_chars: int = 8000
     history_live_turns: int = 4
     capabilities_context: str = ""
+    adult_conversation_prompt: str = ""
 
 
 class ResponseEngine:
@@ -141,6 +149,7 @@ class ResponseEngine:
         creator_id: int | None = None,
         reply_transform: Callable[[int, str], str] | None = None,
         interaction_classifier: InteractionClassifier | None = None,
+        creator_messages: CreatorMessageService | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -169,6 +178,7 @@ class ResponseEngine:
         self._creator_id = creator_id
         self._reply_transform = reply_transform
         self._interaction_classifier = interaction_classifier
+        self._creator_messages = creator_messages
         self._delivering_users: set[StateKey] = set()
 
     async def respond_and_deliver(
@@ -225,6 +235,22 @@ class ResponseEngine:
             async with self._user_states.use_conversation(
                 user_id, chat_id
             ) as user_state:
+                if self._creator_messages is not None and (
+                    use_personal_facts or chat_id is not None
+                ):
+                    delivery_context = await self._creator_messages.context(
+                        user_id if chat_id is None else chat_id,
+                        user_message,
+                        user_state.history_updated_at,
+                    )
+                    trusted_input_context = (
+                        "\n\n".join(
+                            part
+                            for part in (trusted_input_context, delivery_context)
+                            if part
+                        )
+                        or None
+                    )
                 prepared = await self._respond_for_user(
                     user_id=user_id,
                     user_message=user_message,
@@ -349,7 +375,14 @@ class ResponseEngine:
             and configuration is None
             and character is None
         ):
-            return PreparedReply(RP_SETUP_REPLY, user_message)
+            return PreparedReply(
+                (
+                    RP_SAVED_PROFILE_REPLY
+                    if user_state.roleplay_character
+                    else RP_SETUP_REPLY
+                ),
+                user_message,
+            )
 
         if self._interaction_classifier is not None:
             interaction = await self._interaction_classifier.classify(user_message)
@@ -706,6 +739,17 @@ class ResponseEngine:
         state_context = [
             line for line in state_context if line not in appearance_lines
         ] + appearance_lines
+        character_context = (
+            saved_character_context(user_state, user_message)
+            if remember_history and not images and attachment_text is None
+            else ""
+        )
+        trusted_input_context = (
+            "\n\n".join(
+                part for part in (trusted_input_context, character_context) if part
+            )
+            or None
+        )
         prompt = self._build_prompt(
             user_message=user_message,
             has_images=bool(images),
@@ -719,6 +763,7 @@ class ResponseEngine:
             memory_context=memory_context,
             fact_context=fact_context,
             trusted_input_context=trusted_input_context,
+            content_mode=user_state.content_mode,
         )
 
         try:
@@ -974,6 +1019,7 @@ class ResponseEngine:
         memory_context: list[str],
         fact_context: list[str] | None = None,
         trusted_input_context: str | None = None,
+        content_mode: ContentMode = "unselected",
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._prompt_composer.compose(
@@ -987,6 +1033,14 @@ class ResponseEngine:
         if self._config.capabilities_context:
             prompt += (
                 "\n\n## Возможности приложения\n" + self._config.capabilities_context
+            )
+        if (
+            content_mode == "adult"
+            and not is_rp
+            and self._config.adult_conversation_prompt
+        ):
+            prompt += (
+                "\n\n## Разговорный стиль\n" + self._config.adult_conversation_prompt
             )
 
         context_lines = self._limit_context(

@@ -142,6 +142,7 @@ def test_main_builds_application_and_starts_polling(
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
         "furry_species_reference": "SPECIES REFERENCE",
+        "adult_conversation_style": "ADULT CONVERSATION STYLE",
     }
 
     load_prompt_mock = Mock(
@@ -404,6 +405,7 @@ def test_main_builds_application_and_starts_polling(
         call("personality/body.txt"),
         call("personality/rp.txt"),
         call("furry_species_reference"),
+        call("adult_conversation_style"),
     ]
 
     setup_logging_mock.assert_called_once_with(

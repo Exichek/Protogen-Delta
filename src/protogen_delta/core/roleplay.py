@@ -16,7 +16,7 @@ CHARACTER_PATTERN = re.compile(
     r"^\s*мой персонаж\s*:\s*([^\n]{1,500})\s*$", re.IGNORECASE
 )
 INTENT_PATTERN = re.compile(
-    r"(?:\b(?:давай|хочу|начн[её]м|начать)\b.{0,40}\b(?:rp|рп|рол(?:ку|евую))\b|"
+    r"(?:\b(?:давай|хочу|начн[её]м|начать)\b.{0,40}\b(?:rp|рп(?:шить|шиться|ить)?|рол(?:ку|евую))\b|"
     r"\b(?:сыграем|поиграем|отыграем)\b.{0,40}\b(?:сцену|сюжет|роли?)\b)",
     re.IGNORECASE | re.DOTALL,
 )
@@ -48,7 +48,8 @@ def has_roleplay_action(text: str) -> bool:
 
 def has_roleplay_intent(text: str) -> bool:
     """Распознать явное предложение начать RP без действия в звёздочках."""
-    return INTENT_PATTERN.search(text) is not None
+    match = INTENT_PATTERN.search(text)
+    return match is not None and not re.search(r"\bне\s*$", text[: match.start()], re.I)
 
 
 def has_delta_appearance_intent(text: str) -> bool:
