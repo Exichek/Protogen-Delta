@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from appearance_fixtures import verified
 from PIL import Image
 from test_miniapp import TOKEN, _signed_init_data
 from test_response_engine import _create_engine
@@ -90,7 +91,8 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
     repository = UserStateRepository(tmp_path)
     states = UserStateStore(persistence=repository)
     engine._user_states = states
-    model.chat.return_value = "Бирюзовый дракон с белой гривой."
+    description = "Бирюзовый дракон с белой гривой."
+    model.chat.return_value = verified(description, "dragon", "probable")
     server = MiniAppServer(TOKEN, states, response_engine=engine)
 
     async def scenario() -> None:
@@ -109,7 +111,7 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
             )
             assert response.status == 200
             profile = await response.json()
-            assert profile["delta_appearance"] == model.chat.return_value
+            assert profile["delta_appearance"] == "Вероятно, Дракон. " + description
             assert profile["appearance_upload_enabled"]
             assert not profile["roleplay_active"]
             assert profile["roleplay_configuration"] == "female"
@@ -123,7 +125,7 @@ def test_upload_and_reset_persist_only_own_appearance(tmp_path: Path) -> None:
             assert not states.get(42).history
             restored = UserStateStore(persistence=repository)
             async with restored.use(42) as state:
-                assert state.delta_appearance == model.chat.return_value
+                assert state.delta_appearance == "Вероятно, Дракон. " + description
             reset = await client.delete("/api/profile/appearance", headers=headers)
             assert reset.status == 200
             profile = await reset.json()

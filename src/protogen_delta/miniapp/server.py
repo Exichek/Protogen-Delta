@@ -1,12 +1,16 @@
 """Встроенный HTTP-сервер панели настроек Telegram Mini App."""
 
 import asyncio
+import json
+from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, cast
+from urllib.parse import unquote
 
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
+from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.telegram_commands import ModeChange
@@ -17,6 +21,7 @@ from protogen_delta.miniapp.auth import (
     validate_init_data,
 )
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
+from protogen_delta.services.appearance_analysis import validate_species_hint
 from protogen_delta.services.appearance_description import parse_description_file
 from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
@@ -48,6 +53,11 @@ def _profile(
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
         "delta_appearance": state.delta_appearance,
+        "delta_species": (
+            asdict(species)
+            if (species := AppearanceSpecies.decode(state.delta_species))
+            else None
+        ),
         "appearance_upload_enabled": appearance_upload_enabled,
         "roleplay_fetishes": list(state.roleplay_fetishes),
         "roleplay_preferences": state.roleplay_preferences,
@@ -273,6 +283,28 @@ class MiniAppServer:
         user = self._authenticate(request)
         if self._response_engine is None:
             raise web.HTTPServiceUnavailable(text="Анализ облика сейчас недоступен.")
+        options: dict[str, Any] = {}
+        raw_options = request.headers.get("X-Appearance-Options", "")
+        if raw_options:
+            try:
+                if len(raw_options) > 1600:
+                    raise ValueError("Слишком длинные параметры облика.")
+                options = json.loads(unquote(raw_options, errors="strict"))
+                if not isinstance(options, dict) or set(options) - {
+                    "species",
+                    "update_existing",
+                }:
+                    raise ValueError("Некорректные параметры облика.")
+                if (
+                    not isinstance(options.get("species", ""), str)
+                    or type(options.get("update_existing", False)) is not bool
+                ):
+                    raise ValueError("Некорректные параметры облика.")
+                options["species"] = validate_species_hint(options.get("species", ""))
+            except (ValueError, UnicodeError, RecursionError) as error:
+                raise web.HTTPBadRequest(
+                    text="Некорректное название вида или режим обновления облика."
+                ) from error
         if (
             request.content_length is not None
             and request.content_length > MAX_APPEARANCE_BYTES
@@ -307,9 +339,17 @@ class MiniAppServer:
                         text="Подожди 10 секунд перед следующей картинкой.",
                         headers={"Retry-After": "10"},
                     )
-                await self._response_engine.set_delta_appearance_from_image(
-                    user.id, image
-                )
+                if options:
+                    await self._response_engine.set_delta_appearance_from_image(
+                        user.id,
+                        image,
+                        species_hint=options.get("species", ""),
+                        update_existing=options.get("update_existing", False),
+                    )
+                else:
+                    await self._response_engine.set_delta_appearance_from_image(
+                        user.id, image
+                    )
                 async with self._user_states.use(user.id) as state:
                     payload = self._profile(state, user)
                 return web.json_response(payload, headers={"Cache-Control": "no-store"})
@@ -339,6 +379,7 @@ class MiniAppServer:
             )
         async with self._user_states.use(user.id) as state:
             state.delta_appearance = ""
+            state.delta_species = ""
             payload = self._profile(state, user)
         return web.json_response(payload, headers={"Cache-Control": "no-store"})
 

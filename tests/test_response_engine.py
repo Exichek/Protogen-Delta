@@ -7,6 +7,7 @@ from typing import cast
 from unittest.mock import ANY, AsyncMock
 
 import pytest
+from appearance_fixtures import observation, verified
 
 from protogen_delta.core.log_context import LogContextFilter
 from protogen_delta.core.message_utils import split_message
@@ -54,6 +55,7 @@ def _create_engine() -> tuple[
     role_mock = AsyncMock(spec=FetishRoleClassifier)
 
     deepseek_mock.chat.return_value = "Ответ"
+    deepseek_mock.analyze_visual_features.return_value = observation()
     insult_mock.classify.return_value = "none"
     mood_mock.classify.return_value = "neutral"
     role_mock.classify.return_value = "unknown"
@@ -203,7 +205,11 @@ def test_response_engine_saves_delta_appearance_from_image() -> None:
     engine, _, deepseek_mock, _, _, _ = _create_engine()
     engine._user_states.get(TEST_USER_ID).content_mode = "adult"
     deepseek_mock.chat.side_effect = [
-        "Синий антропоморфный дракон с крыльями и длинным хвостом.",
+        verified(
+            "Синий антропоморфный дракон с крыльями и длинным хвостом.",
+            "dragon",
+            "probable",
+        ),
         "Запомнил. Сегодня буду таким.",
     ]
     image = ImageInput(b"image", "image/png", "фотографию")
@@ -219,7 +225,7 @@ def test_response_engine_saves_delta_appearance_from_image() -> None:
     assert result == "Запомнил. Сегодня буду таким."
     state = engine._user_states.get(TEST_USER_ID)
     assert state.delta_appearance == (
-        "Синий антропоморфный дракон с крыльями и длинным хвостом."
+        "Вероятно, Дракон. Синий антропоморфный дракон с крыльями и длинным хвостом."
     )
     assert deepseek_mock.chat.await_count == 2
     main_prompt = deepseek_mock.chat.await_args_list[1].kwargs["system_prompt"]

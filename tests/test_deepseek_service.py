@@ -143,6 +143,59 @@ def _create_error_response(
     return response
 
 
+def test_visual_observation_is_json_without_chat_history_or_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, _, create, _ = _create_service(monkeypatch)
+    service._tools = Mock()
+    images = (ImageInput(b"first", "image/png"), ImageInput(b"second", "image/jpeg"))
+    create.return_value = _create_response(
+        '{"readable":true}',
+        usage=_create_usage(prompt_tokens=100, completion_tokens=10, total_tokens=110),
+    )
+    with caplog.at_level(logging.INFO, logger="protogen_delta.services.deepseek"):
+        result = asyncio.run(
+            service.analyze_visual_features("PRIVATE RULES", "PRIVATE CAPTION", images)
+        )
+    assert result == '{"readable":true}'
+    assert create.await_args is not None
+    kwargs = create.await_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert kwargs["max_tokens"] == 4096 and "tools" not in kwargs
+    assert kwargs["messages"] == [
+        {"role": "system", "content": "PRIVATE RULES"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "PRIVATE CAPTION"},
+                *[
+                    {"type": "image_url", "image_url": {"url": image.data_url()}}
+                    for image in images
+                ],
+            ],
+        },
+    ]
+    service._tools.available_tools_prompt.assert_not_called()
+    assert "appearance_observation" in caplog.text and "history_turns=0" in caplog.text
+    assert "PRIVATE" not in caplog.text and "base64" not in caplog.text
+    assert service.snapshot()["completed"] == 1
+
+
+def test_visual_observation_timeout_preserves_metrics_and_translates_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _, create, _ = _create_service(monkeypatch)
+    create.side_effect = deepseek_module.APITimeoutError(_create_request())
+    with pytest.raises(DeepSeekTimeoutError):
+        asyncio.run(
+            service.analyze_visual_features(
+                "rules", "data", (ImageInput(b"image", "image/png"),)
+            )
+        )
+    assert service.snapshot()["failed"] == 1 and service.snapshot()["active"] == 0
+
+
 def test_deepseek_service_creates_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

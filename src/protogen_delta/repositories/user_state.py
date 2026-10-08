@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import cast
 
+from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.user_state import (
     ContentMode,
     ConversationTurn,
@@ -56,6 +57,7 @@ class UserStateRepository:
         roleplay_preferences: str = "",
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
+        delta_species: str = "",
         content_mode: ContentMode = "unselected",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
@@ -75,6 +77,7 @@ class UserStateRepository:
             roleplay_preferences=roleplay_preferences,
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
+            delta_species=delta_species,
             content_mode=content_mode,
             history=history,
             history_updated_at=history_updated_at,
@@ -125,6 +128,7 @@ class UserStateRepository:
                         roleplay_preferences,
                         roleplay_boundaries,
                         delta_appearance,
+                        delta_species,
                         content_mode,
                         history,
                         history_updated_at
@@ -158,11 +162,14 @@ class UserStateRepository:
             roleplay_preferences,
             roleplay_boundaries,
             delta_appearance,
+            delta_species,
             content_mode,
             history,
             history_updated_at,
         ) = row
 
+        species = AppearanceSpecies.decode(delta_species)
+        delta_species = species.encode() if species else ""
         return PersistentUserState(
             emotions=EmotionalState(
                 warmth=warmth,
@@ -184,6 +191,7 @@ class UserStateRepository:
             roleplay_preferences=roleplay_preferences,
             roleplay_boundaries=roleplay_boundaries,
             delta_appearance=delta_appearance,
+            delta_species=delta_species,
             content_mode=self._decode_content_mode(content_mode),
             history=self._decode_history(history),
             history_updated_at=history_updated_at,
@@ -203,6 +211,7 @@ class UserStateRepository:
         roleplay_preferences: str = "",
         roleplay_boundaries: str = "",
         delta_appearance: str = "",
+        delta_species: str = "",
         content_mode: ContentMode = "unselected",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
@@ -219,6 +228,8 @@ class UserStateRepository:
             if history is not None
             else ""
         )
+        species = AppearanceSpecies.decode(delta_species)
+        delta_species = species.encode() if species else ""
         encoded_history = json.dumps(
             [
                 {
@@ -252,11 +263,12 @@ class UserStateRepository:
                         roleplay_preferences,
                         roleplay_boundaries,
                         delta_appearance,
+                        delta_species,
                         content_mode,
                         history,
                         history_updated_at
                     )
-                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -274,6 +286,7 @@ class UserStateRepository:
                         roleplay_preferences = excluded.roleplay_preferences,
                         roleplay_boundaries = excluded.roleplay_boundaries,
                         delta_appearance = excluded.delta_appearance,
+                        delta_species = excluded.delta_species,
                         content_mode = excluded.content_mode
                         {history_update}
                     """,
@@ -295,6 +308,7 @@ class UserStateRepository:
                         roleplay_preferences,
                         roleplay_boundaries,
                         delta_appearance,
+                        delta_species,
                         content_mode,
                         encoded_history,
                         history_updated_at,
@@ -383,6 +397,7 @@ class UserStateRepository:
                     row[1] for row in connection.execute(f"PRAGMA table_info({table})")
                 }
                 for name, declaration in (
+                    ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
                     ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
                 ):

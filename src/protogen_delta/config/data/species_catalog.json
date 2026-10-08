@@ -1,0 +1,1048 @@
+{
+  "version": 1,
+  "traits": {
+    "fur": "Шерсть/мех",
+    "scales": "Чешуя",
+    "feathers": "Перья",
+    "smooth_skin": "Явно голая кожа без шерсти, перьев и чешуи; гладкая заливка рисунка сама по себе это не подтверждает",
+    "head_wedge": "Клиновидная цельная голова",
+    "head_canine": "Вытянутая морда с переносицей и отдельной носовой подушечкой",
+    "head_feline": "Короткая морда с округлой передней частью",
+    "head_equine": "Длинная морда с широкими ноздрями и округлым передним краем",
+    "beak": "Клюв",
+    "large_ears": "Крупные заострённые уши",
+    "four_ears": "Четыре различимых уха",
+    "round_ears": "Округлые уши",
+    "ear_tufts": "Кисточки на ушах",
+    "long_ears": "Длинные заячьи уши",
+    "visor": "Лицевой визор/дисплей",
+    "organic_ears": "Органические уши",
+    "mechanical_ears": "Механические уши",
+    "armor_plates": "Механические пластины",
+    "mechanical_body": "Модульное механическое тело",
+    "mechanical_legs": "Механические ноги",
+    "gills": "Видимые жаберные щели",
+    "dorsal_fin": "Спинной плавник",
+    "tail_fin_vertical": "Вертикальная хвостовая лопасть",
+    "tail_fin_horizontal": "Горизонтальные хвостовые лопасти",
+    "tail_bushy": "Пушистый хвост",
+    "tail_long": "Длинный хвост",
+    "tail_thick": "Массивный хвост",
+    "tail_flat": "Плоский широкий хвост",
+    "mane": "Грива/шейная шерсть",
+    "antlers": "Ветвистые оленьи рога",
+    "horns": "Неветвистые рога",
+    "hooves": "Копыта",
+    "wings_feathered": "Оперённые крылья",
+    "wings_membrane": "Перепончатые крылья",
+    "striped_fur": "Полосатая шерсть",
+    "spotted_fur": "Пятнистая шерсть",
+    "rodent_incisors": "Крупные резцы",
+    "whiskers": "Вибриссы",
+    "face_mask": "Контрастная маска морды",
+    "raptor_body": "Раптороподобные пропорции",
+    "no_visible_pupils": "Отчётливо видимый однотонный глаз без отдельного зрачка; не маленький или неразличимый глаз",
+    "jagged_jaw": "Зигзагообразный контур челюсти",
+    "large_claws": "Крупные когтевые пальцы"
+  },
+  "cards": [
+    {
+      "id": "sergal",
+      "name": "Сергал",
+      "category": "authored_species",
+      "aliases": [
+        "sergal",
+        "сергал"
+      ],
+      "positive": {
+        "head_wedge": 5,
+        "fur": 1,
+        "organic_ears": 1,
+        "tail_long": 1,
+        "mane": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "canine",
+        "shark"
+      ],
+      "features": [
+        "Самостоятельный вид Vilous: клиновидная голова вместе с шерстью, выраженными ушами и длинным хвостом.",
+        "Грива и окраска варьируются; цвет не определяет подвид."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://wp.vilous.net/2017/02/09/sergal-reference/",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "protogen",
+      "name": "Протоген",
+      "category": "authored_species",
+      "aliases": [
+        "protogen",
+        "протоген"
+      ],
+      "positive": {
+        "visor": 5,
+        "organic_ears": 2,
+        "fur": 1,
+        "armor_plates": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "primagen",
+        "synth"
+      ],
+      "features": [
+        "Биомеханический дизайн ZOR: короткий округлый визор, органические уши, сочетание меха и механических пластин.",
+        "Один дисплей или шлем не устанавливает вид."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://zoruniverse.info/",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "primagen",
+      "name": "Примаген",
+      "category": "authored_species",
+      "aliases": [
+        "primagen",
+        "примаген"
+      ],
+      "positive": {
+        "visor": 3,
+        "mechanical_ears": 5,
+        "mechanical_legs": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "protogen",
+        "synth"
+      ],
+      "features": [
+        "Родственный протогену самостоятельный дизайн ZOR; механические уши и ноги помогают сравнению.",
+        "Отдельный аксессуар не доказывает примагена."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://zoruniverse.info/",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "synth",
+      "name": "Синт",
+      "category": "authored_species",
+      "aliases": [
+        "synth",
+        "синт"
+      ],
+      "positive": {
+        "visor": 3,
+        "mechanical_body": 5,
+        "armor_plates": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "protogen",
+        "primagen"
+      ],
+      "features": [
+        "Синтетический модульный вид Vader-San с выразительной лицевой панелью.",
+        "Механические тела варьируются; не считать любую броню или экран синтом."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://synthspecies.com/wiki/Anatomy",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "avali",
+      "name": "Авали",
+      "category": "authored_species",
+      "aliases": [
+        "avali",
+        "авали"
+      ],
+      "positive": {
+        "four_ears": 5,
+        "feathers": 3,
+        "raptor_body": 3,
+        "tail_long": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "avian",
+        "dragon"
+      ],
+      "features": [
+        "Раптороподобное тело, пушистые перья и четыре уха — сочетание признаков авали.",
+        "Не угадывать скрытые уши; число видно не на любом ракурсе."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://avali.fandom.com/wiki/The_Official_Avali_Wiki",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "manokit",
+      "name": "Манокит",
+      "category": "authored_species",
+      "aliases": [
+        "manokit",
+        "манокит"
+      ],
+      "positive": {
+        "fur": 2,
+        "large_ears": 2,
+        "dorsal_fin": 3,
+        "tail_fin_vertical": 3,
+        "raptor_body": 1
+      },
+      "contradictions": [
+        "gills"
+      ],
+      "confusable_with": [
+        "shark",
+        "fox"
+      ],
+      "features": [
+        "Авторский меховой дизайн с чертами лисицы и акулы: большие уши и плавниковый хвост.",
+        "В 2021 guide формы отличаются пропорциями; прищур не обязателен для всех вариантов. Жабры не следует добавлять."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Manokit",
+          "kind": "secondary_summary",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "dutch_angel_dragon",
+      "name": "Dutch Angel Dragon",
+      "category": "authored_species",
+      "aliases": [
+        "dutch angel dragon",
+        "дач ангел драгон",
+        "ангельский дракон"
+      ],
+      "positive": {
+        "head_equine": 3,
+        "long_ears": 3,
+        "fur": 2,
+        "wings_feathered": 4,
+        "tail_thick": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "dragon",
+        "equine"
+      ],
+      "features": [
+        "Лошадеподобная драконья голова, длинные острые уши, мех и пернатые крылья в сочетании.",
+        "Хвост, конечности и окрас варьируются; не приписывать скрытые органы из канона."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://www.dutchangeldragons.com/anatomy",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "wickerbeast",
+      "name": "Викербист",
+      "category": "authored_species",
+      "aliases": [
+        "wickerbeast",
+        "викербист",
+        "викербест"
+      ],
+      "positive": {
+        "jagged_jaw": 5,
+        "no_visible_pupils": 3,
+        "large_claws": 3,
+        "tail_thick": 2,
+        "horns": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "dragon",
+        "hybrid"
+      ],
+      "features": [
+        "Выраженная зигзагообразная челюсть, глаза без отдельного зрачка, крупные когтевые пальцы и массивный хвост помогают сравнению.",
+        "Подвиды и телосложение варьируются; рога сами по себе не доказывают вид."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://www.wickercave.net/biology",
+          "kind": "creator_reference",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "canine",
+      "name": "Псовый",
+      "category": "visual_group",
+      "aliases": [
+        "canine",
+        "псовый",
+        "псовые"
+      ],
+      "positive": {
+        "head_canine": 5,
+        "fur": 1,
+        "organic_ears": 1,
+        "tail_bushy": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "sergal",
+        "fox"
+      ],
+      "features": [
+        "Псовая морда, уши и шерсть в сочетании; породу по одному окрасу не определять."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "wolf",
+      "name": "Волк",
+      "category": "visual_group",
+      "aliases": [
+        "wolf",
+        "волк"
+      ],
+      "positive": {
+        "head_canine": 3,
+        "fur": 1,
+        "organic_ears": 1,
+        "mane": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "canine",
+        "dog"
+      ],
+      "features": [
+        "Псовый дизайн с вытянутой мордой; без различающих признаков предпочесть общую группу псовых."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "fox",
+      "name": "Лиса",
+      "category": "visual_group",
+      "aliases": [
+        "fox",
+        "лиса",
+        "лис"
+      ],
+      "positive": {
+        "head_canine": 2,
+        "large_ears": 2,
+        "tail_bushy": 3,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "canine",
+        "manokit"
+      ],
+      "features": [
+        "Узкая псовая морда, крупные уши и объёмный пушистый хвост помогают гипотезе; рыжий цвет не обязателен."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "dog",
+      "name": "Собака",
+      "category": "visual_group",
+      "aliases": [
+        "dog",
+        "собака",
+        "пёс"
+      ],
+      "positive": {
+        "head_canine": 3,
+        "fur": 1,
+        "organic_ears": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "canine",
+        "wolf"
+      ],
+      "features": [
+        "Псовый дизайн, возможны разнообразные формы ушей и морды; породы не угадывать."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "feline",
+      "name": "Кошачий",
+      "category": "visual_group",
+      "aliases": [
+        "feline",
+        "кошачий",
+        "кошачьи"
+      ],
+      "positive": {
+        "head_feline": 5,
+        "whiskers": 2,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "cat",
+        "canine"
+      ],
+      "features": [
+        "Короткая морда, усы и кошачьи пропорции. Без подтверждения не выбирать конкретный вид кошачьего."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "cat",
+      "name": "Кошка",
+      "category": "visual_group",
+      "aliases": [
+        "cat",
+        "кошка",
+        "кот"
+      ],
+      "positive": {
+        "head_feline": 3,
+        "whiskers": 2,
+        "fur": 1,
+        "tail_long": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "feline",
+        "lynx"
+      ],
+      "features": [
+        "Кошачья морда и вибриссы, гибкий хвост; не считать любое ласковое «котик» авторским видом."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "lion",
+      "name": "Лев",
+      "category": "visual_group",
+      "aliases": [
+        "lion",
+        "лев"
+      ],
+      "positive": {
+        "head_feline": 3,
+        "mane": 4,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "feline",
+        "dragon"
+      ],
+      "features": [
+        "Кошачьи признаки вместе с выраженной гривой; грива может быть причёской другого вида."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "tiger",
+      "name": "Тигр",
+      "category": "visual_group",
+      "aliases": [
+        "tiger",
+        "тигр"
+      ],
+      "positive": {
+        "head_feline": 3,
+        "striped_fur": 4,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "feline",
+        "cat"
+      ],
+      "features": [
+        "Кошачий силуэт с характерной полосатой шерстью; полосы отдельно не доказывают тигра."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "lynx",
+      "name": "Рысь",
+      "category": "visual_group",
+      "aliases": [
+        "lynx",
+        "рысь"
+      ],
+      "positive": {
+        "head_feline": 3,
+        "ear_tufts": 4,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "feline",
+        "cat"
+      ],
+      "features": [
+        "Кошачьи признаки и кисточки на ушах; хвост и рисунок могут быть стилизованы."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "hyena",
+      "name": "Гиена",
+      "category": "visual_group",
+      "aliases": [
+        "hyena",
+        "гиена"
+      ],
+      "positive": {
+        "round_ears": 3,
+        "mane": 2,
+        "spotted_fur": 2,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "canine",
+        "feline"
+      ],
+      "features": [
+        "Округлые уши, мощная морда и грива могут помогать сравнению; гиена не псовый вид."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "rodent",
+      "name": "Грызун",
+      "category": "visual_group",
+      "aliases": [
+        "rodent",
+        "грызун"
+      ],
+      "positive": {
+        "rodent_incisors": 5,
+        "round_ears": 2,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "rabbit",
+        "cat"
+      ],
+      "features": [
+        "Выраженные резцы вместе с формой морды и ушами; зубы не дорисовывать за закрытой пастью."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "rabbit",
+      "name": "Кролик или заяц",
+      "category": "visual_group",
+      "aliases": [
+        "rabbit",
+        "hare",
+        "кролик",
+        "заяц"
+      ],
+      "positive": {
+        "long_ears": 5,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "rodent",
+        "dutch_angel_dragon"
+      ],
+      "features": [
+        "Заячьи пропорции и длинные уши; это зайцеобразные, не грызуны."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "cervid",
+      "name": "Оленевый",
+      "category": "visual_group",
+      "aliases": [
+        "cervid",
+        "deer",
+        "олень",
+        "оленевый"
+      ],
+      "positive": {
+        "antlers": 5,
+        "hooves": 2,
+        "fur": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "equine",
+        "dragon"
+      ],
+      "features": [
+        "Ветвистые оленьи рога и копыта вместе; не путать рога с ветками на фоне."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "equine",
+      "name": "Лошадиный",
+      "category": "visual_group",
+      "aliases": [
+        "equine",
+        "horse",
+        "лошадь",
+        "конь",
+        "лошадиный"
+      ],
+      "positive": {
+        "head_equine": 5,
+        "hooves": 3,
+        "mane": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "dutch_angel_dragon",
+        "cervid"
+      ],
+      "features": [
+        "Удлинённая лошадиная морда, грива и копыта в сочетании."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "avian",
+      "name": "Птица",
+      "category": "visual_group",
+      "aliases": [
+        "avian",
+        "bird",
+        "птица"
+      ],
+      "positive": {
+        "beak": 5,
+        "feathers": 3,
+        "wings_feathered": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "avali",
+        "griffin"
+      ],
+      "features": [
+        "Клюв и перья; крылья и когти только по видимой области."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "shark",
+      "name": "Антро-акула",
+      "category": "visual_group",
+      "aliases": [
+        "shark",
+        "акула",
+        "антро-акула"
+      ],
+      "positive": {
+        "gills": 5,
+        "dorsal_fin": 3,
+        "tail_fin_vertical": 3,
+        "smooth_skin": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "manokit",
+        "sergal"
+      ],
+      "features": [
+        "Жаберные щели и плавники вместе с формой хвоста; одна зубастая морда недостаточна."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "cetacean",
+      "name": "Дельфин или косатка",
+      "category": "visual_group",
+      "aliases": [
+        "cetacean",
+        "dolphin",
+        "orca",
+        "дельфин",
+        "косатка"
+      ],
+      "positive": {
+        "tail_fin_horizontal": 5,
+        "smooth_skin": 2,
+        "dorsal_fin": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "shark",
+        "hybrid"
+      ],
+      "features": [
+        "Горизонтальные хвостовые лопасти помогают отличить морского млекопитающего от акулы; антро-дизайн может отступать от природного."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "reptile",
+      "name": "Рептилия",
+      "category": "visual_group",
+      "aliases": [
+        "reptile",
+        "lizard",
+        "рептилия",
+        "ящерица"
+      ],
+      "positive": {
+        "scales": 4,
+        "tail_long": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "dragon",
+        "shark"
+      ],
+      "features": [
+        "Чешуя и форма головы/хвоста; не называть гладкую кожу чешуёй по одним бликам."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "dragon",
+      "name": "Дракон",
+      "category": "fantasy_group",
+      "aliases": [
+        "dragon",
+        "дракон"
+      ],
+      "positive": {
+        "horns": 3,
+        "wings_membrane": 4,
+        "scales": 2,
+        "tail_long": 1
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "reptile",
+        "dutch_angel_dragon"
+      ],
+      "features": [
+        "Мифический дизайн; сочетание рогов, морды, хвоста и крыльев помогает гипотезе. Бывают пушистые и бескрылые драконы."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "griffin",
+      "name": "Грифон",
+      "category": "fantasy_group",
+      "aliases": [
+        "griffin",
+        "gryphon",
+        "грифон"
+      ],
+      "positive": {
+        "beak": 4,
+        "wings_feathered": 3,
+        "fur": 2
+      },
+      "contradictions": [],
+      "confusable_with": [
+        "avian",
+        "dragon"
+      ],
+      "features": [
+        "Сочетание птичьих головы/крыльев и звериного корпуса, а не обычная птица."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "hybrid",
+      "name": "Гибрид",
+      "category": "hybrid",
+      "aliases": [
+        "hybrid",
+        "гибрид"
+      ],
+      "positive": {},
+      "contradictions": [],
+      "confusable_with": [
+        "unknown"
+      ],
+      "features": [
+        "Согласованно смешанные признаки разных групп; не назначать конкретных родителей по догадке."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    },
+    {
+      "id": "unknown",
+      "name": "Авторский или неустановленный вид",
+      "category": "unknown",
+      "aliases": [
+        "unknown",
+        "неизвестный",
+        "авторский"
+      ],
+      "positive": {},
+      "contradictions": [],
+      "confusable_with": [
+        "hybrid"
+      ],
+      "features": [
+        "Недостаточно наблюдаемых признаков либо знакомые карточки не объясняют дизайн; вид можно уточнить у владельца."
+      ],
+      "exceptions": [
+        "Это визуальный ориентир, а не обязательная анатомия любого антро-дизайна. Стилизация, гибриды и индивидуальные особенности допустимы."
+      ],
+      "sources": [
+        {
+          "url": "https://en.wikifur.com/wiki/Category:Species",
+          "kind": "taxonomy_index",
+          "checked": "2026-10-08"
+        }
+      ]
+    }
+  ]
+}
