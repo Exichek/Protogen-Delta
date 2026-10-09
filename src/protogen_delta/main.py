@@ -60,6 +60,7 @@ from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
+from protogen_delta.services.capabilities import build_capabilities
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.e621 import E621Client
@@ -264,6 +265,7 @@ async def main() -> None:
             prompt=fetish_role_prompt,
         )
 
+        capabilities = build_capabilities(settings)
         response_engine_config = ResponseEngineConfig(
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
@@ -281,32 +283,8 @@ async def main() -> None:
             visual_prompt=load_prompt("conversation_visual"),
             voice_prompt=load_prompt("voice_examples"),
             scene_voice_prompt=load_prompt("scene_examples"),
-            capabilities_context=(
-                "Читаю PDF, DOCX, XLSX и текстовые файлы/код. Рассматриваю фото, "
-                "стикеры, GIF, TGS, MP4 и WebM: приложение извлекает несколько "
-                "кадров в порядке времени. Это анализ выбранных кадров, не просмотр "
-                "каждого мгновения; звук видео автоматически не анализируется. "
-                "Распознаю речь из голосовых и аудиофайлов. "
-                "Приложение отправляет готовые Telegram-стикеры из размеченного "
-                "пака отдельным механизмом после основного текста; это не "
-                "рисование и не мысленная или словесная реакция. "
-                "Доступность и интервалы задаются текущими настройками. "
-                + (
-                    "Для анализа музыки и звуков подключена аудиомодель. "
-                    if settings.audio_understanding_enabled
-                    else "Анализ музыки/тембра отдельной аудиомоделью не подключён. "
-                )
-                + (
-                    "Для сканированных PDF включено распознавание текста. "
-                    if settings.pdf_ocr_enabled
-                    else ""
-                )
-                + "Входящие медиа ограничены 20 МБ. /download скачивает публичные "
-                "видео до 10 минут/100 МБ и GIF из X. Крупные файлы сжимаются "
-                "для отправки в Telegram. /e6 ищет арты; /id показывает Telegram ID. "
-                "При вопросах о форматах описывай эти реальные возможности, "
-                "а не ограничения отдельно взятой языковой модели."
-            ),
+            capabilities_context=capabilities.summary,
+            capabilities_overview_context=capabilities.overview,
         )
 
         sticker_service = ContextualStickerService(
@@ -355,8 +333,8 @@ async def main() -> None:
             user_states=user_states,
             sticker_service=sticker_service,
             deepseek=deepseek,
-            first_start_prompt=first_start_prompt,
-            repeat_start_prompt=repeat_start_prompt,
+            first_start_prompt=first_start_prompt + "\n\n" + capabilities.summary,
+            repeat_start_prompt=repeat_start_prompt + "\n\n" + capabilities.summary,
         )
 
         async def on_mode_change(user_id: int, mode: ContentMode) -> None:
