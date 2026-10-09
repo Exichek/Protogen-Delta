@@ -61,7 +61,10 @@ def create_text_router(
 
             return
 
-        if not limiter.allow(user_id):
+        safety_signal = (
+            response_engine.is_safety_signal(user_id, message.text, **scope) is True
+        )
+        if not safety_signal and not limiter.allow(user_id):
             await message.answer(RATE_LIMIT_REPLY)
             return
 

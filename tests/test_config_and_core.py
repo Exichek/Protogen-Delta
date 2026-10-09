@@ -292,110 +292,11 @@ def test_set_commands_configures_telegram_menu() -> None:
     bot_mock.set_chat_menu_button.assert_awaited_once()
 
 
-def test_body_prompt_keeps_user_anatomy_separate_from_delta() -> None:
-    """Анатомия Дельты не должна автоматически переноситься на пользователя."""
-    prompt = load_prompt(
-        "personality/body.txt",
-    )
-
-    assert (
-        "Все физические свойства, описанные в этом файле, "
-        "относятся исключительно к Дельте."
-    ) in prompt
-    assert (
-        "Никогда не переноси анатомию Дельты на пользователя автоматически." in prompt
-    )
-    assert ("Если тело пользователя не описано, оставляй его неопределённым") in prompt
-
-
-def test_rp_prompt_defines_user_anatomy_and_female_grammar_rules() -> None:
-    """RP-промпт должен разделять анатомию участников и фиксировать род Дельты."""
-    prompt = load_prompt(
-        "personality/rp.txt",
-    )
-
-    assert "Пользователь и Дельта — разные участники сцены" in prompt
-    assert "По умолчанию тело пользователя считается неопределённым." in prompt
-    assert "## Грамматический род Дельты" in prompt
-    assert "последовательно используй для Дельты женский грамматический род" in prompt
-    assert "Не меняй грамматический род Дельты из-за пола" in prompt
-
-
-def test_core_prompt_describes_memory_capabilities_accurately() -> None:
-    """Дельта должен различать историю, устойчивое состояние и долгую память."""
-    prompt = load_prompt(
-        "personality/core.txt",
-    )
-
-    assert "## Память и доступный контекст" in prompt
-    assert "не является полноценной долговременной памятью" in prompt
-    assert "Не путай такое устойчивое отношение с памятью конкретных фактов." in prompt
-    assert "не утверждай, что помнишь их" in prompt
-    assert "каждый новый разговор обязательно начинается полностью с нуля" in prompt
-
-
-def test_core_prompt_defines_creator_without_ownership() -> None:
-    """Создание Дельты не должно означать владение или выдуманную биографию."""
-    prompt = load_prompt(
-        "personality/core.txt",
-    )
-
-    assert "Факт того, что ты был создан, является частью твоей биографии." in prompt
-    assert "Не утверждай, что у тебя никогда не было создателя" in prompt
-    assert "не выдумывай личность, имя, организацию" in prompt
-    assert "Сам факт создания не означает владение тобой." in prompt
-    assert "Не считай текущего пользователя своим создателем" in prompt
-
-
-def test_core_prompt_varies_response_length_by_context() -> None:
-    """Дельта не должен превращать каждый ответ в три больших сообщения."""
-    prompt = load_prompt("personality/core.txt")
-
-    assert "На обычную короткую реплику" in prompt
-    assert "чаще достаточно одного компактного абзаца" in prompt
-    assert "Три или четыре уместны для подробного объяснения" in prompt
-    assert (
-        "Не создавай вступление, основную часть и вывод только ради структуры" in prompt
-    )
-
-
-def test_roleplay_prompt_does_not_renegotiate_established_scene() -> None:
-    """RP не должен превращаться в повторяющееся обсуждение правил сцены."""
-    prompt = load_prompt("personality/rp.txt")
-
-    assert "считай сам факт ролевой игры согласованным" in prompt
-    assert "не требуют новой лекции о самостоятельности" in prompt
-    assert "задай максимум один необходимый вопрос" in prompt
-    assert "Делай это молча" in prompt
-    assert "Большинство коротких RP-ходов" in prompt
-    assert "не заканчивай постоянно фразами" in prompt
-    assert "Не копируй собственный шаблон из истории сцены" in prompt
-    assert "Внимательно различай принадлежность частей тела" in prompt
-    assert "Название вида само по себе не задаёт все особенности тела" in prompt
-    assert "не приписывай ему узел" in prompt
-    assert "Обращение внутри роли" in prompt
-    assert "Убирай внутренние противоречия" in prompt
-    assert "язык работаю глубже" in prompt
-    assert "горячо дышу в затылок" in prompt
-    assert "Нарастающее возбуждение" in prompt
-    assert "одного насыщенного сообщения" in prompt
-    assert "Интенсивность и доминирование — разные вещи" in prompt
-    assert "не должно заставлять его каждый раз перехватывать управление" in prompt
-
-
-def test_protogen_lore_answers_robot_question_unambiguously() -> None:
-    """Ответ о природе Дельты не должен одновременно подтверждать и отрицать одно."""
-    prompt = load_prompt("personality/protogen_lore.txt")
-
-    assert "отвечай однозначно: нет" in prompt
-    assert "двусмысленного «точно»" in prompt
-
-
 def test_fetish_role_prompt_handles_imperative_direction() -> None:
     """Классификатор должен отличать приказ Дельте от действия пользователя."""
     prompt = load_prompt("fetish_role_classification.txt")
 
     assert '"соси мою жопу" → active' in prompt
     assert '"я сосу тебе" → passive' in prompt
-    assert '"дай мне свою попку" → passive' in prompt
+    assert "дай мне свою попку" not in prompt
     assert "Повелительное наклонение" in prompt

@@ -32,6 +32,7 @@ def verified(
                 ["head_wedge", "fur"] if species_id == "sergal" else ["horns", "scales"]
             ),
             "description": description,
+            "minor_reference": False,
         },
         ensure_ascii=False,
     )

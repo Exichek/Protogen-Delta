@@ -143,6 +143,14 @@ def test_main_builds_application_and_starts_polling(
         "personality/rp.txt": "RP PROMPT",
         "furry_species_reference": "SPECIES REFERENCE",
         "adult_conversation_style": "ADULT CONVERSATION STYLE",
+        "personality/body_female": "OPTIONAL PROMPT",
+        "personality/adult_body_male": "OPTIONAL PROMPT",
+        "personality/adult_body_female": "OPTIONAL PROMPT",
+        "personality/adult_rp": "OPTIONAL PROMPT",
+        "conversation_technical": "OPTIONAL PROMPT",
+        "conversation_visual": "OPTIONAL PROMPT",
+        "voice_examples": "OPTIONAL PROMPT",
+        "scene_examples": "OPTIONAL PROMPT",
     }
 
     load_prompt_mock = Mock(
@@ -406,6 +414,14 @@ def test_main_builds_application_and_starts_polling(
         call("personality/rp.txt"),
         call("furry_species_reference"),
         call("adult_conversation_style"),
+        call("personality/body_female"),
+        call("personality/adult_body_male"),
+        call("personality/adult_body_female"),
+        call("personality/adult_rp"),
+        call("conversation_technical"),
+        call("conversation_visual"),
+        call("voice_examples"),
+        call("scene_examples"),
     ]
 
     setup_logging_mock.assert_called_once_with(
@@ -501,7 +517,9 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
     )
 
-    create_adult_router_mock.assert_called_once_with(user_states, ANY)
+    create_adult_router_mock.assert_called_once_with(
+        user_states, ANY, restrict_minor=ANY
+    )
 
     assert dispatcher_mock.include_router.call_count == 20
 

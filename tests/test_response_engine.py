@@ -559,6 +559,7 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
         _,
         role_mock,
     ) = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
 
     role_mock.classify.return_value = "active"
     deepseek_mock.chat.return_value = "RP ответ"
@@ -611,6 +612,7 @@ def test_response_engine_asks_for_setup_on_bare_roleplay_proposal() -> None:
 def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:
     """Введённый мотив должен сохраняться до конца текущей RP-сцены."""
     engine, _, deepseek_mock, _, _, role_mock = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
 
     asyncio.run(engine.respond(TEST_USER_ID, "*связал тебя*"))
     asyncio.run(engine.respond(TEST_USER_ID, "*продолжай*"))
@@ -630,6 +632,7 @@ def test_response_engine_keeps_fetishes_for_follow_up_rp_turns() -> None:
 def test_response_engine_combines_multiple_scene_fetishes() -> None:
     """Несколько мотивов должны сочетаться без механического перечисления."""
     engine, _, deepseek_mock, _, _, _ = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
     state = engine._user_states.get(TEST_USER_ID)
     state.roleplay_active = True
     state.roleplay_fetishes = ("bondage", "latex")
@@ -1027,6 +1030,7 @@ def test_response_engine_adds_passive_role_to_rp_prompt() -> None:
         _,
         role_mock,
     ) = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
 
     role_mock.classify.return_value = "passive"
     deepseek_mock.chat.return_value = "RP ответ"
@@ -1597,6 +1601,7 @@ def test_response_engine_adds_horny_context_to_prompt() -> None:
         mood_mock,
         _,
     ) = _create_engine()
+    engine._user_states.get(TEST_USER_ID).content_mode = "adult"
 
     mood_mock.classify.return_value = "horny"
     deepseek_mock.chat.return_value = "Ответ"

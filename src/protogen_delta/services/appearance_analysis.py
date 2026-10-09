@@ -66,6 +66,7 @@ def declared_species(text: str) -> str:
 class AppearanceResult:
     description: str
     species: AppearanceSpecies
+    minor_reference: bool = False
 
 
 def _region(trait: str) -> str:
@@ -182,6 +183,9 @@ class AppearanceAnalyzer:
             )
             verified = _json(raw)
         description = verified.get("description")
+        minor_reference = verified.get("minor_reference", True)
+        if type(minor_reference) is not bool:
+            raise ValueError("Invalid reference age marker")
         # Временная поза референса намеренно не входит в AppearanceResult:
         # она не должна стать сохранённой внешностью или действием сцены.
         reference_state = verified.get("reference_state", "")
@@ -248,4 +252,6 @@ class AppearanceAnalyzer:
                 if status == "probable"
                 else card.name + ". "
             )
-        return AppearanceResult(validate_description(prefix + body), species)
+        return AppearanceResult(
+            validate_description(prefix + body), species, minor_reference
+        )

@@ -11,6 +11,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
 from protogen_delta.core.appearance_species import AppearanceSpecies
+from protogen_delta.core.conversation_safety import validate_stopword
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.telegram_commands import ModeChange
@@ -49,6 +50,9 @@ def _profile(
             "username": user.username,
         },
         "content_mode": state.content_mode,
+        "age_restricted": state.age_restricted,
+        "delta_reference_restricted": state.delta_reference_restricted,
+        "roleplay_stopword": state.roleplay_stopword,
         "roleplay_active": state.roleplay_active,
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
@@ -208,10 +212,19 @@ class MiniAppServer:
             "roleplay_character",
             "roleplay_preferences",
             "roleplay_boundaries",
+            "roleplay_stopword",
         }
         if set(payload) - allowed:
             raise web.HTTPBadRequest(text="Переданы неизвестные настройки")
         content_mode = payload.get("content_mode")
+        stopword = payload.get("roleplay_stopword")
+        if stopword is not None:
+            try:
+                if not isinstance(stopword, str):
+                    raise ValueError("Стоп-слово должно быть текстом.")
+                stopword = validate_stopword(stopword)
+            except ValueError as error:
+                raise web.HTTPBadRequest(text=str(error)) from error
         if content_mode is not None and (
             not isinstance(content_mode, str) or content_mode not in {"soft", "adult"}
         ):
@@ -244,9 +257,17 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text="Границы слишком длинные")
 
         async with self._user_states.use(user.id) as state:
+            if content_mode == "adult" and state.age_restricted:
+                raise web.HTTPForbidden(
+                    text="Ты сообщил, что тебе нет 18. Доступен обычный режим общения."
+                )
             previous_mode = state.content_mode
+            if stopword is not None:
+                state.roleplay_stopword = stopword
             if content_mode is not None:
                 state.content_mode = cast(ContentMode, content_mode)
+                if content_mode == "soft":
+                    state.stop_roleplay()
             if roleplay_active is not None:
                 if roleplay_active:
                     state.roleplay_active = True
@@ -391,6 +412,7 @@ class MiniAppServer:
             state.delta_appearance = ""
             state.delta_species = ""
             state.delta_appearance_thumbnail = ""
+            state.delta_reference_restricted = False
             payload = self._profile(state, user)
         return web.json_response(payload, headers={"Cache-Control": "no-store"})
 

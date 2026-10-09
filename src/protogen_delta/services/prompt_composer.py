@@ -48,6 +48,12 @@ _TIME_PATTERN = re.compile(
     r"время\s+(?:в|по)\s+[\w-]+)\b",
     re.I,
 )
+_TECHNICAL_PATTERN = re.compile(
+    r"```|\b(?:docker|python|linux|api|sql|код\w*|лог\w*|кеш\w*|кэш\w*|"
+    r"токен\w*|сервер\w*|ошибк\w*|программ\w*|репозитор\w*|"
+    r"ускорен\w*|производительн\w*|debug\w*|traceback)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,14 @@ class PromptSections:
     body: str = ""
     roleplay: str = ""
     species: str = ""
+    female_body: str = ""
+    adult_body_male: str = ""
+    adult_body_female: str = ""
+    adult_roleplay: str = ""
+    technical: str = ""
+    visual: str = ""
+    voice: str = ""
+    scene_voice: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,9 +99,16 @@ class PromptComposer:
         is_roleplay: bool,
         has_images: bool = False,
         has_custom_appearance: bool = False,
+        adult_context: bool = False,
+        female_configuration: bool = False,
+        technical_context: bool = False,
     ) -> str:
         """Собрать минимальный набор секций для текущего сообщения."""
         parts = [self._sections.core]
+        if technical_context or _TECHNICAL_PATTERN.search(user_message):
+            parts.append(self._sections.technical)
+        if has_images:
+            parts.append(self._sections.visual)
         if (
             has_images
             or (is_roleplay and has_custom_appearance)
@@ -102,7 +123,17 @@ class PromptComposer:
         if is_roleplay:
             if not has_custom_appearance:
                 parts.extend((self._sections.lore, self._sections.body))
+                if female_configuration:
+                    parts.append(self._sections.female_body)
+                if adult_context:
+                    parts.append(
+                        self._sections.adult_body_female
+                        if female_configuration
+                        else self._sections.adult_body_male
+                    )
             parts.append(self._sections.roleplay)
+            if adult_context:
+                parts.append(self._sections.adult_roleplay)
             return self._join(parts)
 
         if _LORE_PATTERN.search(user_message):
@@ -113,7 +144,19 @@ class PromptComposer:
             and not has_custom_appearance
         ):
             parts.append(self._sections.body)
+            if adult_context:
+                parts.append(self._sections.adult_body_male)
         return self._join(parts)
+
+    def examples(self, *, is_roleplay: bool) -> str:
+        """Короткие образцы голоса, выбранные по режиму текущего ответа."""
+        return self._join(
+            [self._sections.voice, self._sections.scene_voice if is_roleplay else ""]
+        )
+
+    @staticmethod
+    def is_technical(message: str) -> bool:
+        return bool(_TECHNICAL_PATTERN.search(message))
 
     @staticmethod
     def select_tools(

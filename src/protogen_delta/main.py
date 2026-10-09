@@ -272,6 +272,14 @@ async def main() -> None:
             body_prompt=body_prompt,
             species_prompt=load_prompt("furry_species_reference"),
             adult_conversation_prompt=load_prompt("adult_conversation_style"),
+            female_body_prompt=load_prompt("personality/body_female"),
+            adult_body_male_prompt=load_prompt("personality/adult_body_male"),
+            adult_body_female_prompt=load_prompt("personality/adult_body_female"),
+            adult_rp_prompt=load_prompt("personality/adult_rp"),
+            technical_prompt=load_prompt("conversation_technical"),
+            visual_prompt=load_prompt("conversation_visual"),
+            voice_prompt=load_prompt("voice_examples"),
+            scene_voice_prompt=load_prompt("scene_examples"),
             capabilities_context=(
                 "Читаю PDF, DOCX, XLSX и текстовые файлы/код. Рассматриваю фото, "
                 "стикеры, GIF, TGS, MP4 и WebM: приложение извлекает несколько "
@@ -392,7 +400,9 @@ async def main() -> None:
             creator_messages=creator_messages,
         )
 
-        adult_router = create_adult_router(user_states, on_mode_change)
+        adult_router = create_adult_router(
+            user_states, on_mode_change, restrict_minor=response_engine.restrict_minor
+        )
         e621_client = E621Client(
             settings.e621_user_agent,
             proxy_url=settings.telegram_proxy_url,
