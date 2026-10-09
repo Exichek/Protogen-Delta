@@ -43,7 +43,7 @@ OpenAI-совместимая LLM генерирует ответы, а прил
 | Развёртывание | Локальный процесс или Docker |
 | Лицензия | MIT |
 
-Контрольный прогон **27.09.2026**: более **500 тестов**, покрытие выше **95%**, исходный код и тесты проверены mypy, Python 3.14.7. Это снимок конкретной проверки; текущий результат смотрите в [GitHub Actions](https://github.com/Exichek/Protogen-Delta/actions/workflows/tests.yml).
+Контрольный прогон **09.10.2026** в Linux CI (`develop`): **1578 тестов прошли**, покрытие **95.46%**, исходный код и тесты проверены mypy, Python 3.14. Это снимок конкретной проверки; текущий результат смотрите в [GitHub Actions](https://github.com/Exichek/Protogen-Delta/actions/workflows/tests.yml).
 
 <a id="features"></a>
 ## ⚙️ Возможности
