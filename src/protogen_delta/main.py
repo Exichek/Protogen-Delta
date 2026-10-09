@@ -40,6 +40,7 @@ from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
+from protogen_delta.handlers.safety import AgeSafetyMiddleware
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.stickers import create_sticker_admin_router
 from protogen_delta.handlers.text import create_text_router
@@ -400,6 +401,7 @@ async def main() -> None:
             creator_messages=creator_messages,
         )
 
+        dispatcher.message.outer_middleware(AgeSafetyMiddleware(response_engine))
         adult_router = create_adult_router(
             user_states, on_mode_change, restrict_minor=response_engine.restrict_minor
         )

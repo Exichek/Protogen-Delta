@@ -3,21 +3,68 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from appearance_fixtures import verified
 from test_adult_handler import _create_callback
+from test_media_handler import _message
 from test_miniapp import TOKEN, _signed_init_data
 from test_response_engine import _create_engine
 
 from protogen_delta.core.conversation_safety import declares_minor, reference_is_child
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.handlers.adult import AGE_RESTRICTED_TEXT, create_adult_router
+from protogen_delta.handlers.safety import AgeSafetyMiddleware
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.prompt_composer import PromptComposer, PromptSections
+
+
+@pytest.mark.parametrize("kind", ["text", "caption", "forwarded", "ordinary"])
+def test_age_middleware_handles_own_statement_before_file_processing(kind: str) -> None:
+    async def scenario() -> None:
+        engine, _, model, *_ = _create_engine()
+        message, answer = _message()
+        raw = cast(Mock, message)
+        raw.from_user = SimpleNamespace(id=42, is_bot=False)
+        message.text = "мне 16 лет" if kind in {"text", "forwarded"} else None
+        message.caption = "мне 16 лет" if kind == "caption" else None
+        raw.forward_origin = SimpleNamespace() if kind == "forwarded" else None
+        handler = AsyncMock()
+        await AgeSafetyMiddleware(engine)(handler, message, {})
+        if kind in {"text", "caption"}:
+            handler.assert_not_awaited()
+            answer.assert_awaited_once()
+            assert engine._user_states.get(42).age_restricted
+        else:
+            handler.assert_awaited_once()
+            answer.assert_not_awaited()
+        model.chat.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_minor_character_uses_neutral_modules_for_adult_account() -> None:
+    engine, _, model, *_ = _create_engine()
+    state = engine._user_states.get(42)
+    state.content_mode = "adult"
+    state.roleplay_active = True
+    state.roleplay_character = "Возраст: 15 лет. Персонаж в синем пальто."
+    state.roleplay_fetishes = ("bondage",)
+    engine._prompt_composer = PromptComposer(
+        PromptSections(
+            core="CORE", adult_body_male="ADULT_BODY", adult_roleplay="ADULT_RP"
+        )
+    )
+    asyncio.run(engine.respond(42, "*передаю карту*"))
+    prompt = model.chat.await_args.kwargs["system_prompt"]
+    assert "ADULT_BODY" not in prompt and "ADULT_RP" not in prompt
+    assert "интимные мотивы" not in prompt
 
 
 def test_minor_closes_persisted_groups_and_keeps_other_users_unchanged(

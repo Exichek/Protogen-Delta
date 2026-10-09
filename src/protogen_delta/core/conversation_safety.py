@@ -34,7 +34,7 @@ def reference_is_child(text: str) -> bool:
         return True
     return bool(
         re.search(
-            r"\b(?:персонаж\w*|ему|ей)\s+(?:[1-9]|1[0-7])\s+(?:лет|год\w*)\b",
+            r"\b(?:[1-9]|1[0-7])\s+(?:лет|год\w*)\b",
             text,
             re.I,
         )

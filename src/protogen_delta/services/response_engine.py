@@ -432,6 +432,8 @@ class ResponseEngine:
             user_state.roleplay_active = True
             user_state.roleplay_configuration = configuration
         if character is not None:
+            if reference_is_child(character):
+                user_state.stop_roleplay()
             user_state.roleplay_active = True
             user_state.roleplay_character = character
 
@@ -520,6 +522,7 @@ class ResponseEngine:
             user_state.content_mode == "adult"
             and not user_state.age_restricted
             and not user_state.delta_reference_restricted
+            and not reference_is_child(user_state.roleplay_character)
         )
         state_context = build_state_context(
             user_state,
@@ -653,6 +656,7 @@ class ResponseEngine:
             user_state.content_mode == "adult"
             and not user_state.age_restricted
             and not user_state.delta_reference_restricted
+            and not reference_is_child(user_state.roleplay_character)
         )
         if adult_allowed:
             state_context.append(
@@ -1047,6 +1051,8 @@ class ResponseEngine:
                     state.delta_reference_restricted = reference_is_child(description)
                 elif reference_is_child(description):
                     state.delta_reference_restricted = True
+                if state.delta_reference_restricted:
+                    state.stop_roleplay()
                 if expected_appearance is None:
                     state.delta_appearance_thumbnail = ""
                 hint = declared_species(description)

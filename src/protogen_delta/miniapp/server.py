@@ -11,7 +11,10 @@ from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
 from protogen_delta.core.appearance_species import AppearanceSpecies
-from protogen_delta.core.conversation_safety import validate_stopword
+from protogen_delta.core.conversation_safety import (
+    reference_is_child,
+    validate_stopword,
+)
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.telegram_commands import ModeChange
@@ -277,6 +280,8 @@ class MiniAppServer:
                 state.roleplay_configuration = configuration
             if character is not None:
                 state.roleplay_character = character.strip()
+                if reference_is_child(state.roleplay_character):
+                    state.stop_roleplay()
             if preferences is not None:
                 state.roleplay_preferences = preferences.strip()
             if boundaries is not None:
