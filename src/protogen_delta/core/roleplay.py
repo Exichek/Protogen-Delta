@@ -36,14 +36,30 @@ APPEARANCE_RESET_PATTERN = re.compile(
 )
 
 
-def has_roleplay_action(text: str) -> bool:
-    """Распознать текст в одиночных звёздочках вне кода и формул."""
+def roleplay_actions(text: str) -> tuple[str, ...]:
+    """Извлечь действия в одиночных звёздочках вне кода и формул."""
+    actions: list[str] = []
     without_code = re.sub(r"```.*?(?:```|$)|`[^`\n]*(?:`|$)", "", text, flags=re.DOTALL)
     for match in re.finditer(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", without_code):
         action = match[1].strip()
         if re.search(r"[^\W\d_]{2,}", action) and not re.search(r"[=+^<>/\\|]", action):
-            return True
-    return False
+            actions.append(action)
+    return tuple(actions)
+
+
+def has_roleplay_action(text: str) -> bool:
+    return bool(roleplay_actions(text))
+
+
+def user_will_start_scene(text: str) -> bool:
+    """Пользователь берёт первый ход на себя вместо запроса завязки."""
+    return bool(
+        re.search(
+            r"(?:^|[\s,.!;:])(?:я\s+)?(?:начну|начинаю|первым\s+начну|первой\s+начну)\b",
+            text,
+            re.I,
+        )
+    )
 
 
 def has_roleplay_intent(text: str) -> bool:

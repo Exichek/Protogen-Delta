@@ -182,6 +182,11 @@ class AppearanceAnalyzer:
             )
             verified = _json(raw)
         description = verified.get("description")
+        # Временная поза референса намеренно не входит в AppearanceResult:
+        # она не должна стать сохранённой внешностью или действием сцены.
+        reference_state = verified.get("reference_state", "")
+        if not isinstance(reference_state, str) or len(reference_state) > 400:
+            raise ValueError("Invalid reference state")
         status, key, evidence = (
             verified.get("status"),
             verified.get("species_id"),
