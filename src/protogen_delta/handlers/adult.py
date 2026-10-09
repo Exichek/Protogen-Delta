@@ -1,5 +1,7 @@
 """Выбор возрастного режима содержимого пользователем."""
 
+from collections.abc import Awaitable, Callable
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
@@ -40,6 +42,9 @@ SOFT_ENABLED_TEXT = (
 )
 
 FOREIGN_CALLBACK_TEXT = "Эта настройка предназначена не тебе."
+AGE_RESTRICTED_TEXT = (
+    "Ты сообщил, что тебе нет 18. Для этого профиля доступен обычный режим общения."
+)
 
 
 def _callback_data(mode: ContentMode, user_id: int) -> str:
@@ -92,7 +97,10 @@ def _parse_callback(data: str) -> tuple[ContentMode, int] | None:
 
 
 def create_adult_router(
-    user_states: UserStateStore, on_mode_change: ModeChange | None = None
+    user_states: UserStateStore,
+    on_mode_change: ModeChange | None = None,
+    *,
+    restrict_minor: Callable[[int], Awaitable[None]] | None = None,
 ) -> Router:
     """Создать роутер команды и кнопок возрастного режима."""
     router = Router(name=__name__)
@@ -125,8 +133,16 @@ def create_adult_router(
             await callback.answer(FOREIGN_CALLBACK_TEXT, show_alert=True)
             return
 
+        if mode == "soft" and restrict_minor is not None:
+            await restrict_minor(expected_user_id)
         async with user_states.use(expected_user_id) as state:
+            if mode == "adult" and state.age_restricted:
+                await callback.answer(AGE_RESTRICTED_TEXT, show_alert=True)
+                return
             state.content_mode = mode
+            if mode == "soft":
+                state.age_restricted = True
+                state.stop_roleplay()
 
         if on_mode_change is not None:
             await on_mode_change(expected_user_id, mode)

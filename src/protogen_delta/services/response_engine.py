@@ -8,6 +8,11 @@ from dataclasses import dataclass
 
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
+from protogen_delta.core.conversation_safety import (
+    declares_minor,
+    is_scene_stop,
+    reference_is_child,
+)
 from protogen_delta.core.log_context import bind_log_context
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -133,6 +138,14 @@ class ResponseEngineConfig:
     history_live_turns: int = 4
     capabilities_context: str = ""
     adult_conversation_prompt: str = ""
+    female_body_prompt: str = ""
+    adult_body_male_prompt: str = ""
+    adult_body_female_prompt: str = ""
+    adult_rp_prompt: str = ""
+    technical_prompt: str = ""
+    visual_prompt: str = ""
+    voice_prompt: str = ""
+    scene_voice_prompt: str = ""
 
 
 class ResponseEngine:
@@ -174,6 +187,14 @@ class ResponseEngine:
                 body=config.body_prompt,
                 roleplay=config.rp_prompt,
                 species=config.species_prompt,
+                female_body=config.female_body_prompt,
+                adult_body_male=config.adult_body_male_prompt,
+                adult_body_female=config.adult_body_female_prompt,
+                adult_roleplay=config.adult_rp_prompt,
+                technical=config.technical_prompt,
+                visual=config.visual_prompt,
+                voice=config.voice_prompt,
+                scene_voice=config.scene_voice_prompt,
             )
         )
         self._memory = memory
@@ -181,7 +202,47 @@ class ResponseEngine:
         self._reply_transform = reply_transform
         self._interaction_classifier = interaction_classifier
         self._creator_messages = creator_messages
+        self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
         self._delivering_users: set[StateKey] = set()
+
+    def is_safety_signal(
+        self, user_id: int, text: str, *, chat_id: int | None = None
+    ) -> bool:
+        state = self._user_states.get_conversation(user_id, chat_id)
+        return declares_minor(text) or (
+            state.roleplay_active and is_scene_stop(text, state.roleplay_stopword)
+        )
+
+    async def _interrupt_reply(
+        self, user_id: int, chat_id: int | None = None, *, all_chats: bool = False
+    ) -> None:
+        key: StateKey = user_id if chat_id is None else (chat_id, user_id)
+        current = asyncio.current_task()
+        tasks = [
+            task
+            for scope, task in tuple(self._reply_tasks.items())
+            if task is not current
+            and (
+                scope == key
+                or (
+                    all_chats
+                    and (
+                        scope == user_id
+                        or isinstance(scope, tuple)
+                        and scope[1] == user_id
+                    )
+                )
+            )
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def restrict_minor(self, user_id: int) -> None:
+        """Применить прямое возрастное заявление до дальнейшего общения."""
+        await self._interrupt_reply(user_id, all_chats=True)
+        await self._user_states.restrict_minor(user_id)
 
     async def respond_and_deliver(
         self,
@@ -199,9 +260,17 @@ class ResponseEngine:
     ) -> None:
         """Отклонить повторный запрос и удержать lock до конца доставки."""
         key: StateKey = user_id if chat_id is None else (chat_id, user_id)
+        control_text = model_message_override or user_message
+        if self.is_safety_signal(user_id, control_text, chat_id=chat_id):
+            await self._interrupt_reply(
+                user_id, chat_id, all_chats=declares_minor(control_text)
+            )
         if key in self._delivering_users:
             raise ResponseBusyError
         self._delivering_users.add(key)
+        task = asyncio.current_task()
+        if task is not None:
+            self._reply_tasks[key] = task
         try:
             await self.respond(
                 user_id,
@@ -216,6 +285,7 @@ class ResponseEngine:
                 chat_id=chat_id,
             )
         finally:
+            self._reply_tasks.pop(key, None)
             self._delivering_users.remove(key)
 
     async def respond(
@@ -234,9 +304,18 @@ class ResponseEngine:
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
+            minor_declared = declares_minor(model_message_override or user_message)
+            if minor_declared:
+                await self.restrict_minor(user_id)
             async with self._user_states.use_conversation(
                 user_id, chat_id
             ) as user_state:
+                if minor_declared:
+                    user_state.stop_roleplay()
+                    reply = "Спасибо, что сказал. Остаёмся в обычном общении, взрослый режим выключен."
+                    if deliver is not None:
+                        await deliver(reply)
+                    return reply
                 if self._creator_messages is not None and (
                     use_personal_facts or chat_id is not None
                 ):
@@ -313,6 +392,7 @@ class ResponseEngine:
         chat_id: int | None = None,
     ) -> bool:
         """Выключить RP-режим пользователя, сохранив остальное состояние."""
+        await self._interrupt_reply(user_id, chat_id)
         async with self._user_states.use_conversation(user_id, chat_id) as user_state:
             return user_state.stop_roleplay()
 
@@ -331,6 +411,13 @@ class ResponseEngine:
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         remaining = split_roleplay_stop(user_message)
+        if user_state.roleplay_active and is_scene_stop(
+            user_message, user_state.roleplay_stopword
+        ):
+            user_state.stop_roleplay()
+            return PreparedReply(
+                "Остановился. Сцена завершена; можем просто поговорить."
+            )
         stopped = remaining is not None
         was_roleplay_active = user_state.roleplay_active
         if stopped:
@@ -345,6 +432,8 @@ class ResponseEngine:
             user_state.roleplay_active = True
             user_state.roleplay_configuration = configuration
         if character is not None:
+            if reference_is_child(character):
+                user_state.stop_roleplay()
             user_state.roleplay_active = True
             user_state.roleplay_character = character
 
@@ -360,7 +449,10 @@ class ResponseEngine:
         if (contains_rp_action or contains_rp_intent) and not stopped:
             user_state.roleplay_active = True
 
-        is_rp = user_state.roleplay_active
+        technical_topic = (
+            PromptComposer.is_technical(user_message) and not contains_rp_action
+        )
+        is_rp = user_state.roleplay_active and not technical_topic
         is_new_rp = is_rp and not was_roleplay_active and not stopped
 
         if (
@@ -426,9 +518,17 @@ class ResponseEngine:
             except Exception:
                 logger.warning("User fact profile unavailable")
 
+        adult_allowed = (
+            user_state.content_mode == "adult"
+            and not user_state.age_restricted
+            and not user_state.delta_reference_restricted
+            and not reference_is_child(user_state.roleplay_character)
+        )
         state_context = build_state_context(
             user_state,
-            include_intimate=is_rp or mood == "horny",
+            include_intimate=adult_allowed
+            and not technical_topic
+            and (is_rp or mood == "horny"),
         )
 
         if self._creator_id is not None and user_id == self._creator_id:
@@ -546,13 +646,19 @@ class ResponseEngine:
             )
         else:
             state_context.append(
-                "Сейчас обычный разговор, RP выключен. Конфигурация Дельты "
+                "Сейчас обычный разговор, RP выключен для этого ответа. Конфигурация Дельты "
                 "базовая, мужской род. Старые сцены в истории завершены. "
                 "Отвечай на текущий вопрос без сценических действий и "
                 "продолжения прежней сцены."
             )
 
-        if user_state.content_mode == "adult":
+        adult_allowed = (
+            user_state.content_mode == "adult"
+            and not user_state.age_restricted
+            and not user_state.delta_reference_restricted
+            and not reference_is_child(user_state.roleplay_character)
+        )
+        if adult_allowed:
             state_context.append(
                 "Пользователь явно подтвердил совершеннолетие и включил режим "
                 "18+. Можно прямо и естественно поддерживать откровенные взрослые "
@@ -639,7 +745,7 @@ class ResponseEngine:
                     "вместо подробного рассказа. Старые темы диалога не являются "
                     "свидетельством содержания нового ролика."
                 )
-            if user_state.content_mode == "adult":
+            if adult_allowed:
                 state_context.append(
                     "Если изображение явно эротическое и разговор поддерживает "
                     "такой тон, реагируй прямо, эмоционально и разговорно: можешь "
@@ -706,7 +812,7 @@ class ResponseEngine:
             self._config.fetish_triggers,
         )
 
-        if is_rp and current_fetishes:
+        if is_rp and adult_allowed and current_fetishes:
             user_state.roleplay_fetishes = tuple(
                 dict.fromkeys((*user_state.roleplay_fetishes, *current_fetishes))
             )
@@ -714,7 +820,7 @@ class ResponseEngine:
         role: FetishRole = "unknown"
 
         # Определять роль есть смысл только при обнаруженном fetish-контексте.
-        if is_rp and current_fetishes:
+        if is_rp and adult_allowed and current_fetishes:
             role = await self._fetish_role_classifier.classify(user_message)
 
             logger.info(
@@ -757,8 +863,14 @@ class ResponseEngine:
             user_message=user_message,
             has_images=bool(images),
             is_rp=is_rp,
-            fetishes=list(user_state.roleplay_fetishes),
-            current_fetishes=current_fetishes,
+            fetishes=(
+                list(user_state.roleplay_fetishes)
+                if adult_allowed and not technical_topic
+                else []
+            ),
+            current_fetishes=(
+                current_fetishes if adult_allowed and not technical_topic else []
+            ),
             role=role,
             mood=user_state.mood,
             insult_type=insult_type,
@@ -766,8 +878,25 @@ class ResponseEngine:
             memory_context=memory_context,
             fact_context=fact_context,
             trusted_input_context=trusted_input_context,
-            content_mode=user_state.content_mode,
+            content_mode="adult" if adult_allowed else "soft",
             scene_context=scene_context,
+            adult_context=(
+                adult_allowed
+                and not technical_topic
+                and bool(
+                    current_fetishes
+                    or (is_rp and user_state.roleplay_fetishes)
+                    or mood == "horny"
+                )
+            ),
+            female_configuration=is_rp
+            and user_state.roleplay_configuration == "female",
+            technical_context=bool(
+                attachment_name
+                and re.search(
+                    r"\.(?:py|js|ts|sh|ps1|sql|log|json)$", attachment_name, re.I
+                )
+            ),
         )
 
         try:
@@ -919,6 +1048,12 @@ class ResponseEngine:
                     )
                 state.delta_appearance = description
                 if expected_appearance is None:
+                    state.delta_reference_restricted = reference_is_child(description)
+                elif reference_is_child(description):
+                    state.delta_reference_restricted = True
+                if state.delta_reference_restricted:
+                    state.stop_roleplay()
+                if expected_appearance is None:
                     state.delta_appearance_thumbnail = ""
                 hint = declared_species(description)
                 if hint or expected_appearance is None:
@@ -945,6 +1080,7 @@ class ResponseEngine:
             user_state.delta_appearance = ""
             user_state.delta_species = ""
             user_state.delta_appearance_thumbnail = ""
+            user_state.delta_reference_restricted = False
             return "cleared"
         if not images or not has_delta_appearance_intent(user_message):
             return None
@@ -952,6 +1088,8 @@ class ResponseEngine:
         adult_details = (
             "Если видна взрослая анатомия, назови её нейтрально и точно."
             if user_state.content_mode == "adult"
+            and not user_state.age_restricted
+            and not reference_is_child(user_message)
             else "Не включай в карточку откровенные сексуальные подробности."
         )
         hint = validate_species_hint(species_hint) or declared_species(user_message)
@@ -978,6 +1116,11 @@ class ResponseEngine:
 
         user_state.delta_appearance = result.description
         user_state.delta_species = result.species.encode()
+        user_state.delta_reference_restricted = (
+            result.minor_reference or reference_is_child(user_message)
+        )
+        if user_state.delta_reference_restricted:
+            user_state.stop_roleplay()
         user_state.delta_appearance_thumbnail = ""
         return "updated"
 
@@ -1041,6 +1184,9 @@ class ResponseEngine:
         trusted_input_context: str | None = None,
         content_mode: ContentMode = "unselected",
         scene_context: Sequence[str] = (),
+        adult_context: bool = False,
+        female_configuration: bool = False,
+        technical_context: bool = False,
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._prompt_composer.compose(
@@ -1051,6 +1197,9 @@ class ResponseEngine:
                 line.startswith("Текущий облик Дельты")
                 for line in (*state_context, *scene_context)
             ),
+            adult_context=adult_context,
+            female_configuration=female_configuration,
+            technical_context=technical_context,
         )
         if self._config.capabilities_context:
             prompt += (
@@ -1106,7 +1255,7 @@ class ResponseEngine:
                 "Позволь ей естественно проявиться в ответе, "
                 "не превращая каждую тёплую реплику в чрезмерную ласковость."
             )
-        elif mood == "horny":
+        elif mood == "horny" and content_mode == "adult":
             context_lines.append(
                 "Сообщение имеет явно сексуальный или возбуждающий контекст. "
                 "Учитывай это естественно и соразмерно уже установленной "
@@ -1199,6 +1348,9 @@ class ResponseEngine:
                 "не повторяй её и не выдавай ограничение языковой модели за "
                 "ограничение всего приложения."
             )
+        examples = self._prompt_composer.examples(is_roleplay=is_rp)
+        if examples:
+            prompt += "\n\n" + examples
         return prompt
 
     @staticmethod

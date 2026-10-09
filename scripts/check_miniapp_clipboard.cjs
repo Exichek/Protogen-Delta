@@ -22,12 +22,13 @@ async function main() {
   const context = await browser.newContext({viewport: {width: 430, height: 932}});
   // Block every external request; these tests never access an actual clipboard or bot.
   await context.route('**/*', route => route.abort());
-  async function fresh(saved = false, loadState = 'ready') {
+  async function fresh(saved = false, loadState = 'ready', ageRestricted = false) {
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     const setup = `<script>
       window.Telegram={WebApp:{initData:'synthetic',ready(){},expand(){}}};
       window.testProfile=${JSON.stringify(profile)};
+      window.testProfile.age_restricted=${ageRestricted};
       const canvas=document.createElement('canvas');canvas.width=32;canvas.height=32;
       const drawing=canvas.getContext('2d');drawing.fillStyle='#38bdd3';drawing.fillRect(0,0,32,32);
       window.thumbnail=canvas.toDataURL('image/jpeg');
@@ -46,6 +47,10 @@ async function main() {
         if(!window.failStatus && options.method==='PATCH' && url==='/api/profile/appearance') {
           window.lastEdit=JSON.parse(options.body);
           window.testProfile.delta_appearance=window.lastEdit.appearance.trim();
+        }
+        if(!window.failStatus && options.method==='PATCH' && url==='/api/profile') {
+          window.lastSettings=JSON.parse(options.body);
+          Object.assign(window.testProfile,window.lastSettings);
         }
         return {ok:!window.failStatus,status:window.failStatus||200,
           text:async()=>window.failMessage,json:async()=>window.testProfile};
@@ -79,6 +84,17 @@ async function main() {
   const message = page => page.locator('#appearance-status').textContent();
   const waitClipboard = page => page.waitForFunction(() => !document.querySelector('#paste-appearance').disabled);
   try {
+    let settings = await fresh();
+    await settings.locator('#stopword').fill('Пауза');
+    await settings.locator('#save').click();
+    await settings.waitForFunction(() => document.querySelector('#status').textContent==='Сохранено.');
+    assert.equal(await settings.evaluate(() => window.lastSettings.roleplay_stopword), 'Пауза');
+    assert.equal(await settings.locator('#stopword').inputValue(), 'Пауза');
+    await settings.close();checks++;
+    settings=await fresh(false,'ready',true);
+    assert.equal(await settings.locator('#content-mode option[value="adult"]').isDisabled(),true);
+    assert.equal(await settings.locator('#age-restriction-hint').isVisible(),true);
+    await settings.close();checks++;
     let editor = await fresh(true);
     await editor.locator('#edit-appearance').click();
     assert.equal(await editor.locator('#appearance-edit-text').inputValue(), 'Сергал');

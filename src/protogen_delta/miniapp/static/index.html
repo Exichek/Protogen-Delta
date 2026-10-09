@@ -67,6 +67,7 @@
     </div>
     <label for="content-mode">Режим общения</label>
     <select id="content-mode"><option value="soft">Мягкий</option><option value="adult">18+</option></select>
+    <p id="age-restriction-hint" class="muted" hidden>Обычный режим выбран по указанному тобой возрасту.</p>
     <label for="configuration">Конфигурация Дельты в RP</label>
     <select id="configuration"><option value="male">Мужская</option><option value="female">Женская</option></select>
     <label for="character">Мой персонаж для RP</label>
@@ -75,6 +76,9 @@
     <textarea id="preferences" maxlength="1000" placeholder="Темы, динамика, тон и детали, которые хочется видеть чаще"></textarea>
     <label for="boundaries">Мои границы</label>
     <textarea id="boundaries" maxlength="1000" placeholder="Что нельзя добавлять в сцену"></textarea>
+    <label for="stopword">Стоп-слово</label>
+    <input id="stopword" maxlength="40" value="стоп" placeholder="Например, пауза">
+    <p class="muted">Отправь его отдельным сообщением, чтобы завершить сцену. «Стоп» и «красный» тоже работают.</p>
     <p class="muted" id="fetishes">Распознанные темы: пока нет</p>
     <button id="save">Сохранить настройки</button>
     <button class="secondary" id="clear-rp">Очистить RP-профиль</button>
@@ -172,6 +176,9 @@
   const render = p => {
     document.querySelector("#hello").textContent = `${p.user.first_name} · ID ${p.user.id}`;
     document.querySelector("#content-mode").value = p.content_mode === "adult" ? "adult" : "soft";
+    document.querySelector('#content-mode option[value="adult"]').disabled = Boolean(p.age_restricted);
+    document.querySelector("#age-restriction-hint").hidden = !p.age_restricted;
+    document.querySelector("#stopword").value = p.roleplay_stopword || "стоп";
     document.querySelector("#configuration").value = p.roleplay_configuration;
     document.querySelector("#character").value = p.roleplay_character;
     document.querySelector("#preferences").value = p.roleplay_preferences;
@@ -218,6 +225,7 @@
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
     document.querySelector("#appearance-empty-hint").hidden = customAppearance;
+    if (p.delta_reference_restricted) appearanceStatus.textContent = "Этот референс используется только для нейтрального общения.";
     const thumbnail = p.delta_appearance && p.delta_appearance_thumbnail;
     const savedImage = document.querySelector("#saved-appearance-image");
     // The server produces only bounded JPEG data URLs; do not load external URLs.
@@ -391,7 +399,7 @@
     document.querySelector("#appearance").textContent = "Не удалось загрузить облик.";
     appearanceFail(error);
   });
-  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
+  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
   document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });
 </script>
 </body>

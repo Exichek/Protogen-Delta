@@ -130,6 +130,9 @@ class PersistentUserState:
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
     content_mode: ContentMode = "unselected"
+    age_restricted: bool = False
+    delta_reference_restricted: bool = False
+    roleplay_stopword: str = "стоп"
     history: tuple[ConversationTurn, ...] = ()
     history_updated_at: float = 0.0
 
@@ -146,6 +149,10 @@ class UserStatePersistence(Protocol):
         user_id: StateKey,
     ) -> PersistentUserState | None:
         """Загрузить долгоживущее состояние пользователя."""
+        ...
+
+    async def restrict_conversations(self, user_id: int) -> None:
+        """Закрыть групповые сцены после явного возрастного заявления."""
         ...
 
     async def save(
@@ -165,6 +172,9 @@ class UserStatePersistence(Protocol):
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
+        age_restricted: bool = False,
+        delta_reference_restricted: bool = False,
+        roleplay_stopword: str = "стоп",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -205,6 +215,9 @@ class UserState:
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
     content_mode: ContentMode = "unselected"
+    age_restricted: bool = False
+    delta_reference_restricted: bool = False
+    roleplay_stopword: str = "стоп"
     history_updated_at: float = 0.0
     emotions_updated_at: float = field(
         default=0.0,
@@ -275,7 +288,10 @@ class UserState:
         self.delta_appearance = ""
         self.delta_species = ""
         self.delta_appearance_thumbnail = ""
+        self.delta_reference_restricted = False
+        self.roleplay_stopword = "стоп"
         self.content_mode = "unselected"
+        self.age_restricted = False
 
 
 class UserStateStore:
@@ -355,6 +371,24 @@ class UserStateStore:
         async with self._coordinate(user_id, exclusive=False):
             yield
 
+    async def restrict_minor(self, user_id: int) -> None:
+        """Согласованно закрыть сцены этого пользователя во всех чатах."""
+        async with self._coordinate(user_id, exclusive=True):
+            async with self._use_state(user_id) as state:
+                state.age_restricted = True
+                state.content_mode = "soft"
+                state.stop_roleplay()
+            if self._persistence is not None:
+                await self._persistence.restrict_conversations(user_id)
+            for key in tuple(self._states):
+                if isinstance(key, tuple) and key[1] == user_id:
+                    state = self.get(key)
+                    state.age_restricted = True
+                    state.content_mode = "soft"
+                    state.stop_roleplay()
+                    state.history.clear()
+                    state.history_updated_at = 0.0
+
     @asynccontextmanager
     async def _coordinate(
         self, key: StateKey, *, exclusive: bool
@@ -419,6 +453,9 @@ class UserStateStore:
                                     delta_species=state.delta_species,
                                     delta_appearance_thumbnail=state.delta_appearance_thumbnail,
                                     content_mode=state.content_mode,
+                                    age_restricted=state.age_restricted,
+                                    delta_reference_restricted=state.delta_reference_restricted,
+                                    roleplay_stopword=state.roleplay_stopword,
                                     history=tuple(state.history),
                                     history_updated_at=state.history_updated_at,
                                     history_expires_before=self._wall_clock()
@@ -442,6 +479,7 @@ class UserStateStore:
             return private
         state = self.get((chat_id, user_id))
         state.content_mode = private.content_mode
+        state.age_restricted = private.age_restricted
         return state
 
     def mark_history_updated(self, state: UserState) -> None:
@@ -463,6 +501,7 @@ class UserStateStore:
             async with self._use_state(key) as state:
                 if chat_id is not None:
                     state.content_mode = private.content_mode
+                    state.age_restricted = private.age_restricted
                 yield state
 
     def remove(self, user_id: StateKey) -> bool:
@@ -558,6 +597,11 @@ class UserStateStore:
                 persistent_state.delta_appearance_thumbnail
             )
             state.content_mode = persistent_state.content_mode
+            state.age_restricted = persistent_state.age_restricted
+            state.delta_reference_restricted = (
+                persistent_state.delta_reference_restricted
+            )
+            state.roleplay_stopword = persistent_state.roleplay_stopword
             state.history = deque(persistent_state.history, maxlen=self._history_limit)
             state.history_updated_at = persistent_state.history_updated_at
         else:

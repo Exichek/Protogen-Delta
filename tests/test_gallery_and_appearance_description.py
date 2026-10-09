@@ -128,6 +128,7 @@ def test_age_toggle_updates_commands_help_and_menu(tmp_path: Path) -> None:
         for mode in ("adult", "soft", "adult"):
             callback.data = f"adult:{mode}:7"
             await adult.callback_query.handlers[0].callback(callback)
+            mode = states.get(7).content_mode
             hook.assert_awaited_with(7, mode)
             assert (
                 "randomart" in [command.command for command in commands_for_mode(mode)]

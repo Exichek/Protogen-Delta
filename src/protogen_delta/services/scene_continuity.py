@@ -53,6 +53,8 @@ def scene_continuity_context(state: UserState, *, has_images: bool) -> str:
         )
     return (
         rules
+        + "\nСтоп-слово текущей сцены: "
+        + repr(state.roleplay_stopword)
         + "\nНедавние действия по авторам: "
         + json.dumps(events, ensure_ascii=False)
     )

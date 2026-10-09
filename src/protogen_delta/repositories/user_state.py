@@ -60,6 +60,9 @@ class UserStateRepository:
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
+        age_restricted: bool = False,
+        delta_reference_restricted: bool = False,
+        roleplay_stopword: str = "стоп",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -81,6 +84,9 @@ class UserStateRepository:
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
             content_mode=content_mode,
+            age_restricted=age_restricted,
+            delta_reference_restricted=delta_reference_restricted,
+            roleplay_stopword=roleplay_stopword,
             history=history,
             history_updated_at=history_updated_at,
             history_expires_before=history_expires_before,
@@ -95,6 +101,18 @@ class UserStateRepository:
             self._delete_sync,
             user_id,
         )
+
+    async def restrict_conversations(self, user_id: int) -> None:
+        def update() -> None:
+            with closing(sqlite3.connect(self._path)) as db, db:
+                db.execute(
+                    "UPDATE conversation_states SET roleplay_active=0, roleplay_fetishes='[]', "
+                    "arousal=0, content_mode='soft', age_restricted=1, history='[]', "
+                    "history_updated_at=0 WHERE user_id=?",
+                    (user_id,),
+                )
+
+        await asyncio.to_thread(update)
 
     @staticmethod
     def _scope(key: StateKey) -> tuple[str, str, tuple[int, ...]]:
@@ -133,6 +151,9 @@ class UserStateRepository:
                         delta_species,
                         delta_appearance_thumbnail,
                         content_mode,
+                        age_restricted,
+                        delta_reference_restricted,
+                        roleplay_stopword,
                         history,
                         history_updated_at
                     FROM {table}
@@ -168,6 +189,9 @@ class UserStateRepository:
             delta_species,
             delta_appearance_thumbnail,
             content_mode,
+            age_restricted,
+            delta_reference_restricted,
+            roleplay_stopword,
             history,
             history_updated_at,
         ) = row
@@ -198,6 +222,9 @@ class UserStateRepository:
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
             content_mode=self._decode_content_mode(content_mode),
+            age_restricted=bool(age_restricted),
+            delta_reference_restricted=bool(delta_reference_restricted),
+            roleplay_stopword=roleplay_stopword,
             history=self._decode_history(history),
             history_updated_at=history_updated_at,
         )
@@ -219,6 +246,9 @@ class UserStateRepository:
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
         content_mode: ContentMode = "unselected",
+        age_restricted: bool = False,
+        delta_reference_restricted: bool = False,
+        roleplay_stopword: str = "стоп",
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -273,10 +303,13 @@ class UserStateRepository:
                         delta_species,
                         delta_appearance_thumbnail,
                         content_mode,
+                        age_restricted,
+                        delta_reference_restricted,
+                        roleplay_stopword,
                         history,
                         history_updated_at
                     )
-                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -296,7 +329,10 @@ class UserStateRepository:
                         delta_appearance = excluded.delta_appearance,
                         delta_species = excluded.delta_species,
                         delta_appearance_thumbnail = excluded.delta_appearance_thumbnail,
-                        content_mode = excluded.content_mode
+                        content_mode = excluded.content_mode,
+                        age_restricted = excluded.age_restricted,
+                        delta_reference_restricted = excluded.delta_reference_restricted,
+                        roleplay_stopword = excluded.roleplay_stopword
                         {history_update}
                     """,
                     (
@@ -320,6 +356,9 @@ class UserStateRepository:
                         delta_species,
                         delta_appearance_thumbnail,
                         content_mode,
+                        int(age_restricted),
+                        int(delta_reference_restricted),
+                        roleplay_stopword,
                         encoded_history,
                         history_updated_at,
                     ),
@@ -407,6 +446,9 @@ class UserStateRepository:
                     row[1] for row in connection.execute(f"PRAGMA table_info({table})")
                 }
                 for name, declaration in (
+                    ("age_restricted", "INTEGER NOT NULL DEFAULT 0"),
+                    ("delta_reference_restricted", "INTEGER NOT NULL DEFAULT 0"),
+                    ("roleplay_stopword", "TEXT NOT NULL DEFAULT 'стоп'"),
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
