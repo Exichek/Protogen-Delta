@@ -325,10 +325,8 @@ def test_unreadable_or_ambiguous_reference_preserves_previous_appearance(
             )
         )
     assert engine._user_states.get(7).delta_appearance == "Прежний облик"
-    prompt = model.chat.await_args.kwargs["system_prompt"]
-    assert "Не составляй смешанный облик" in prompt
-    assert "Не заполняй каждый пункт" in prompt
-    assert "2000" in prompt
+    assert model.chat.await_args.kwargs["json_response"] is True
+    assert model.chat.await_args.kwargs["tool_names"] == frozenset()
 
 
 def test_text_appearance_busy_preserves_state() -> None:

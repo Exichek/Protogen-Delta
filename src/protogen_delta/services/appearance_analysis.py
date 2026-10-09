@@ -13,14 +13,25 @@ from protogen_delta.services.appearance_description import (
     APPEARANCE_LIMIT,
     validate_description,
 )
-from protogen_delta.services.deepseek import DeepSeekService, ImageInput
+from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.species_catalog import SpeciesCatalog, species_catalog
+from protogen_delta.services.visual_model import VisualModel
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
+            # Some JSON-mode replies repeat a selection flag with the same
+            # boolean value. This carries no conflicting selection; all other
+            # duplicates, including false/true or bool/int, remain invalid.
+            if (
+                key in {"readable", "ambiguous"}
+                and type(value) is bool
+                and type(result[key]) is bool
+                and result[key] is value
+            ):
+                continue
             raise ValueError("Duplicate visual JSON field")
         result[key] = value
     return result
@@ -98,7 +109,7 @@ def _region(trait: str) -> str:
 
 class AppearanceAnalyzer:
     def __init__(
-        self, model: DeepSeekService, catalog: SpeciesCatalog | None = None
+        self, model: VisualModel, catalog: SpeciesCatalog | None = None
     ) -> None:
         self._model = model
         self._catalog = catalog or species_catalog()
@@ -180,6 +191,7 @@ class AppearanceAnalyzer:
                 user_message=json.dumps(payload, ensure_ascii=False),
                 images=images,
                 tool_names=frozenset(),
+                json_response=True,
             )
             verified = _json(raw)
         description = verified.get("description")

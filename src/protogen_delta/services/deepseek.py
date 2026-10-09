@@ -318,6 +318,7 @@ class DeepSeekService:
                 ],
                 response_format={"type": "json_object"},
                 max_tokens=4096,
+                temperature=0,
                 **self._provider_options,
             )
         except OpenAIError as error:
@@ -339,15 +340,24 @@ class DeepSeekService:
         history: Sequence[ConversationTurn] = (),
         images: Sequence[ImageInput] = (),
         tool_names: Collection[str] | None = None,
+        *,
+        json_response: bool = False,
     ) -> str:
-        """Получить ответ модели с учётом истории и приложенных изображений."""
+        """Получить ответ; JSON-режим исключает внешние инструменты."""
+        if json_response and tool_names:
+            raise ValueError("JSON-ответ нельзя объединять с внешними инструментами")
+        json_options: dict[str, Any] = (
+            {"response_format": {"type": "json_object"}, "temperature": 0}
+            if json_response
+            else {}
+        )
         messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
                 "content": system_prompt,
             }
         ]
-        if self._tools is not None:
+        if self._tools is not None and not json_response:
             inventory = ", ".join(self._tools.registry.tools)
             messages.append(
                 {
@@ -413,7 +423,11 @@ class DeepSeekService:
         started_at = perf_counter()
 
         try:
-            if self._tools is not None and (tool_names is None or tool_names):
+            if (
+                self._tools is not None
+                and not json_response
+                and (tool_names is None or tool_names)
+            ):
                 async with asyncio.timeout(45):
                     return await self._chat_with_tools(
                         messages,
@@ -426,6 +440,7 @@ class DeepSeekService:
                 model=self._model,
                 messages=messages,
                 max_tokens=4096,
+                **json_options,
                 **self._provider_options,
             )
         except TimeoutError as error:
@@ -436,7 +451,7 @@ class DeepSeekService:
             raise _translate_openai_error(error) from error
 
         _log_request_metrics(
-            request_type="chat",
+            request_type="appearance_verification" if json_response else "chat",
             started_at=started_at,
             response=response,
             system_prompt=system_prompt,

@@ -231,10 +231,8 @@ def test_response_engine_saves_delta_appearance_from_image() -> None:
     main_prompt = deepseek_mock.chat.await_args_list[1].kwargs["system_prompt"]
     assert "Текущий облик Дельты" in main_prompt
     assert "назначил этот облик" in main_prompt
-    assert (
-        "Мускулатуру отмечай лишь"
-        in deepseek_mock.chat.await_args_list[0].kwargs["system_prompt"]
-    )
+    assert deepseek_mock.chat.await_args_list[0].kwargs["json_response"] is True
+    assert "json_response" not in deepseek_mock.chat.await_args_list[1].kwargs
     assert "не отвергай его" in main_prompt
 
 

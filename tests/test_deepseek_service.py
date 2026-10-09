@@ -163,6 +163,7 @@ def test_visual_observation_is_json_without_chat_history_or_tools(
     kwargs = create.await_args.kwargs
     assert kwargs["response_format"] == {"type": "json_object"}
     assert kwargs["max_tokens"] == 4096 and "tools" not in kwargs
+    assert kwargs["temperature"] == 0
     assert kwargs["messages"] == [
         {"role": "system", "content": "PRIVATE RULES"},
         {
@@ -180,6 +181,48 @@ def test_visual_observation_is_json_without_chat_history_or_tools(
     assert "appearance_observation" in caplog.text and "history_turns=0" in caplog.text
     assert "PRIVATE" not in caplog.text and "base64" not in caplog.text
     assert service.snapshot()["completed"] == 1
+
+
+def test_visual_verification_json_omits_tool_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, _, create, _ = _create_service(monkeypatch)
+    service._tools = Mock()
+    image = ImageInput(b"private image", "image/png")
+    create.return_value = _create_response('{"description":"Visible details"}')
+    with caplog.at_level(logging.INFO, logger="protogen_delta.services.deepseek"):
+        reply = asyncio.run(
+            service.chat(
+                "PRIVATE JSON RULES",
+                "PRIVATE PAYLOAD",
+                images=(image,),
+                tool_names=frozenset(),
+                json_response=True,
+            )
+        )
+    assert reply == '{"description":"Visible details"}'
+    assert create.await_args is not None
+    kwargs = create.await_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert kwargs["temperature"] == 0 and kwargs["max_tokens"] == 4096
+    assert len(kwargs["messages"]) == 2 and "tools" not in kwargs
+    assert kwargs["messages"][0] == {"role": "system", "content": "PRIVATE JSON RULES"}
+    assert "appearance_verification" in caplog.text
+    assert "PRIVATE" not in caplog.text and "base64" not in caplog.text
+
+
+def test_json_response_rejects_external_tools_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _, create, _ = _create_service(monkeypatch)
+    with pytest.raises(ValueError, match="инструментами"):
+        asyncio.run(
+            service.chat(
+                "JSON rules", "input", tool_names={"web_search"}, json_response=True
+            )
+        )
+    create.assert_not_awaited()
 
 
 def test_visual_observation_timeout_preserves_metrics_and_translates_error(

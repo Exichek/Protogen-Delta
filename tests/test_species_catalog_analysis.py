@@ -15,6 +15,7 @@ from test_miniapp import TOKEN, _signed_init_data
 from test_miniapp_appearance import _image
 from test_response_engine import _create_engine
 
+from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.miniapp.server import MiniAppServer
@@ -54,6 +55,38 @@ def test_catalog_bounded_sources_and_diagnostic_ranking() -> None:
         {"head_canine": "present", "fur": "present", "tail_bushy": "present"}
     )
     assert "sergal" in {c.id for c in canine}
+
+
+def test_identical_selection_flag_duplicate_does_not_discard_reference() -> None:
+    async def scenario() -> None:
+        model = _model()
+        raw = observation("head_wedge", "fur")
+        model.analyze_visual_features.return_value = raw[:-1] + ', "ambiguous": false}'
+        result = await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"image", "image/png"),), "caption", "Neutral"
+        )
+        assert result.species.species_id == "sergal"
+        assert model.chat.await_count == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ['"ambiguous":true', '"ambiguous":0', '"observations":"different"'],
+)
+def test_conflicting_or_nonboolean_duplicate_never_reaches_verifier(extra: str) -> None:
+    async def scenario() -> None:
+        model = _model()
+        raw = observation("head_wedge", "fur")
+        model.analyze_visual_features.return_value = raw[:-1] + "," + extra + "}"
+        with pytest.raises(ValueError, match="Duplicate"):
+            await AppearanceAnalyzer(model).analyze(
+                (ImageInput(b"image", "image/png"),), "caption", "Neutral"
+            )
+        model.chat.assert_not_awaited()
+
+    asyncio.run(scenario())
 
 
 def test_confusing_minor_traits_do_not_exclude_head_alternative() -> None:
@@ -139,11 +172,15 @@ def test_two_passes_reinspect_same_images_with_selected_cards_only() -> None:
             == images
         )
         assert model.chat.await_args.kwargs["tool_names"] == frozenset()
+        assert model.chat.await_args.kwargs["json_response"] is True
         payload = json.loads(model.chat.await_args.kwargs["user_message"])
         assert len(payload["cards"]) <= 5
         assert payload["preliminary"]["features"][0]["trait"] == "head_wedge"
         assert "wickerbeast" not in {c["id"] for c in payload["cards"]}
-        assert "исправляй его ошибки" in model.chat.await_args.kwargs["system_prompt"]
+        assert (
+            load_prompt("appearance_verification")
+            in model.chat.await_args.kwargs["system_prompt"]
+        )
 
     asyncio.run(scenario())
 
