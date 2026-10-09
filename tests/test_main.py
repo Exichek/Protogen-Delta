@@ -473,10 +473,11 @@ def test_main_builds_application_and_starts_polling(
         main_module.UsersRepository,
     )
     assert start_router_call.kwargs["deepseek"] is deepseek_mock
-    assert start_router_call.kwargs["first_start_prompt"] == "START GREETING PROMPT"
-    assert (
-        start_router_call.kwargs["repeat_start_prompt"]
-        == "REPEAT START GREETING PROMPT"
+    assert start_router_call.kwargs["first_start_prompt"].startswith(
+        "START GREETING PROMPT\n\n"
+    )
+    assert start_router_call.kwargs["repeat_start_prompt"].startswith(
+        "REPEAT START GREETING PROMPT\n\n"
     )
 
     create_reset_router_mock.assert_called_once()

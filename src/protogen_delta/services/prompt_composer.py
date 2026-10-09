@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from protogen_delta.core.user_state import ConversationTurn
 
@@ -109,15 +109,11 @@ class PromptComposer:
             parts.append(self._sections.technical)
         if has_images:
             parts.append(self._sections.visual)
-        if (
-            has_images
-            or (is_roleplay and has_custom_appearance)
-            or re.search(
-                r"\b(?:фурр\w*|фурсон\w*|сергал\w*|sergal\w*|протоген\w*|protogen\w*|"
-                r"примаген\w*|primagen\w*|синт(?:ы|а|ов)?|synth\w*|акул\w*|shark\w*|дракон\w*|dragon\w*)\b",
-                user_message,
-                re.I,
-            )
+        if has_images or re.search(
+            r"\b(?:фурр\w*|фурсон\w*|сергал\w*|sergal\w*|протоген\w*|protogen\w*|"
+            r"примаген\w*|primagen\w*|синт(?:ы|а|ов)?|synth\w*|акул\w*|shark\w*|дракон\w*|dragon\w*)\b",
+            user_message,
+            re.I,
         ):
             parts.append(self._sections.species)
         if is_roleplay:
@@ -230,12 +226,44 @@ class PromptComposer:
         used = 0
         for turn in reversed(recent):
             size = len(turn.user_message) + len(turn.assistant_message)
+            if not kept and size > history_chars:
+                user_limit = min(len(turn.user_message), (history_chars + 1) // 2)
+                assistant_limit = min(
+                    len(turn.assistant_message), history_chars - user_limit
+                )
+                user_limit = min(
+                    len(turn.user_message), history_chars - assistant_limit
+                )
+                kept.append(
+                    replace(
+                        turn,
+                        user_message=PromptComposer._shorten(
+                            turn.user_message, user_limit
+                        ),
+                        assistant_message=PromptComposer._shorten(
+                            turn.assistant_message, assistant_limit
+                        ),
+                    )
+                )
+                break
             if kept and used + size > history_chars:
                 break
             kept.append(turn)
             used += size
         kept.reverse()
         return HistorySelection(summary=summary, recent=tuple(kept))
+
+    @staticmethod
+    def _shorten(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        if limit == 0:
+            return ""
+        marker = "\n[…сокращено…]\n" if limit >= 30 else "…"
+        remaining = limit - len(marker)
+        head = (remaining + 1) // 2
+        tail = remaining - head
+        return text[:head] + marker + (text[-tail:] if tail else "")
 
     @staticmethod
     def _join(parts: list[str]) -> str:

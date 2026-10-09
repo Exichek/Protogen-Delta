@@ -153,6 +153,44 @@ def test_temporary_appearance_does_not_load_conflicting_base_body() -> None:
         _composer().compose("*подхожу*", is_roleplay=True, has_custom_appearance=True)
         == "CORE\n\nRP"
     )
+
+
+def test_large_latest_turn_is_bounded_without_changing_saved_history() -> None:
+    from protogen_delta.core.user_state import ConversationTurn
+
+    original = ConversationTurn(
+        "USER START " + "u" * 9000 + " USER END",
+        "ANSWER START " + "a" * 9000 + " ANSWER END",
+    )
+    selected = _composer().compact_history([original], history_chars=8000)
+    assert len(selected.recent) == 1
+    shortened = selected.recent[0]
+    assert len(shortened.user_message) + len(shortened.assistant_message) == 8000
+    assert shortened.user_message.startswith("USER START")
+    assert shortened.user_message.endswith("USER END")
+    assert shortened.assistant_message.startswith("ANSWER START")
+    assert shortened.assistant_message.endswith("ANSWER END")
+    assert "сокращено" in shortened.user_message
+    assert len(original.user_message) > 9000 and len(original.assistant_message) > 9000
+
+
+@pytest.mark.parametrize("limit", [1, 2, 20, 8000])
+@pytest.mark.parametrize("user,answer", [("u" * 9000, "short"), ("", "a" * 9000)])
+def test_history_budget_includes_marker_and_short_field_rebalance(
+    limit: int, user: str, answer: str
+) -> None:
+    from protogen_delta.core.user_state import ConversationTurn
+
+    selected = _composer().compact_history(
+        [ConversationTurn(user, answer)], history_chars=limit
+    )
+    assert (
+        sum(
+            len(turn.user_message) + len(turn.assistant_message)
+            for turn in selected.recent
+        )
+        <= limit
+    )
     assert (
         _composer().compose(
             "Как ты выглядишь?", is_roleplay=False, has_custom_appearance=True

@@ -41,6 +41,7 @@ from protogen_delta.services.appearance_analysis import (
 from protogen_delta.services.appearance_description import (
     validate_description,
 )
+from protogen_delta.services.capabilities import is_capability_overview
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
@@ -137,6 +138,7 @@ class ResponseEngineConfig:
     history_chars: int = 8000
     history_live_turns: int = 4
     capabilities_context: str = ""
+    capabilities_overview_context: str = ""
     adult_conversation_prompt: str = ""
     female_body_prompt: str = ""
     adult_body_male_prompt: str = ""
@@ -449,7 +451,14 @@ class ResponseEngine:
         if (contains_rp_action or contains_rp_intent) and not stopped:
             user_state.roleplay_active = True
 
-        technical_topic = (
+        capability_overview = bool(
+            self._config.capabilities_overview_context
+            and is_capability_overview(user_message)
+            and not images
+            and attachment_text is None
+            and model_message_override is None
+        )
+        technical_topic = capability_overview or (
             PromptComposer.is_technical(user_message) and not contains_rp_action
         )
         is_rp = user_state.roleplay_active and not technical_topic
@@ -475,7 +484,14 @@ class ResponseEngine:
                 user_message,
             )
 
-        if self._interaction_classifier is not None:
+        insult_type: InsultType
+        mood: MoodType | None
+        if capability_overview:
+            # The complete, benign functional question needs no paid sentiment
+            # classification. Mixed requests, insults and attachments keep it.
+            insult_type, mood = "none", "neutral"
+            user_state.mood = "neutral"
+        elif self._interaction_classifier is not None:
             interaction = await self._interaction_classifier.classify(user_message)
             insult_type, mood = interaction.insult, interaction.mood
             if mood is not None:
@@ -499,7 +515,7 @@ class ResponseEngine:
 
         fact_context: list[str] = []
         fact_update = FactsUpdate()
-        if self._memory is not None and use_personal_facts:
+        if self._memory is not None and use_personal_facts and not capability_overview:
             try:
                 if (
                     not is_rp
@@ -549,7 +565,7 @@ class ResponseEngine:
             )
 
         memory_context: list[str] = []
-        if self._memory is not None and use_personal_facts:
+        if self._memory is not None and use_personal_facts and not capability_overview:
             try:
                 memory_context = await self._memory.context(
                     user_id,
@@ -563,7 +579,7 @@ class ResponseEngine:
                 )
 
         scene_context: list[str] = []
-        if user_state.delta_appearance:
+        if user_state.delta_appearance and not capability_overview:
             (scene_context if is_rp else state_context).append(
                 "Текущий облик Дельты, выбранный пользователем: "
                 + repr(user_state.delta_appearance[:2000])
@@ -830,7 +846,11 @@ class ResponseEngine:
             )
 
         history = self._prompt_composer.compact_history(
-            tuple(user_state.history) if remember_history else (),
+            (
+                tuple(user_state.history)
+                if remember_history and not capability_overview
+                else ()
+            ),
             live_turns=self._config.history_live_turns,
             history_chars=self._config.history_chars,
         )
@@ -897,6 +917,7 @@ class ResponseEngine:
                     r"\.(?:py|js|ts|sh|ps1|sql|log|json)$", attachment_name, re.I
                 )
             ),
+            capability_overview=capability_overview,
         )
 
         try:
@@ -1187,6 +1208,7 @@ class ResponseEngine:
         adult_context: bool = False,
         female_configuration: bool = False,
         technical_context: bool = False,
+        capability_overview: bool = False,
     ) -> str:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._prompt_composer.compose(
@@ -1351,6 +1373,11 @@ class ResponseEngine:
         examples = self._prompt_composer.examples(is_roleplay=is_rp)
         if examples:
             prompt += "\n\n" + examples
+        if capability_overview:
+            prompt += (
+                "\n\n## Обзор возможностей для текущего вопроса\n"
+                + self._config.capabilities_overview_context
+            )
         return prompt
 
     @staticmethod

@@ -19,7 +19,7 @@ from protogen_delta.services.prompt_composer import PromptComposer, PromptSectio
         ("Кто такие сергалы?", False, False, False, True),
         ("Shark or dolphin?", False, False, False, True),
         ("Опиши", True, False, False, True),
-        ("Идём", False, True, True, True),
+        ("Идём", False, True, True, False),
     ],
 )
 def test_species_section_is_thematic(

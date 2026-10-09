@@ -11,8 +11,13 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
+from protogen_delta.core.capability_formatting import format_capability_headings
 from protogen_delta.core.chat_scope import chat_scope_options
-from protogen_delta.core.message_utils import reply_delay_seconds, split_reply
+from protogen_delta.core.message_utils import (
+    reply_delay_seconds,
+    split_message,
+    split_reply,
+)
 from protogen_delta.services.response_engine import ReplyDelivery
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -72,11 +77,12 @@ def create_reply_delivery(
     *,
     user_id: int | None = None,
     context_tags: Collection[str] = (),
+    format_capabilities: bool = False,
 ) -> ReplyDelivery:
     """Создать отправку ответа частями со статусом набора и паузами."""
 
     async def deliver(reply: str) -> None:
-        chunks = split_reply(reply)
+        chunks = split_message(reply) if format_capabilities else split_reply(reply)
         started = perf_counter()
         sent = 0
         outcome = "failed"
@@ -94,7 +100,11 @@ def create_reply_delivery(
                             exc_info=True,
                         )
                     await sleep(reply_delay_seconds(chunk))
-                await message.answer(chunk)
+                if format_capabilities:
+                    text, entities = format_capability_headings(chunk)
+                    await message.answer(text, entities=entities, parse_mode=None)
+                else:
+                    await message.answer(chunk)
                 sent += 1
             if sticker_service is not None and user_id is not None:
                 try:
