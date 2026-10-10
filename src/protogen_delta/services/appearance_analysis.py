@@ -131,6 +131,7 @@ class AppearanceAnalyzer:
         content_rules: str,
         *,
         species_hint: str = "",
+        subject: Literal["delta", "user"] = "delta",
     ) -> AppearanceResult:
         if not images:
             raise ValueError("No appearance image")
@@ -203,13 +204,15 @@ class AppearanceAnalyzer:
                     raise ValueError("Invalid visual feature")
                 states[feature["trait"]] = feature["state"]
             cards = self._catalog.select(states, hint)
-            prompt = (
-                load_prompt("appearance_extraction").format(
-                    limit=APPEARANCE_LIMIT, content_rules=content_rules
-                )
-                + "\n\n"
-                + load_prompt("appearance_identification")
+            extraction = load_prompt("appearance_extraction").format(
+                limit=APPEARANCE_LIMIT, content_rules=content_rules
             )
+            if subject == "user":
+                extraction = extraction.replace(
+                    "сохранённого облика Дельты",
+                    "сохранённого RP-персонажа пользователя",
+                )
+            prompt = extraction + "\n\n" + load_prompt("appearance_identification")
             prompt += "\n\n" + load_prompt("appearance_verification")
             payload = {
                 "caption": user_message,

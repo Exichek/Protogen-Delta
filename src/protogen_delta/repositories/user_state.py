@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import cast
 
+from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.user_state import (
     ContentMode,
@@ -59,6 +60,9 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_appearance_profile: str = "",
+        roleplay_character_thumbnail: str = "",
+        roleplay_character_restricted: bool = False,
         content_mode: ContentMode = "unselected",
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
@@ -83,6 +87,9 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_appearance_profile=delta_appearance_profile,
+            roleplay_character_thumbnail=roleplay_character_thumbnail,
+            roleplay_character_restricted=bool(roleplay_character_restricted),
             content_mode=content_mode,
             age_restricted=age_restricted,
             delta_reference_restricted=delta_reference_restricted,
@@ -150,6 +157,9 @@ class UserStateRepository:
                         delta_appearance,
                         delta_species,
                         delta_appearance_thumbnail,
+                        delta_appearance_profile,
+                        roleplay_character_thumbnail,
+                        roleplay_character_restricted,
                         content_mode,
                         age_restricted,
                         delta_reference_restricted,
@@ -188,6 +198,9 @@ class UserStateRepository:
             delta_appearance,
             delta_species,
             delta_appearance_thumbnail,
+            delta_appearance_profile,
+            roleplay_character_thumbnail,
+            roleplay_character_restricted,
             content_mode,
             age_restricted,
             delta_reference_restricted,
@@ -198,6 +211,10 @@ class UserStateRepository:
 
         species = AppearanceSpecies.decode(delta_species)
         delta_species = species.encode() if species else ""
+        profile = AppearanceProfile.decode(delta_appearance_profile)
+        delta_appearance_profile = (
+            profile.encode() if profile and delta_appearance else ""
+        )
         return PersistentUserState(
             emotions=EmotionalState(
                 warmth=warmth,
@@ -221,6 +238,9 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_appearance_profile=delta_appearance_profile,
+            roleplay_character_thumbnail=roleplay_character_thumbnail,
+            roleplay_character_restricted=bool(roleplay_character_restricted),
             content_mode=self._decode_content_mode(content_mode),
             age_restricted=bool(age_restricted),
             delta_reference_restricted=bool(delta_reference_restricted),
@@ -245,6 +265,9 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_appearance_profile: str = "",
+        roleplay_character_thumbnail: str = "",
+        roleplay_character_restricted: bool = False,
         content_mode: ContentMode = "unselected",
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
@@ -266,6 +289,10 @@ class UserStateRepository:
         )
         species = AppearanceSpecies.decode(delta_species)
         delta_species = species.encode() if species else ""
+        profile = AppearanceProfile.decode(delta_appearance_profile)
+        delta_appearance_profile = (
+            profile.encode() if profile and delta_appearance else ""
+        )
         encoded_history = json.dumps(
             [
                 {
@@ -302,6 +329,9 @@ class UserStateRepository:
                         delta_appearance,
                         delta_species,
                         delta_appearance_thumbnail,
+                        delta_appearance_profile,
+                        roleplay_character_thumbnail,
+                        roleplay_character_restricted,
                         content_mode,
                         age_restricted,
                         delta_reference_restricted,
@@ -309,7 +339,8 @@ class UserStateRepository:
                         history,
                         history_updated_at
                     )
-                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -329,6 +360,9 @@ class UserStateRepository:
                         delta_appearance = excluded.delta_appearance,
                         delta_species = excluded.delta_species,
                         delta_appearance_thumbnail = excluded.delta_appearance_thumbnail,
+                        delta_appearance_profile = excluded.delta_appearance_profile,
+                        roleplay_character_thumbnail = excluded.roleplay_character_thumbnail,
+                        roleplay_character_restricted = excluded.roleplay_character_restricted,
                         content_mode = excluded.content_mode,
                         age_restricted = excluded.age_restricted,
                         delta_reference_restricted = excluded.delta_reference_restricted,
@@ -355,6 +389,9 @@ class UserStateRepository:
                         delta_appearance,
                         delta_species,
                         delta_appearance_thumbnail,
+                        delta_appearance_profile,
+                        roleplay_character_thumbnail,
+                        int(roleplay_character_restricted),
                         content_mode,
                         int(age_restricted),
                         int(delta_reference_restricted),
@@ -451,6 +488,9 @@ class UserStateRepository:
                     ("roleplay_stopword", "TEXT NOT NULL DEFAULT 'стоп'"),
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
+                    ("delta_appearance_profile", "TEXT NOT NULL DEFAULT ''"),
+                    ("roleplay_character_thumbnail", "TEXT NOT NULL DEFAULT ''"),
+                    ("roleplay_character_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
                     ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
                 ):

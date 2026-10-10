@@ -187,7 +187,7 @@ def test_miniapp_profile_api_rejects_unknown_or_invalid_settings() -> None:
             too_long = await client.patch(
                 "/api/profile",
                 headers=headers,
-                json={"roleplay_character": "x" * 1001},
+                json={"roleplay_character": "x" * 2001},
             )
             assert too_long.status == 400
             long_preferences = await client.patch(
