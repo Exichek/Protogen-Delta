@@ -12,6 +12,7 @@ class AppearanceSpecies:
     source: Literal["user", "vision"]
     status: Literal["declared", "probable", "hybrid", "unknown"]
     evidence: tuple[str, ...] = ()
+    visual_check: Literal["match", "conflict", "unconfirmed"] | None = None
 
     def encode(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -40,6 +41,9 @@ class AppearanceSpecies:
                     for trait in item.get("evidence", [])
                 )
                 or (item["source"] == "user") != (item["status"] == "declared")
+                or item.get("visual_check")
+                not in {None, "match", "conflict", "unconfirmed"}
+                or (item.get("visual_check") is not None and item["source"] != "user")
             ):
                 return None
             return cls(
@@ -48,6 +52,7 @@ class AppearanceSpecies:
                 item["source"],
                 item["status"],
                 tuple(item.get("evidence", [])),
+                item.get("visual_check"),
             )
         except ValueError, RecursionError, TypeError:
             return None
