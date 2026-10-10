@@ -142,10 +142,11 @@ class SpeciesCatalog:
         # A mammalian-looking muzzle or head appendage can hide an anthro
         # shark design. Keep a marine alternative available to the second
         # visual pass, even when the first pass missed the fins or gills.
-        # This is a comparison candidate, never an inferred species.
+        # A visible tail fin also warrants this comparison when its plane
+        # is unclear. This is a candidate, never an inferred species.
         shark = self.cards.get("shark")
         if (
-            present & {"head_canine", "long_ears"}
+            present & {"head_canine", "long_ears", "tail_fin"}
             and shark is not None
             and shark.auto_detect
             and shark not in selected

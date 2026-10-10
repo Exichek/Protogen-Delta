@@ -91,6 +91,32 @@ def test_catalog_auto_detect_setting_requires_boolean(value: object) -> None:
         SpeciesCatalog(data)
 
 
+def test_generic_tail_fin_survives_unknown_plane_and_species() -> None:
+    async def scenario() -> None:
+        model = _model()
+        raw = json.loads(observation("tail_fin"))
+        raw["features"].extend(
+            {"trait": key, "state": "uncertain", "evidence": "Plane hidden by angle"}
+            for key in ("tail_fin_vertical", "tail_fin_horizontal")
+        )
+        model.analyze_visual_features.return_value = json.dumps(raw)
+        model.chat.return_value = verified("На хвосте тёмный раздвоенный плавник.")
+        result = await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"synthetic", "image/png"),), "Облик", "Neutral"
+        )
+        payload = json.loads(model.chat.await_args.kwargs["user_message"])
+        assert payload["preliminary"]["features"][0]["trait"] == "tail_fin"
+        assert result.species.status == "unknown"
+        assert "раздвоенный плавник" in result.description
+        assert {c.id for c in species_catalog().select({"tail_fin": "present"})} == {
+            "unknown",
+            "hybrid",
+            "shark",
+        }
+
+    asyncio.run(scenario())
+
+
 def test_clothing_regions_reach_verifier_without_voting_for_species() -> None:
     async def scenario() -> None:
         model = _model()
