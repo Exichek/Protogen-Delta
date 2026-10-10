@@ -297,6 +297,11 @@ async def main() -> None:
         )
         response_engine = ResponseEngine(
             deepseek=deepseek,
+            appearance_model=(
+                deepseek.for_appearance()
+                if settings.llm_provider == "deepseek"
+                else deepseek
+            ),
             insult_classifier=insult_classifier,
             mood_classifier=mood_classifier,
             fetish_role_classifier=fetish_role_classifier,

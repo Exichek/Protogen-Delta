@@ -134,7 +134,7 @@ class AppearanceAnalyzer:
             raise ValueError("No appearance image")
         hint = validate_species_hint(species_hint) or declared_species(user_message)
         # Shared budget for both SDK calls. Cancellation preserves the old card.
-        async with asyncio.timeout(50):
+        async with asyncio.timeout(120):
             raw = await self._model.analyze_visual_features(
                 system_prompt=load_prompt("appearance_observation")
                 + "\n\nОграничения описания:\n"

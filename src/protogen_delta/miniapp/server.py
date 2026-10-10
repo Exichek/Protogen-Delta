@@ -364,7 +364,7 @@ class MiniAppServer:
                 raise web.HTTPTooManyRequests(
                     text="Сейчас обрабатываю другие картинки. Попробуй чуть позже."
                 ) from error
-            async with asyncio.timeout(60):
+            async with asyncio.timeout(150):
                 data = await request.clone(
                     client_max_size=MAX_APPEARANCE_BYTES + 1
                 ).read()

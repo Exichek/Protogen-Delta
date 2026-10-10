@@ -43,10 +43,12 @@ def test_require_string_dict_rejects_invalid_value() -> None:
 
 
 @pytest.mark.parametrize("pack_available", [None, True, False])
+@pytest.mark.parametrize("provider", ["deepseek", "openrouter"])
 def test_main_builds_application_and_starts_polling(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     pack_available: bool | None,
+    provider: str,
 ) -> None:
     """main должен собрать приложение и запустить polling."""
     settings = Settings(
@@ -56,6 +58,7 @@ def test_main_builds_application_and_starts_polling(
         art_chat_id=-1001234567890,
         deepseek_base_url="https://api.test.local",
         deepseek_model="test-model",
+        llm_provider=provider,
         log_level="INFO",
         data_dir=tmp_path,
         admin_ids=frozenset({123}),
@@ -509,6 +512,15 @@ def test_main_builds_application_and_starts_polling(
         reset_response_engine,
         main_module.ResponseEngine,
     )
+    if provider == "deepseek":
+        deepseek_mock.for_appearance.assert_called_once_with()
+        assert (
+            reset_response_engine._appearance_model
+            is deepseek_mock.for_appearance.return_value
+        )
+    else:
+        deepseek_mock.for_appearance.assert_not_called()
+        assert reset_response_engine._appearance_model is deepseek_mock
     assert isinstance(
         reset_users_repository,
         main_module.UsersRepository,
