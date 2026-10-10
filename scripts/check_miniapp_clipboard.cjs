@@ -42,6 +42,8 @@ async function main() {
         if(options.method==='GET' && window.loadState==='failed'){window.failStatus=401;window.failMessage='initData просрочен';}
         if(!window.failStatus && options.method==='POST' && url==='/api/profile/appearance')
           Object.assign(window.testProfile,{delta_appearance:'Новый облик',delta_appearance_thumbnail:window.thumbnail});
+        if(!window.failStatus && options.method==='POST' && url==='/api/profile/character/appearance')
+          Object.assign(window.testProfile,{roleplay_character:'Новый персонаж',roleplay_character_thumbnail:window.thumbnail});
         if(!window.failStatus && options.method==='DELETE' && url==='/api/profile/appearance')
           Object.assign(window.testProfile,{delta_appearance:'',delta_appearance_thumbnail:''});
         if(!window.failStatus && options.method==='PATCH' && url==='/api/profile/appearance') {
@@ -190,6 +192,98 @@ async function main() {
     assert.equal(await page.locator('#apply-appearance').isDisabled(), false);
     await page.close(); checks+=7;
 
+    for (const [mime, ext] of [['image/png','png'], ['image/jpeg','jpg'], ['image/webp','webp']]) {
+      page = await fresh(true);
+      await page.evaluate(() => window.paste());
+      const deltaPreview = await page.locator('#appearance-preview').getAttribute('src');
+      await page.locator('#character-upload summary').click();
+      await page.evaluate(type => window.setClipboard('image',type), mime);
+      await page.locator('#paste-character').click();
+      await page.waitForFunction(() => !document.querySelector('#paste-character').disabled);
+      assert.equal(await page.locator('#character-file-name').textContent(), `Картинка из буфера.${ext}`);
+      await page.waitForFunction(() => document.querySelector('#character-preview').naturalWidth > 0);
+      assert.equal(await page.locator('#appearance-preview').getAttribute('src'), deltaPreview);
+      assert.equal(await page.evaluate(() => window.calls.length), 1, 'Selecting an image never uploads it');
+      await page.locator('#character-species').fill('Дракон');
+      await page.locator('#character-notes').fill('Справа');
+      await page.locator('#analyze-character').click();
+      await page.waitForFunction(() => document.querySelector('#character-status').textContent.startsWith('Твой облик сохранён'));
+      const calls = await page.evaluate(() => window.calls);
+      assert.equal(calls[1].url, '/api/profile/character/appearance');
+      assert.equal(calls[1].type, mime);
+      assert.deepEqual(JSON.parse(decodeURIComponent(calls[1].headers['X-Appearance-Options'])), {species:'Дракон',notes:'Справа'});
+      assert.equal(await page.locator('#character').inputValue(), 'Новый персонаж');
+      assert.equal(await page.locator('#appearance').textContent(), 'Сергал');
+      assert.equal(await selected(page), 'pasted.png');
+      assert.equal(await page.locator('#character-preview').isVisible(), false);
+      assert.equal(await page.locator('#saved-character').isVisible(), true);
+      await page.close();checks++;
+    }
+    page = await fresh();
+    await page.locator('#character-upload summary').click();
+    assert.equal(await page.evaluate(() => window.paste('#character-input-area')), true);
+    assert.equal(await page.locator('#character-file-name').textContent(), 'pasted.png');
+    assert.equal(await selected(page), '');
+    assert.equal(await page.evaluate(() => window.paste('#character')), false, 'Text fields keep ordinary paste');
+    await page.evaluate(() => window.paste('#character-input-area','image/gif'));
+    assert.match(await page.locator('#character-status').textContent(), /JPEG, PNG или WebP/);
+    assert.equal(await page.locator('#character-file-name').textContent(), 'pasted.png');
+    await page.evaluate(() => window.paste('#character-input-area','image/png',20*1024*1024+1));
+    assert.match(await page.locator('#character-status').textContent(), /до 20 МБ/);
+    await page.evaluate(() => {
+      const data=new DataTransfer();data.items.add(window.makeImage('image/png','user-dropped.png'));
+      document.querySelector('#character-input-area').dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+    });
+    assert.equal(await page.locator('#character-file-name').textContent(), 'user-dropped.png');
+    await page.locator('#character').fill('Несохранённое описание');
+    await page.evaluate(() => {window.failStatus=502;window.failMessage='Ошибка разбора';});
+    await page.locator('#analyze-character').click();
+    await page.waitForFunction(() => document.querySelector('#character-status').textContent==='Ошибка разбора');
+    assert.equal(await page.locator('#character-file-name').textContent(), 'user-dropped.png');
+    assert.equal(await page.locator('#character-preview').isVisible(), true);
+    assert.equal(await page.locator('#character').inputValue(), 'Несохранённое описание');
+    await page.close();checks+=5;
+    for (const mode of ['denied','text','unavailable']) {
+      page = await fresh();
+      await page.locator('#character-upload summary').click();
+      await page.evaluate(() => window.paste('#character-input-area'));
+      await page.evaluate(mode => {
+        if(mode==='unavailable')Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});
+        else window.setClipboard(mode);
+      },mode);
+      await page.locator('#paste-character').click();
+      await page.waitForFunction(() => !document.querySelector('#paste-character').disabled);
+      assert.match(await page.locator('#character-status').textContent(), mode==='text' ? /Скопируй само изображение/ : /Ctrl\+V/);
+      assert.equal(await page.locator('#character-file-name').textContent(), 'pasted.png');
+      assert.equal(await selected(page), '');
+      await page.close();checks++;
+    }
+    page = await fresh();
+    await page.locator('#character-upload summary').click();
+    await page.evaluate(() => window.setClipboard('pending'));
+    await page.locator('#paste-character').click();
+    await page.waitForFunction(() => Boolean(window.finishRead));
+    assert.equal(await page.locator('#paste-appearance').isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.paste('#appearance-input-area')), false);
+    await page.locator('#character-upload summary').click();
+    await page.evaluate(() => window.finishRead());
+    await waitClipboard(page);
+    assert.equal(await page.locator('#character-file-name').textContent(), '');
+    assert.equal(await selected(page), '');
+    assert.match(await page.locator('#character-status').textContent(), /Вставка отменена/);
+    await page.close();checks++;
+
+    page = await fresh();
+    await page.locator('#character-upload summary').click();
+    assert.equal(await page.evaluate(() => window.paste('body')), true);
+    assert.equal(await page.locator('#character-file-name').textContent(), 'pasted.png');
+    assert.equal(await selected(page), '');
+    await page.locator('#appearance-input-area').focus();
+    assert.equal(await page.evaluate(() => window.paste('body')), true);
+    assert.equal(await selected(page), 'pasted.png');
+    assert.equal(await page.locator('#character-file-name').textContent(), 'pasted.png');
+    await page.close();checks++;
+
     for (const mode of ['denied','text','unavailable']) {
       page = await fresh();
       await page.evaluate(() => window.paste());
@@ -248,6 +342,7 @@ async function main() {
       await page.close(); checks++;
     }
     page = await fresh(true);
+    await page.locator('#character-upload summary').click();
     for (const theme of ['dark','light']) {
       await page.evaluate(theme => {
         if(theme==='light')document.body.style.cssText='--tg-theme-text-color:#222;--tg-theme-bg-color:#fff;--tg-theme-hint-color:#667;--tg-theme-secondary-bg-color:#f2f3f5;--tg-theme-button-color:#538cc0';
@@ -258,9 +353,12 @@ async function main() {
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth), false, 'No horizontal overflow');
         const box=await page.locator('#paste-appearance').boundingBox();
         assert.ok(box.width>100 && box.height>=54 && box.x>=0 && box.x+box.width<=width);
+        const characterBox=await page.locator('#paste-character').boundingBox();
+        assert.ok(characterBox.width>100 && characterBox.height>=54 && characterBox.x>=0 && characterBox.x+characterBox.width<=width);
         if(process.env.MINIAPP_SCREENSHOTS) {
           fs.mkdirSync(process.env.MINIAPP_SCREENSHOTS,{recursive:true});
           await page.locator('section[aria-labelledby="appearance-title"]').screenshot({path:path.join(process.env.MINIAPP_SCREENSHOTS,`clipboard-${theme}-${width}.png`)});
+          await page.locator('#character-upload').screenshot({path:path.join(process.env.MINIAPP_SCREENSHOTS,`character-clipboard-${theme}-${width}.png`)});
         }
         checks++;
       }
