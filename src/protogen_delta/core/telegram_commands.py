@@ -59,7 +59,7 @@ async def set_commands(bot: Bot, mini_app_url: str | None = None) -> None:
     await bot.set_my_commands(commands_for_mode())
     menu_button = (
         MenuButtonWebApp(
-            text="Открыть Дельту",
+            text="RP и функции",
             web_app=WebAppInfo(url=mini_app_url),
         )
         if mini_app_url is not None
