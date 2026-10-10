@@ -71,6 +71,41 @@ def test_identical_selection_flag_duplicate_does_not_discard_reference() -> None
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("head_trait", ["head_canine", "long_ears"])
+def test_marine_alternative_survives_first_pass_mammalian_head(
+    head_trait: str,
+) -> None:
+    cards = species_catalog().select(
+        {head_trait: "present", "fur": "present", "organic_ears": "present"}
+    )
+    assert "shark" in {card.id for card in cards}
+    assert {"unknown", "hybrid"}.issubset({card.id for card in cards})
+    assert len(cards) <= 6
+
+
+def test_verifier_can_repair_missed_marine_traits() -> None:
+    async def scenario() -> None:
+        model = _model()
+        model.analyze_visual_features.return_value = observation(
+            "head_canine", "organic_ears", "fur"
+        )
+        reply = json.loads(verified("Гладкая кожа, жабры и хвостовой плавник."))
+        reply.update(
+            species_id="shark",
+            status="probable",
+            evidence_traits=["gills", "tail_fin_vertical"],
+        )
+        model.chat.return_value = json.dumps(reply)
+        result = await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"synthetic", "image/png"),), "Описание внешности", "Neutral"
+        )
+        assert result.species.species_id == "shark"
+        assert model.chat.await_count == 1
+        assert result.species.status == "probable"
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "extra",
     ['"ambiguous":true', '"ambiguous":0', '"observations":"different"'],
@@ -107,7 +142,8 @@ def test_confusing_minor_traits_do_not_exclude_head_alternative() -> None:
         )
     )
     assert {"sergal", "canine", "wickerbeast"}.issubset({c.id for c in cards})
-    assert len(cards) == 5
+    assert len(cards) == 6
+    assert "shark" in {card.id for card in cards}
 
 
 def test_invalid_catalog_fails_at_load() -> None:
