@@ -89,6 +89,8 @@ def _region(trait: str) -> str:
         "visor",
         "no_visible_pupils",
         "face_mask",
+        "horns",
+        "antlers",
     }:
         return "head"
     if "ears" in trait or trait == "ear_tufts":
