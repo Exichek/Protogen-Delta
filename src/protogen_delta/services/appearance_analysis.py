@@ -213,7 +213,10 @@ class AppearanceAnalyzer:
                 "caption": user_message,
                 "author_species": hint,
                 "preliminary": observed,
-                "cards": [card.prompt_data() for card in cards],
+                "cards": [
+                    card.prompt_data(allowed_ids={item.id for item in cards})
+                    for card in cards
+                ],
                 "trait_vocabulary": self._catalog.traits,
             }
             raw = await self._model.chat(

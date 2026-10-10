@@ -19,8 +19,9 @@ class SpeciesCard:
     features: tuple[str, ...]
     exceptions: tuple[str, ...]
     sources: tuple[dict[str, str], ...]
+    auto_detect: bool = True
 
-    def prompt_data(self) -> dict[str, Any]:
+    def prompt_data(self, *, allowed_ids: set[str] | None = None) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -32,7 +33,11 @@ class SpeciesCard:
                 trait for trait, weight in self.positive.items() if weight >= 3
             ],
             "exceptions": self.exceptions,
-            "confusable_with": self.confusable,
+            "confusable_with": tuple(
+                key
+                for key in self.confusable
+                if allowed_ids is None or key in allowed_ids
+            ),
             "sources": self.sources,
         }
 
@@ -56,7 +61,10 @@ class SpeciesCatalog:
                 features=tuple(item["features"]),
                 exceptions=tuple(item["exceptions"]),
                 sources=tuple(item["sources"]),
+                auto_detect=item.get("auto_detect", True),
             )
+            if type(card.auto_detect) is not bool:
+                raise ValueError("Invalid auto detection setting")
             if card.id in self.cards or not card.sources or not card.features:
                 raise ValueError("Invalid species card")
             if (card.positive.keys() | set(card.contradictions)) - self.traits.keys():
@@ -103,7 +111,9 @@ class SpeciesCatalog:
         selected = [
             card
             for card in ranked
-            if card.id not in {"hybrid", "unknown"} and score(card) > 0
+            if card.auto_detect
+            and card.id not in {"hybrid", "unknown"}
+            and score(card) > 0
         ][:2]
         hint = self.find(declared) if declared else None
         if hint and hint not in selected:
@@ -122,7 +132,11 @@ class SpeciesCatalog:
                 break
             for key in card.confusable:
                 alternative = self.cards[key]
-                if alternative not in selected and key not in {"hybrid", "unknown"}:
+                if (
+                    alternative.auto_detect
+                    and alternative not in selected
+                    and key not in {"hybrid", "unknown"}
+                ):
                     selected.append(alternative)
                     break
         # A mammalian-looking muzzle or head appendage can hide an anthro
@@ -133,6 +147,7 @@ class SpeciesCatalog:
         if (
             present & {"head_canine", "long_ears"}
             and shark is not None
+            and shark.auto_detect
             and shark not in selected
         ):
             selected.append(shark)

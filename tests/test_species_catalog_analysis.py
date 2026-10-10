@@ -57,6 +57,69 @@ def test_catalog_bounded_sources_and_diagnostic_ranking() -> None:
     assert "sergal" in {c.id for c in canine}
 
 
+@pytest.mark.parametrize(
+    "traits",
+    [
+        ("gills", "smooth_skin"),
+        ("fur", "large_ears", "dorsal_fin", "tail_fin_vertical"),
+        ("dorsal_fin", "tail_fin_vertical"),
+    ],
+)
+def test_manokit_only_enters_candidates_when_explicitly_declared(
+    traits: tuple[str, ...],
+) -> None:
+    catalog = species_catalog()
+    states = dict.fromkeys(traits, "present")
+    cards = catalog.select(states)
+    ids = {card.id for card in cards}
+    assert "shark" in ids and "manokit" not in ids
+    assert all(
+        "manokit" not in card.prompt_data(allowed_ids=ids)["confusable_with"]
+        for card in cards
+    )
+    assert "manokit" in {card.id for card in catalog.select(states, "Манокит")}
+    assert len(cards) <= 6
+
+
+@pytest.mark.parametrize("value", ["false", 0, None])
+def test_catalog_auto_detect_setting_requires_boolean(value: object) -> None:
+    from protogen_delta.config.json_loader import load_json
+
+    data = load_json("species_catalog.json")
+    data["cards"][0]["auto_detect"] = value
+    with pytest.raises(ValueError, match="auto detection"):
+        SpeciesCatalog(data)
+
+
+def test_clothing_regions_reach_verifier_without_voting_for_species() -> None:
+    async def scenario() -> None:
+        model = _model()
+        raw = json.loads(observation("gills", "tail_fin_vertical"))
+        raw["features"].extend(
+            {"trait": key, "state": "present", "evidence": "Visible cuff and seam"}
+            for key in ("armwear", "legwear", "footwear")
+        )
+        model.analyze_visual_features.return_value = json.dumps(raw)
+        model.chat.return_value = verified("Полосатые рукава и чулки.")
+        await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"synthetic", "image/png"),), "Облик", "Neutral"
+        )
+        payload = json.loads(model.chat.await_args.kwargs["user_message"])
+        assert {f["trait"] for f in payload["preliminary"]["features"][-3:]} == {
+            "armwear",
+            "legwear",
+            "footwear",
+        }
+        assert {c["id"] for c in payload["cards"]} == {
+            c.id
+            for c in species_catalog().select(
+                {"gills": "present", "tail_fin_vertical": "present"}
+            )
+        }
+
+    asyncio.run(scenario())
+
+
 def test_identical_selection_flag_duplicate_does_not_discard_reference() -> None:
     async def scenario() -> None:
         model = _model()
@@ -158,7 +221,10 @@ def test_negative_catalog_traits_reach_visual_verification() -> None:
         model.analyze_visual_features.return_value = observation("gills", "smooth_skin")
         model.chat.return_value = verified("Гладкий покров и жаберные щели.")
         await AppearanceAnalyzer(model).analyze(
-            (ImageInput(b"synthetic", "image/png"),), "Описание внешности", "Neutral"
+            (ImageInput(b"synthetic", "image/png"),),
+            "Описание внешности",
+            "Neutral",
+            species_hint="Манокит",
         )
         payload = json.loads(model.chat.await_args.kwargs["user_message"])
         manokit = next(card for card in payload["cards"] if card["id"] == "manokit")
