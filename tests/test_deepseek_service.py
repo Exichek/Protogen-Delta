@@ -105,6 +105,59 @@ def _create_request() -> Mock:
     return Mock()
 
 
+def test_appearance_reasoning_is_scoped_and_does_not_expose_thoughts(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, constructor, create, _ = _create_service(monkeypatch)
+    service._tools = Mock()
+    service._tools.registry.tools = ()
+    appearance = service.for_appearance()
+    constructor.return_value.with_options.assert_called_once_with(
+        timeout=60.0, max_retries=0
+    )
+    assert appearance._tools is None and service._tools is not None
+    response = _create_response('{"description":"Visible details"}')
+    response.choices[0].message.reasoning_content = "PRIVATE REASONING"
+    create.return_value = response
+    image = ImageInput(b"synthetic", "image/png")
+
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO, logger="protogen_delta.services.deepseek"):
+            first = await appearance.analyze_visual_features(
+                "JSON rules", "input", (image,)
+            )
+            second = await appearance.chat(
+                "JSON rules",
+                "input",
+                images=(image,),
+                tool_names=frozenset(),
+                json_response=True,
+            )
+            await service.chat(
+                "rules", "input", images=(image,), tool_names=frozenset()
+            )
+            await service.extract_user_facts("JSON rules", "input")
+        assert first == second == '{"description":"Visible details"}'
+
+    asyncio.run(scenario())
+    calls = create.await_args_list
+    assert len(calls) == 4
+    for request in calls[:2]:
+        assert request.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert request.kwargs["reasoning_effort"] == "high"
+        assert request.kwargs["max_tokens"] == 16384
+        assert request.kwargs["response_format"] == {"type": "json_object"}
+        assert "temperature" not in request.kwargs and "tools" not in request.kwargs
+        assert len(request.kwargs["messages"]) == 2
+    for request in calls[2:]:
+        assert request.kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+        assert "reasoning_effort" not in request.kwargs
+    assert calls[2].kwargs["max_tokens"] == 4096
+    assert "PRIVATE REASONING" not in caplog.text
+    assert appearance._metrics is service._metrics
+
+
 def test_fact_extraction_uses_bounded_json_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

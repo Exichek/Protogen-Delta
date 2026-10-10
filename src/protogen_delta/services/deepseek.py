@@ -5,6 +5,7 @@ import base64
 import logging
 import re
 from collections.abc import Collection, Sequence
+from copy import copy
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, cast
@@ -276,6 +277,8 @@ class DeepSeekService:
             max_retries=max_retries,
         )
         self._model = model
+        self._max_output_tokens = 4096
+        self._json_temperature: dict[str, Any] = {"temperature": 0}
         self._metrics = OperationMetrics()
         self._tools = tools
         self._provider_options: dict[str, Any] = (
@@ -286,6 +289,19 @@ class DeepSeekService:
 
     def snapshot(self) -> OperationSnapshot:
         return self._metrics.snapshot()
+
+    def for_appearance(self) -> "DeepSeekService":
+        """Отдельный режим двух проходов облика без изменения обычного клиента."""
+        model = copy(self)
+        model._client = self._client.with_options(timeout=60.0, max_retries=0)
+        model._tools = None
+        model._max_output_tokens = 16384
+        model._json_temperature = {}
+        model._provider_options = {
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "reasoning_effort": "high",
+        }
+        return model
 
     async def _complete(
         self, *, client: AsyncOpenAI | None = None, **kwargs: Any
@@ -317,8 +333,8 @@ class DeepSeekService:
                     {"role": "user", "content": content},
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=4096,
-                temperature=0,
+                max_tokens=self._max_output_tokens,
+                **self._json_temperature,
                 **self._provider_options,
             )
         except OpenAIError as error:
@@ -347,7 +363,7 @@ class DeepSeekService:
         if json_response and tool_names:
             raise ValueError("JSON-ответ нельзя объединять с внешними инструментами")
         json_options: dict[str, Any] = (
-            {"response_format": {"type": "json_object"}, "temperature": 0}
+            {"response_format": {"type": "json_object"}, **self._json_temperature}
             if json_response
             else {}
         )
@@ -439,7 +455,7 @@ class DeepSeekService:
             response = await self._complete(
                 model=self._model,
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=self._max_output_tokens,
                 **json_options,
                 **self._provider_options,
             )

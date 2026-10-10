@@ -146,6 +146,23 @@ def test_clothing_regions_reach_verifier_without_voting_for_species() -> None:
     asyncio.run(scenario())
 
 
+def test_appearance_assignment_uses_dedicated_model() -> None:
+    async def scenario() -> None:
+        engine, _, fast, *_ = _create_engine()
+        reasoning = _model()
+        engine._appearance_model = reasoning
+        await engine.set_delta_appearance_from_image(
+            42, ImageInput(b"synthetic", "image/png")
+        )
+        assert reasoning.analyze_visual_features.await_count == 1
+        assert reasoning.chat.await_count == 1
+        assert reasoning.chat.await_args.kwargs["json_response"] is True
+        fast.analyze_visual_features.assert_not_awaited()
+        fast.chat.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
 def test_identical_selection_flag_duplicate_does_not_discard_reference() -> None:
     async def scenario() -> None:
         model = _model()

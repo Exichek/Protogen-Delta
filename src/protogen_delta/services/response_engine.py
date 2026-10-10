@@ -71,6 +71,7 @@ from protogen_delta.services.prompt_composer import PromptComposer, PromptSectio
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.scene_continuity import scene_continuity_context
 from protogen_delta.services.state_context import build_state_context
+from protogen_delta.services.visual_model import VisualModel
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ class ResponseEngine:
         reply_transform: Callable[[int, str], str] | None = None,
         interaction_classifier: InteractionClassifier | None = None,
         creator_messages: CreatorMessageService | None = None,
+        appearance_model: VisualModel | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -177,6 +179,9 @@ class ResponseEngine:
             raise ValueError("RP-промпт не может быть пустым")
 
         self._deepseek = deepseek
+        self._appearance_model = (
+            appearance_model if appearance_model is not None else deepseek
+        )
         self._insult_classifier = insult_classifier
         self._mood_classifier = mood_classifier
         self._fetish_role_classifier = fetish_role_classifier
@@ -1132,7 +1137,7 @@ class ResponseEngine:
         if not hint and same_character and previous and previous.source == "user":
             hint = previous.name
         try:
-            result = await AppearanceAnalyzer(self._deepseek).analyze(
+            result = await AppearanceAnalyzer(self._appearance_model).analyze(
                 images, reference_caption, adult_details, species_hint=hint
             )
         except DeepSeekError, ValueError, TimeoutError, RecursionError:
