@@ -42,6 +42,7 @@
     #appearance { white-space:pre-wrap; overflow-wrap:anywhere; }
     #appearance-status { margin-top:12px; min-height:20px; font-size:14px; }
     #appearance-file-name { overflow-wrap:anywhere; font-size:13px; }
+    button.small-action { width:auto; padding:8px 12px; font-size:13px; margin-top:8px; }
     .tabs { display:grid; grid-template-columns:1fr 1fr; gap:10px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
     .tabs button { margin-top:0; opacity:.65; }
     .tabs button[aria-selected="true"] { opacity:1; }
@@ -116,6 +117,7 @@
     <div id="appearance-species-panel">
       <label for="appearance-species">Вид персонажа</label>
       <input id="appearance-species" type="text" maxlength="80" placeholder="Например, сергал. Можно оставить пустым">
+      <button id="save-appearance-species" class="secondary small-action" type="button" disabled>Сохранить вид</button>
       <label for="appearance-notes">Комментарий к референсу</label>
       <textarea id="appearance-notes" maxlength="400" rows="3" placeholder="Необязательно: голова внизу, хвост слева вверху; длинные чёрно-красные волосы"></textarea>
       <p class="muted">Подсказка для анализа этой картинки, до 400 символов.</p>
@@ -202,7 +204,7 @@
   const imageTypes = ["image/png", "image/jpeg", "image/webp"];
   const appearanceEditor = document.querySelector("#appearance-editor");
   const editText = document.querySelector("#appearance-edit-text");
-  let appearanceEditing = false, savedDescription = "", editOriginal = "";
+  let appearanceEditing = false, savedDescription = "", editOriginal = "", savedSpecies = null;
   let appearanceBusy = false, clipboardBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null, selectionRevision = 0;
   const updateAppearanceButtons = () => {
     const busy = appearanceBusy || clipboardBusy || appearanceEditing;
@@ -221,6 +223,8 @@
     appearanceMode.disabled = busy;
     descriptionInput.disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-species").disabled = busy || !appearanceEnabled;
+    const speciesValue = document.querySelector("#appearance-species").value.trim();
+    document.querySelector("#save-appearance-species").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || !speciesValue || (savedSpecies?.source === "user" && speciesValue === savedSpecies.name);
     document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
   };
@@ -229,6 +233,7 @@
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     const species = p.delta_species;
+    savedSpecies = species || null;
     // Keep the stored text unchanged for editing and optimistic concurrency.
     // Only remove the application-generated header from its presentation.
     let visibleDescription = savedDescription;
@@ -263,6 +268,17 @@
     document.querySelector("#appearance-file-name").textContent = "";
   };
   const appearanceFail = error => { appearanceStatus.className="error"; appearanceStatus.textContent = initData ? `Ошибка: ${error.message}` : "Открой панель кнопкой внутри Telegram."; };
+  document.querySelector("#appearance-species").addEventListener("input", updateAppearanceButtons);
+  document.querySelector("#save-appearance-species").addEventListener("click", async () => {
+    if (document.querySelector("#save-appearance-species").disabled) return;
+    const name = document.querySelector("#appearance-species").value.trim();
+    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Сохраняю вид…";
+    try {
+      const profile = await api("PATCH", {species:name,expected_appearance:savedDescription,expected_species:savedSpecies}, "/api/profile/appearance/species");
+      renderAppearance(profile); appearanceStatus.className="ok"; appearanceStatus.textContent="Вид сохранён. Это твоё уточнение.";
+    } catch(error) { appearanceFail(error); }
+    finally { appearanceBusy=false; updateAppearanceButtons(); }
+  });
   document.querySelector("#edit-appearance").addEventListener("click", () => {
     if (appearanceBusy || clipboardBusy || !customAppearance || !appearanceEnabled) return;
     editOriginal = savedDescription; editText.value = savedDescription;

@@ -263,6 +263,7 @@ def test_set_commands_configures_telegram_menu() -> None:
 
     assert [command.command for command in commands] == [
         "start",
+        "funcs",
         "menu",
         "e6",
         "rp",
@@ -277,12 +278,13 @@ def test_set_commands_configures_telegram_menu() -> None:
 
     assert [command.description for command in commands] == [
         "🚀 Познакомиться с Дельтой",
+        "📋 Все функции и команды",
         "⚙️ Панель возможностей",
         "🔎 Поиск артов e621 по тегам",
         "🎭 Управление RP — /rp off",
         "🔞 Выбрать возрастной режим",
         "🪪 Узнать Telegram ID",
-        "📥 Скачать видео или GIF из X",
+        "📥 Скачать публичное видео или GIF",
         "🔎 Найти источник арта (ответом)",
         "🧠 Мой постоянный профиль",
         "🧹 Полностью очистить память",

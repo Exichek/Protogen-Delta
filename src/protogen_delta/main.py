@@ -338,15 +338,15 @@ async def main() -> None:
             user_states=user_states,
             sticker_service=sticker_service,
             deepseek=deepseek,
-            first_start_prompt=first_start_prompt + "\n\n" + capabilities.summary,
-            repeat_start_prompt=repeat_start_prompt + "\n\n" + capabilities.summary,
+            first_start_prompt=first_start_prompt + "\n\n" + capabilities.greeting,
+            repeat_start_prompt=repeat_start_prompt + "\n\n" + capabilities.greeting,
         )
 
         async def on_mode_change(user_id: int, mode: ContentMode) -> None:
             async with user_states.use(user_id) as current_state:
                 await set_user_commands(bot, user_id, current_state.content_mode)
 
-        help_router = create_help_router(user_states)
+        help_router = create_help_router(user_states, settings=settings)
         menu_router = create_menu_router(settings.mini_app_url, user_states)
         utilities_router = create_utilities_router(bot)
 

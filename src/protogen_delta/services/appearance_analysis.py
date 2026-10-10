@@ -50,6 +50,8 @@ def _json(text: str) -> dict[str, Any]:
 
 
 def validate_species_hint(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Название вида должно быть текстом.")
     value = value.strip()
     if value and not re.fullmatch(r"[\w\-' А-Яа-яЁё]{1,80}", value):
         raise ValueError("Название вида: до 80 букв, цифр, пробелов или дефисов.")
