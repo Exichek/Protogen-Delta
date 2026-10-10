@@ -213,7 +213,7 @@
     if (!response.ok) {
       const message = await response.text();
       if (response.status === 401) throw new Error(message === "initData просрочен"
-        ? "Срок доступа к панели истёк. Полностью закрой Mini App и открой заново через «Открыть Дельту»."
+        ? "Срок доступа к панели истёк. Полностью закрой Mini App и открой заново через «RP и функции»."
         : "Не удалось подтвердить доступ. Полностью закрой панель и открой заново кнопкой бота внутри Telegram.");
       throw new Error(message || `HTTP ${response.status}`);
     }
