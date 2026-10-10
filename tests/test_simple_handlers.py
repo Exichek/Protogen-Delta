@@ -12,7 +12,7 @@ from aiogram.types import Message
 
 import protogen_delta.handlers.unknown_command as unknown_command_module
 from protogen_delta.core.rate_limiter import UserRateLimiter
-from protogen_delta.handlers.help import HELP_TEXT, create_help_router
+from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.rp import (
     RP_ALREADY_DISABLED_REPLY,
     RP_DISABLED_REPLY,
@@ -26,6 +26,7 @@ from protogen_delta.handlers.unknown_command import (
     UNKNOWN_COMMAND_REPLIES,
     create_unknown_command_router,
 )
+from protogen_delta.services.functions_catalog import functions_text
 from protogen_delta.services.response_engine import (
     ReplyDelivery,
     ResponseBusyError,
@@ -102,7 +103,8 @@ def test_help_handler_sends_help_text() -> None:
     )
 
     answer_mock.assert_awaited_once_with(
-        HELP_TEXT.replace("/randomart – 🎨 Случайный арт\n", ""),
+        functions_text(),
+        parse_mode=None,
     )
 
 

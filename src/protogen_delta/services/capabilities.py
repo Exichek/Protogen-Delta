@@ -27,6 +27,7 @@ def is_capability_overview(message: str) -> bool:
 class ApplicationCapabilities:
     summary: str
     overview: str
+    greeting: str = ""
 
 
 def build_capabilities(settings: Settings) -> ApplicationCapabilities:
@@ -99,4 +100,12 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
             "Функции используют текущий возрастной режим и личные настройки.",
         )
     )
-    return ApplicationCapabilities(summary, overview)
+    greeting = (
+        "Возможности для краткого приветствия: общение, помощь с текстами и кодом, "
+        "разбор присланных картинок и документов, RP по желанию пользователя. "
+        "Команды и полный список функций собраны в /funcs. "
+        "Выбери две-три возможности и вплети их в живую речь."
+    )
+    if settings.brave_search_api_key:
+        greeting += " Можно упомянуть поиск информации с источниками."
+    return ApplicationCapabilities(summary, overview, greeting)

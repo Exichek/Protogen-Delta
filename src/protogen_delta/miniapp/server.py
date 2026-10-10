@@ -128,6 +128,9 @@ class MiniAppServer:
                 web.post("/api/profile/appearance", self._upload_appearance),
                 web.put("/api/profile/appearance", self._set_text_appearance),
                 web.patch("/api/profile/appearance", self._set_text_appearance),
+                web.patch(
+                    "/api/profile/appearance/species", self._set_appearance_species
+                ),
                 web.delete("/api/profile/appearance", self._reset_appearance),
                 web.get("/health", self._health),
                 web.post("/api/tools/{tool}", self._run_tool),
@@ -477,6 +480,52 @@ class MiniAppServer:
             async with self._user_states.use(user.id) as state:
                 payload = self._profile(state, user)
             return web.json_response(payload, headers={"Cache-Control": "no-store"})
+        finally:
+            self._appearance_pending.discard(user.id)
+
+    async def _set_appearance_species(self, request: web.Request) -> web.Response:
+        """Применить вид к собственному сохранённому облику, без новой картинки."""
+        user = self._authenticate(request)
+        if self._response_engine is None:
+            raise web.HTTPServiceUnavailable(text="Смена облика сейчас недоступна.")
+        if user.id in self._appearance_pending:
+            raise web.HTTPConflict(text="Облик уже обрабатывается. Подожди немного.")
+        self._appearance_pending.add(user.id)
+        try:
+            try:
+                payload = await request.json()
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload)
+                    != {"species", "expected_appearance", "expected_species"}
+                    or not isinstance(payload["expected_appearance"], str)
+                    or not 1 <= len(payload["expected_appearance"]) <= 2000
+                ):
+                    raise ValueError("Нужны вид и исходная версия облика.")
+                hint = validate_species_hint(payload["species"])
+                expected = payload["expected_species"]
+                previous = None
+                if expected is not None:
+                    if not isinstance(expected, dict):
+                        raise ValueError("Некорректная исходная версия вида.")
+                    previous = AppearanceSpecies.decode(json.dumps(expected))
+                    if previous is None:
+                        raise ValueError("Некорректная исходная версия вида.")
+                await self._response_engine.set_delta_species(
+                    user.id,
+                    hint,
+                    expected_appearance=payload["expected_appearance"],
+                    expected_species=previous,
+                )
+            except (ValueError, RecursionError) as error:
+                raise web.HTTPBadRequest(text=str(error)) from error
+            except ResponseBusyError as error:
+                raise web.HTTPConflict(
+                    text="Бот ещё отвечает в чате. Попробуй после ответа."
+                ) from error
+            async with self._user_states.use(user.id) as state:
+                result = self._profile(state, user)
+            return web.json_response(result, headers={"Cache-Control": "no-store"})
         finally:
             self._appearance_pending.discard(user.id)
 

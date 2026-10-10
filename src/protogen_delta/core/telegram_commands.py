@@ -23,12 +23,15 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
     """Показать общую коллекцию только подтвердившим совершеннолетие."""
     commands = [
         BotCommand(command="start", description="🚀 Познакомиться с Дельтой"),
+        BotCommand(command="funcs", description="📋 Все функции и команды"),
         BotCommand(command="menu", description="⚙️ Панель возможностей"),
         BotCommand(command="e6", description="🔎 Поиск артов e621 по тегам"),
         BotCommand(command="rp", description="🎭 Управление RP — /rp off"),
         BotCommand(command="adult", description="🔞 Выбрать возрастной режим"),
         BotCommand(command="id", description="🪪 Узнать Telegram ID"),
-        BotCommand(command="download", description="📥 Скачать видео или GIF из X"),
+        BotCommand(
+            command="download", description="📥 Скачать публичное видео или GIF"
+        ),
         BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
         BotCommand(command="memory", description="🧠 Мой постоянный профиль"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),

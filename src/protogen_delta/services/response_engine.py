@@ -70,6 +70,7 @@ from protogen_delta.services.mood import MoodClassifier, MoodType
 from protogen_delta.services.prompt_composer import PromptComposer, PromptSections
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.scene_continuity import scene_continuity_context
+from protogen_delta.services.species_catalog import species_catalog
 from protogen_delta.services.state_context import build_state_context
 from protogen_delta.services.visual_model import VisualModel
 
@@ -1089,6 +1090,65 @@ class ResponseEngine:
                         else ""
                     )
             return description
+        finally:
+            self._delivering_users.remove(user_id)
+
+    async def set_delta_species(
+        self,
+        user_id: int,
+        name: str,
+        *,
+        expected_appearance: str,
+        expected_species: AppearanceSpecies | None,
+    ) -> str:
+        """Сохранить явное уточнение вида без повторного визуального запроса."""
+        hint = validate_species_hint(name)
+        if not hint:
+            raise ValueError("Укажи вид персонажа.")
+        if user_id in self._delivering_users:
+            raise ResponseBusyError
+        self._delivering_users.add(user_id)
+        try:
+            async with self._user_states.use_conversation(user_id) as state:
+                previous = AppearanceSpecies.decode(state.delta_species)
+                if (
+                    not state.delta_appearance
+                    or state.delta_appearance != expected_appearance
+                    or previous != expected_species
+                ):
+                    raise ValueError(
+                        "Облик или вид уже изменился. Открой панель заново."
+                    )
+                body = state.delta_appearance
+                if previous is not None:
+                    header = (
+                        "Вид со слов пользователя: " + previous.name + ". "
+                        if previous.source == "user"
+                        else ("Вероятно, " if previous.status == "probable" else "")
+                        + previous.name
+                        + ". "
+                    )
+                    if body.startswith(header):
+                        header_length = len(header)
+                        body = body[header_length:]
+                description = validate_description(
+                    "Вид со слов пользователя: " + hint + ". " + body
+                )
+                card = species_catalog().find(hint)
+                metadata = AppearanceSpecies(
+                    hint,
+                    card.id if card else None,
+                    "user",
+                    "declared",
+                    visual_check="unconfirmed",
+                )
+                state.delta_appearance = description
+                state.delta_species = metadata.encode()
+                if reference_is_child(hint):
+                    state.delta_reference_restricted = True
+                if state.delta_reference_restricted:
+                    state.stop_roleplay()
+                return description
         finally:
             self._delivering_users.remove(user_id)
 
