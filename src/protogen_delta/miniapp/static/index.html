@@ -86,6 +86,7 @@
   </section>
   <section class="card" aria-labelledby="appearance-title">
     <b id="appearance-title">Текущий облик Дельты</b>
+    <p class="muted" id="appearance-species-status" hidden></p>
     <p class="muted" id="appearance">Загружаю облик…</p>
     <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
     <button id="edit-appearance" class="clipboard-button" type="button" hidden>Редактировать описание</button>
@@ -112,7 +113,6 @@
     </div>
     <p id="appearance-image-hint" class="muted">JPEG, PNG или WebP до 20 МБ.</p>
     <div id="appearance-species-panel">
-      <p class="muted" id="appearance-species-status"></p>
       <label for="appearance-species">Вид персонажа</label>
       <input id="appearance-species" type="text" maxlength="80" placeholder="Например, сергал. Можно оставить пустым">
       <label><input id="appearance-same-character" type="checkbox"> Обновить картинку того же персонажа</label>
@@ -223,7 +223,15 @@
     savedDescription = p.delta_appearance || "";
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
-    document.querySelector("#appearance").textContent = p.delta_appearance || "Базовый облик";
+    const species = p.delta_species;
+    // Keep the stored text unchanged for editing and optimistic concurrency.
+    // Only remove the application-generated header from its presentation.
+    let visibleDescription = savedDescription;
+    if (species && typeof species.name === "string") {
+      const header = species.source === "user" ? `Вид со слов пользователя: ${species.name}. ` : species.status === "probable" ? `Вероятно, ${species.name}. ` : `${species.name}. `;
+      if (visibleDescription.startsWith(header)) visibleDescription = visibleDescription.slice(header.length);
+    }
+    document.querySelector("#appearance").textContent = visibleDescription || (customAppearance ? savedDescription : "Базовый облик");
     document.querySelector("#appearance-empty-hint").hidden = customAppearance;
     if (p.delta_reference_restricted) appearanceStatus.textContent = "Этот референс используется только для нейтрального общения.";
     const thumbnail = p.delta_appearance && p.delta_appearance_thumbnail;
@@ -232,8 +240,9 @@
     const hasThumbnail = typeof thumbnail === "string" && thumbnail.length <= 90000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(thumbnail);
     if (hasThumbnail) savedImage.src = thumbnail; else savedImage.removeAttribute("src");
     document.querySelector("#saved-appearance").hidden = !hasThumbnail;
-    const species = p.delta_species;
-    document.querySelector("#appearance-species-status").textContent = species ? `${species.source === "user" ? "Вид со слов пользователя" : species.status === "probable" ? "Предполагаемый вид" : "Определение вида"}: ${species.name}` : "";
+    const speciesStatus = document.querySelector("#appearance-species-status");
+    speciesStatus.hidden = !customAppearance || !species;
+    speciesStatus.textContent = !species ? "" : species.status === "unknown" ? "Вид пока не определён" : species.source === "user" ? `Вид: ${species.name} · указан тобой` : species.status === "hybrid" ? "Смешанный или авторский дизайн · по изображению" : `Вид: ${species.name} · по изображению`;
     updateAppearanceButtons();
   };
   const clearSelection = () => {
