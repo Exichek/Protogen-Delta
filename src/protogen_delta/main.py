@@ -531,6 +531,7 @@ async def main() -> None:
             bot=bot,
             deepseek=deepseek,
             repository=memories_repository,
+            user_states=user_states,
             system_prompt=core_prompt,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
