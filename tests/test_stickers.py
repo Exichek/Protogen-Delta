@@ -412,3 +412,41 @@ def test_admin_pack_import_reports_results(tmp_path: Path) -> None:
         assert "позже" in _answer_text(failure_answer)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "restriction",
+    [
+        "age_restricted",
+        "delta_reference_restricted",
+        "roleplay_character_restricted",
+        "character",
+    ],
+)
+def test_reference_age_marker_also_filters_adult_stickers(
+    tmp_path: Path, restriction: str
+) -> None:
+    repository = StickersRepository(tmp_path)
+    repository.upsert(_entry("restricted-reaction", "playful", rating="adult"))
+    states = UserStateStore()
+    state = states.get(42)
+    state.content_mode = "adult"
+    if restriction == "character":
+        state.roleplay_character = "Ребёнок"
+    else:
+        setattr(state, restriction, True)
+    bot = AsyncMock(spec=Bot)
+    service = ContextualStickerService(
+        cast(Bot, bot), repository, states, min_replies=1, chance=1
+    )
+    assert not service.is_available(42)
+    assert "нет доступных" in service.capabilities_context(42)
+    assert not asyncio.run(
+        service.maybe_send(chat_id=42, user_id=42, context_text="uwu")
+    )
+    bot.send_sticker.assert_not_awaited()
+    repository.upsert(_entry("ordinary-reaction", "playful"))
+    assert service.is_available(42)
+    assert asyncio.run(service.maybe_send(chat_id=42, user_id=42, context_text="uwu"))
+    assert bot.send_sticker.await_args is not None
+    assert bot.send_sticker.await_args.kwargs["sticker"] == "file-ordinary-reaction"
