@@ -27,6 +27,7 @@ class SpeciesCard:
             "category": self.category,
             "features": self.features,
             "supporting_traits": list(self.positive),
+            "contradicting_traits": self.contradictions,
             "diagnostic_traits": [
                 trait for trait, weight in self.positive.items() if weight >= 3
             ],

@@ -106,6 +106,67 @@ def test_verifier_can_repair_missed_marine_traits() -> None:
     asyncio.run(scenario())
 
 
+def test_horns_and_wings_support_two_different_visible_regions() -> None:
+    async def scenario() -> None:
+        model = _model()
+        model.analyze_visual_features.return_value = observation(
+            "horns", "wings_membrane"
+        )
+        reply = json.loads(verified("Рога на голове и перепончатые крылья."))
+        reply.update(
+            species_id="dragon",
+            status="probable",
+            evidence_traits=["horns", "wings_membrane"],
+        )
+        model.chat.return_value = json.dumps(reply)
+        result = await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"synthetic", "image/png"),), "Описание внешности", "Neutral"
+        )
+        assert result.species.species_id == "dragon"
+        assert model.analyze_visual_features.await_count == model.chat.await_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_two_head_traits_do_not_count_as_two_regions() -> None:
+    async def scenario() -> None:
+        from protogen_delta.config.json_loader import load_json
+
+        value = load_json("species_catalog.json")
+        dragon = next(card for card in value["cards"] if card["id"] == "dragon")
+        dragon["positive"]["head_wedge"] = 1
+        model = _model()
+        model.analyze_visual_features.return_value = observation("horns", "head_wedge")
+        reply = json.loads(verified("Клиновидная голова с рогами."))
+        reply.update(
+            species_id="dragon",
+            status="probable",
+            evidence_traits=["horns", "head_wedge"],
+        )
+        model.chat.return_value = json.dumps(reply)
+        with pytest.raises(ValueError, match="Insufficient distinguishing evidence"):
+            await AppearanceAnalyzer(model, SpeciesCatalog(value)).analyze(
+                (ImageInput(b"synthetic", "image/png"),), "Описание головы", "Neutral"
+            )
+
+    asyncio.run(scenario())
+
+
+def test_negative_catalog_traits_reach_visual_verification() -> None:
+    async def scenario() -> None:
+        model = _model()
+        model.analyze_visual_features.return_value = observation("gills", "smooth_skin")
+        model.chat.return_value = verified("Гладкий покров и жаберные щели.")
+        await AppearanceAnalyzer(model).analyze(
+            (ImageInput(b"synthetic", "image/png"),), "Описание внешности", "Neutral"
+        )
+        payload = json.loads(model.chat.await_args.kwargs["user_message"])
+        manokit = next(card for card in payload["cards"] if card["id"] == "manokit")
+        assert manokit["contradicting_traits"] == ["gills"]
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "extra",
     ['"ambiguous":true', '"ambiguous":0', '"observations":"different"'],
