@@ -4,7 +4,9 @@
       "file_id": "AgADLqYAAmTTIUo",
       "file_unique_id": "AgADLqYAAmTTIUo",
       "name": "hi_sticker2",
-      "tags": ["greeting"],
+      "tags": [
+        "greeting"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -12,7 +14,9 @@
       "file_id": "AgADwqkAAq9DGUo",
       "file_unique_id": "AgADwqkAAq9DGUo",
       "name": "hi_sticker3",
-      "tags": ["greeting"],
+      "tags": [
+        "greeting"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -20,7 +24,10 @@
       "file_id": "AgADEqYAAlwkIEo",
       "file_unique_id": "AgADEqYAAlwkIEo",
       "name": "harmful_stiker",
-      "tags": ["refusal", "angry"],
+      "tags": [
+        "refusal",
+        "angry"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -28,7 +35,10 @@
       "file_id": "AgADTK8AApwNIUo",
       "file_unique_id": "AgADTK8AApwNIUo",
       "name": "harmful_stiker2",
-      "tags": ["error", "confused"],
+      "tags": [
+        "error",
+        "confused"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -36,7 +46,9 @@
       "file_id": "AgAD_qkAAo4pIUo",
       "file_unique_id": "AgAD_qkAAo4pIUo",
       "name": "boop_sticker",
-      "tags": ["playful"],
+      "tags": [
+        "playful"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -44,7 +56,10 @@
       "file_id": "AgADaa8AAmA7IUo",
       "file_unique_id": "AgADaa8AAmA7IUo",
       "name": "beep",
-      "tags": ["happy", "playful"],
+      "tags": [
+        "happy",
+        "playful"
+      ],
       "rating": "safe",
       "set_name": "delta_sticksss"
     },
@@ -250,6 +265,60 @@
       "tags": [
         "cuddle",
         "horny"
+      ],
+      "rating": "adult",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADr6YAAr2JUUo",
+      "file_unique_id": "AgADr6YAAr2JUUo",
+      "name": "boop_2",
+      "tags": [
+        "boop",
+        "playful"
+      ],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgAD5KkAAryKUEo",
+      "file_unique_id": "AgAD5KkAAryKUEo",
+      "name": "bite",
+      "tags": [
+        "bite",
+        "playful"
+      ],
+      "rating": "safe",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADE6YAAlFGUEo",
+      "file_unique_id": "AgADE6YAAlFGUEo",
+      "name": "good_boy",
+      "tags": [
+        "praise"
+      ],
+      "rating": "adult",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgADhKwAAuIEUUo",
+      "file_unique_id": "AgADhKwAAuIEUUo",
+      "name": "ur_my_pet",
+      "tags": [
+        "cuddle",
+        "love"
+      ],
+      "rating": "adult",
+      "set_name": "delta_sticksss"
+    },
+    {
+      "file_id": "AgAD3aYAAsIsUUo",
+      "file_unique_id": "AgAD3aYAAsIsUUo",
+      "name": "kiss",
+      "tags": [
+        "kiss",
+        "love"
       ],
       "rating": "adult",
       "set_name": "delta_sticksss"
