@@ -8,6 +8,13 @@ def observation(*traits: str) -> str:
         {
             "readable": True,
             "ambiguous": False,
+            "layout": {
+                "orientation": "Synthetic orientation",
+                "head": "Synthetic head position",
+                "torso": "Synthetic torso position",
+                "pelvis": "Synthetic pelvis position",
+                "tail_base": "Synthetic tail base position",
+            },
             "observations": "Synthetic visible character",
             "features": [
                 {

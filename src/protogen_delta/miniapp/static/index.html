@@ -87,6 +87,7 @@
   <section class="card" aria-labelledby="appearance-title">
     <b id="appearance-title">Текущий облик Дельты</b>
     <p class="muted" id="appearance-species-status" hidden></p>
+    <p class="muted" id="appearance-species-check" hidden></p>
     <p class="muted" id="appearance">Загружаю облик…</p>
     <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
     <button id="edit-appearance" class="clipboard-button" type="button" hidden>Редактировать описание</button>
@@ -115,6 +116,9 @@
     <div id="appearance-species-panel">
       <label for="appearance-species">Вид персонажа</label>
       <input id="appearance-species" type="text" maxlength="80" placeholder="Например, сергал. Можно оставить пустым">
+      <label for="appearance-notes">Комментарий к референсу</label>
+      <textarea id="appearance-notes" maxlength="400" rows="3" placeholder="Необязательно: голова внизу, хвост слева вверху; длинные чёрно-красные волосы"></textarea>
+      <p class="muted">Подсказка для анализа этой картинки, до 400 символов.</p>
       <label><input id="appearance-same-character" type="checkbox"> Обновить картинку того же персонажа</label>
       <p class="muted">Указанный тобой вид сохраняется отдельно. При обновлении того же персонажа он остаётся прежним; новая картинка уточняет внешность.</p>
     </div>
@@ -217,6 +221,7 @@
     appearanceMode.disabled = busy;
     descriptionInput.disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-species").disabled = busy || !appearanceEnabled;
+    document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
   };
   const renderAppearance = p => {
@@ -243,6 +248,11 @@
     const speciesStatus = document.querySelector("#appearance-species-status");
     speciesStatus.hidden = !customAppearance || !species;
     speciesStatus.textContent = !species ? "" : species.status === "unknown" ? "Вид пока не определён" : species.source === "user" ? `Вид: ${species.name} · указан тобой` : species.status === "hybrid" ? "Смешанный или авторский дизайн · по изображению" : `Вид: ${species.name} · по изображению`;
+    const checkLabels = {match:"Видимые признаки согласуются с указанным видом.",unconfirmed:"По этому ракурсу указанный вид пока не подтверждён.",conflict:"Распознавание расходится с указанным видом. Проверь описание или добавь более ясный референс."};
+    const speciesCheck = document.querySelector("#appearance-species-check");
+    const checkLabel = species && species.source === "user" ? checkLabels[species.visual_check] || "" : "";
+    speciesCheck.textContent = checkLabel;
+    speciesCheck.hidden = !customAppearance || !checkLabel;
     updateAppearanceButtons();
   };
   const clearSelection = () => {
@@ -368,10 +378,11 @@
     if (appearanceBusy || (!selectedFile && !descriptionInput.value.trim())) return;
     appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent=appearanceMode.value === "text" ? "Сохраняю описание…" : "Разбираю внешность…";
     try {
-      const headers = appearanceMode.value === "image" ? {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#appearance-species").value.trim(),update_existing:document.querySelector("#appearance-same-character").checked}))} : {};
+      const headers = appearanceMode.value === "image" ? {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#appearance-species").value.trim(),notes:document.querySelector("#appearance-notes").value.trim(),update_existing:document.querySelector("#appearance-same-character").checked}))} : {};
       const profile = await api(appearanceMode.value === "text" ? "PUT" : "POST", selectedFile || {appearance:descriptionInput.value}, "/api/profile/appearance", headers);
       renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
       document.querySelector("#appearance-species").value="";
+      document.querySelector("#appearance-notes").value="";
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
@@ -383,6 +394,7 @@
       const profile = await api("DELETE", null, "/api/profile/appearance");
       renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
       document.querySelector("#appearance-species").value=""; document.querySelector("#appearance-same-character").checked=false;
+      document.querySelector("#appearance-notes").value="";
       tg?.HapticFeedback?.notificationOccurred("success");
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }

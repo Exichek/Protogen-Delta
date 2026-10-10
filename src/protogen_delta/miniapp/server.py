@@ -25,7 +25,10 @@ from protogen_delta.miniapp.auth import (
     validate_init_data,
 )
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
-from protogen_delta.services.appearance_analysis import validate_species_hint
+from protogen_delta.services.appearance_analysis import (
+    validate_reference_notes,
+    validate_species_hint,
+)
 from protogen_delta.services.appearance_description import parse_description_file
 from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
@@ -320,12 +323,13 @@ class MiniAppServer:
         raw_options = request.headers.get("X-Appearance-Options", "")
         if raw_options:
             try:
-                if len(raw_options) > 1600:
+                if len(raw_options) > 7000:
                     raise ValueError("Слишком длинные параметры облика.")
                 options = json.loads(unquote(raw_options, errors="strict"))
                 if not isinstance(options, dict) or set(options) - {
                     "species",
                     "update_existing",
+                    "notes",
                 }:
                     raise ValueError("Некорректные параметры облика.")
                 if (
@@ -334,9 +338,10 @@ class MiniAppServer:
                 ):
                     raise ValueError("Некорректные параметры облика.")
                 options["species"] = validate_species_hint(options.get("species", ""))
+                options["notes"] = validate_reference_notes(options.get("notes", ""))
             except (ValueError, UnicodeError, RecursionError) as error:
                 raise web.HTTPBadRequest(
-                    text="Некорректное название вида или режим обновления облика."
+                    text="Проверь вид, комментарий (до 400 символов) и режим обновления."
                 ) from error
         if (
             request.content_length is not None
@@ -381,6 +386,7 @@ class MiniAppServer:
                         thumbnail=thumbnail,
                         species_hint=options.get("species", ""),
                         update_existing=options.get("update_existing", False),
+                        reference_notes=options.get("notes", ""),
                     )
                 else:
                     await self._response_engine.set_delta_appearance_from_image(

@@ -56,6 +56,12 @@ def validate_species_hint(value: str) -> str:
     return value
 
 
+def validate_reference_notes(value: str) -> str:
+    if not isinstance(value, str) or len(value) > 400:
+        raise ValueError("Комментарий к референсу: до 400 символов.")
+    return value.strip()
+
+
 def declared_species(text: str) -> str:
     """Только собственная явная декларация, не цитата или ласковое обращение."""
     match = re.search(
@@ -131,11 +137,22 @@ class AppearanceAnalyzer:
         async with asyncio.timeout(50):
             raw = await self._model.analyze_visual_features(
                 system_prompt=load_prompt("appearance_observation")
+                + "\n\nОграничения описания:\n"
+                + content_rules
                 + "\n\nСловарь признаков (данные):\n"
                 + self._catalog.observation_vocabulary(),
                 user_message="Наблюдай внешность выбранного персонажа. Подпись (данные): "
                 + repr(user_message)
-                + "\nВерни JSON с обязательными readable, ambiguous, observations "
+                + (
+                    "\nВид, указанный пользователем (данные): "
+                    + repr(hint)
+                    + ". Используй его как исходный ориентир для поиска видимых "
+                    "признаков и точек крепления. Скрытые типичные детали "
+                    "этого вида остаются неизвестными."
+                    if hint
+                    else ""
+                )
+                + "\nВерни JSON с обязательными readable, ambiguous, layout, observations "
                 "и features. features — массив признаков по переданному словарю, "
                 "не пропускай это поле. Не возвращай только текст наблюдений.",
                 images=images,
@@ -148,6 +165,17 @@ class AppearanceAnalyzer:
                 raise ValueError("Missing visual selection")
             if not observed["readable"] or observed["ambiguous"]:
                 raise ValueError("Unusable reference")
+            layout = observed.get("layout")
+            if (
+                not isinstance(layout, dict)
+                or set(layout)
+                != {"orientation", "head", "torso", "pelvis", "tail_base"}
+                or any(
+                    not isinstance(value, str) or not 1 <= len(value.strip()) <= 120
+                    for value in layout.values()
+                )
+            ):
+                raise ValueError("Invalid reference layout")
             observations = observed.get("observations")
             features = observed.get("features")
             if (
@@ -248,8 +276,16 @@ class AppearanceAnalyzer:
             raise ValueError("Visual card too long")
         if hint:
             card = self._catalog.find(hint)
+            visual_check: Literal["match", "conflict", "unconfirmed"] = "unconfirmed"
+            if card and status == "probable":
+                visual_check = "match" if card.id == key else "conflict"
             species = AppearanceSpecies(
-                hint, card.id if card else None, "user", "declared"
+                hint,
+                card.id if card else None,
+                "user",
+                "declared",
+                tuple(evidence),
+                visual_check,
             )
             prefix = "Вид со слов пользователя: " + hint + ". "
         else:
