@@ -72,7 +72,23 @@
     <label for="configuration">Конфигурация Дельты в RP</label>
     <select id="configuration"><option value="male">Мужская</option><option value="female">Женская</option></select>
     <label for="character">Мой персонаж для RP</label>
-    <textarea id="character" maxlength="1000" placeholder="Вид, внешность, важные детали и роль в сцене"></textarea>
+    <textarea id="character" maxlength="2000" placeholder="Вид, внешность, важные детали и роль в сцене"></textarea>
+    <p class="muted">До 2000 знаков. После разбора арта описание можно исправить здесь.</p>
+    <button id="save-character-description" class="secondary small-action" type="button" disabled>Сохранить описание персонажа</button>
+    <figure id="saved-character" class="saved-appearance" hidden><img id="saved-character-image" alt="Референс моего персонажа для RP"><figcaption class="muted">Мой персонаж</figcaption></figure>
+    <details><summary>Загрузить арт моего персонажа</summary>
+      <label for="character-file">Картинка персонажа</label>
+      <input id="character-file" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden disabled>
+      <button id="choose-character" class="clipboard-button" type="button" disabled>Выбрать картинку моего персонажа</button>
+      <p id="character-file-name" class="muted"></p>
+      <p class="muted">JPEG, PNG или WebP до 20 МБ. Разбор заменит описание твоего персонажа.</p>
+      <label for="character-species">Вид моего персонажа</label>
+      <input id="character-species" maxlength="80" placeholder="Необязательно: например, акула">
+      <label for="character-notes">Комментарий к моему арту</label>
+      <textarea id="character-notes" maxlength="400" rows="2" placeholder="Кто твой персонаж, если их несколько; важные видимые детали"></textarea>
+      <button id="analyze-character" type="button" disabled>Распознать мой облик</button>
+    </details>
+    <div id="character-status" role="status" aria-live="polite"></div>
     <label for="preferences">Что мне нравится в RP</label>
     <textarea id="preferences" maxlength="1000" placeholder="Темы, динамика, тон и детали, которые хочется видеть чаще"></textarea>
     <label for="boundaries">Мои границы</label>
@@ -90,7 +106,7 @@
     <p class="muted" id="appearance-species-status" hidden></p>
     <p class="muted" id="appearance-species-check" hidden></p>
     <p class="muted" id="appearance">Загружаю облик…</p>
-    <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Меняется только внешность, не твой персонаж для RP.</p>
+    <p class="muted" id="appearance-empty-hint" hidden>Задай внешний вид Дельты картинкой или описанием. Здесь задаются внешность и отдельный профиль Дельты для RP.</p>
     <button id="edit-appearance" class="clipboard-button" type="button" hidden>Редактировать описание</button>
     <div id="appearance-editor" hidden>
       <label for="appearance-edit-text">Исправь описание облика</label>
@@ -122,7 +138,7 @@
       <textarea id="appearance-notes" maxlength="400" rows="3" placeholder="Необязательно: голова внизу, хвост слева вверху; длинные чёрно-красные волосы"></textarea>
       <p class="muted">Подсказка для анализа этой картинки, до 400 символов.</p>
       <label><input id="appearance-same-character" type="checkbox"> Обновить картинку того же персонажа</label>
-      <p class="muted">Указанный тобой вид сохраняется отдельно. При обновлении того же персонажа он остаётся прежним; новая картинка уточняет внешность.</p>
+      <p class="muted">При обновлении того же персонажа сохраняются указанный вид, характер и предпочтения. Новый персонаж начинает с пустого профиля.</p>
     </div>
     <div id="appearance-input-area" class="appearance-source" tabindex="0" role="group" aria-label="Загрузка облика">
       <p id="appearance-clipboard-hint" class="muted">Перетащи картинку сюда или вставь из буфера. Работает и Ctrl+V.</p>
@@ -140,6 +156,20 @@
     <button id="apply-appearance" type="button" disabled>Применить облик</button>
     <button id="reset-appearance" class="secondary" type="button" disabled>Вернуть базовый облик</button>
     <div id="appearance-status" role="status" aria-live="polite"></div>
+    <div id="delta-profile-panel">
+      <p><b>Характер и поведение этого облика Дельты</b></p>
+      <p class="muted" id="delta-profile-hint">Для текущего облика. Заполни вручную: эти сведения не определяются по картинке.</p>
+      <label for="delta-personality">Характер Дельты</label>
+      <textarea id="delta-personality" maxlength="1000" rows="3" placeholder="Например: любопытный, упрямый, сдержанный; постепенно открывается собеседнику" disabled></textarea>
+      <label for="delta-behavior">Манера поведения Дельты</label>
+      <textarea id="delta-behavior" maxlength="1000" rows="3" placeholder="Как говорит и действует: инициативный, любит поддразнивать, не торопит события" disabled></textarea>
+      <label for="delta-preferences">Что этому персонажу нравится в сценах</label>
+      <textarea id="delta-preferences" maxlength="1000" rows="3" placeholder="Темы, занятия, тон и динамика обычных сцен: приключения, загадки, спокойные разговоры" disabled></textarea>
+      <label for="delta-boundaries">Границы этого персонажа</label>
+      <textarea id="delta-boundaries" maxlength="1000" rows="3" placeholder="Что не добавлять в сцену и чего персонаж избегает" disabled></textarea>
+      <button id="save-delta-profile" class="secondary" type="button" disabled>Сохранить характер и поведение</button>
+      <div id="delta-profile-status" role="status" aria-live="polite"></div>
+    </div>
   </section>
   </div>
   <div id="tools-panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
@@ -186,13 +216,13 @@
     document.querySelector("#age-restriction-hint").hidden = !p.age_restricted;
     document.querySelector("#stopword").value = p.roleplay_stopword || "стоп";
     document.querySelector("#configuration").value = p.roleplay_configuration;
-    document.querySelector("#character").value = p.roleplay_character;
+    renderCharacter(p);
     document.querySelector("#preferences").value = p.roleplay_preferences;
     document.querySelector("#boundaries").value = p.roleplay_boundaries;
     document.querySelector("#fetishes").textContent = `Распознанные темы: ${p.roleplay_fetishes.length ? p.roleplay_fetishes.join(", ") : "пока нет"}`;
     document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
     document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
-    renderAppearance(p);
+    renderAppearance(p, true);
   };
   const appearanceStatus = document.querySelector("#appearance-status");
   const fileInput = document.querySelector("#appearance-file");
@@ -205,9 +235,13 @@
   const appearanceEditor = document.querySelector("#appearance-editor");
   const editText = document.querySelector("#appearance-edit-text");
   let appearanceEditing = false, savedDescription = "", editOriginal = "", savedSpecies = null;
+  const profileFields = ["personality", "behavior", "preferences", "boundaries"];
+  const emptyProfile = () => Object.fromEntries(profileFields.map(name => [name, ""]));
+  const profileDraft = () => Object.fromEntries(profileFields.map(name => [name, document.querySelector(`#delta-${name}`).value.trim()]));
+  let savedProfile = emptyProfile(), characterBusy = false, settingsBusy = false, characterSnapshot = "";
   let appearanceBusy = false, clipboardBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null, selectionRevision = 0;
   const updateAppearanceButtons = () => {
-    const busy = appearanceBusy || clipboardBusy || appearanceEditing;
+    const busy = appearanceBusy || clipboardBusy || appearanceEditing || characterBusy || settingsBusy;
     document.querySelector("#edit-appearance").hidden = !customAppearance || appearanceEditing;
     document.querySelector("#edit-appearance").disabled = busy || !appearanceEnabled;
     document.querySelector("#save-appearance-edit").disabled = appearanceBusy || !editText.value.trim() || editText.value.trim() === editOriginal;
@@ -227,9 +261,20 @@
     document.querySelector("#save-appearance-species").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || !speciesValue || (savedSpecies?.source === "user" && speciesValue === savedSpecies.name);
     document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
+    for (const name of profileFields) document.querySelector(`#delta-${name}`).disabled = busy || !appearanceEnabled || !customAppearance;
+    document.querySelector("#save-delta-profile").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || JSON.stringify(profileDraft()) === JSON.stringify(savedProfile);
+    updateCharacterButtons();
   };
-  const renderAppearance = p => {
-    savedDescription = p.delta_appearance || "";
+  const renderAppearance = (p, preserveProfileDraft=false) => {
+    const nextDescription = p.delta_appearance || "";
+    const nextProfile = {...emptyProfile(), ...(p.delta_appearance_profile || {})};
+    const keepDraft = preserveProfileDraft && nextDescription === savedDescription && JSON.stringify(nextProfile) === JSON.stringify(savedProfile);
+    savedDescription = nextDescription; savedProfile = nextProfile;
+    if (!keepDraft) {
+      for (const name of profileFields) document.querySelector(`#delta-${name}`).value = savedProfile[name];
+      document.querySelector("#delta-profile-status").textContent="";
+    }
+    document.querySelector("#delta-profile-hint").textContent = savedDescription ? "Для текущего облика. Заполни вручную: эти сведения не определяются по картинке." : "Сначала задай облик Дельты, затем заполни его характер и поведение.";
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     const species = p.delta_species;
@@ -260,6 +305,63 @@
     speciesCheck.hidden = !customAppearance || !checkLabel;
     updateAppearanceButtons();
   };
+  const updateCharacterButtons = () => {
+    const busy = characterBusy || appearanceBusy || clipboardBusy || appearanceEditing || settingsBusy;
+    document.querySelector("#character-file").disabled = busy || !appearanceEnabled;
+    document.querySelector("#choose-character").disabled = busy || !appearanceEnabled;
+    document.querySelector("#character-file-name").textContent = document.querySelector("#character-file").files[0]?.name || "";
+    document.querySelector("#analyze-character").disabled = busy || !appearanceEnabled || !document.querySelector("#character-file").files.length;
+    document.querySelector("#save-character-description").disabled = busy || document.querySelector("#character").value.trim() === characterSnapshot;
+    for (const id of ["character", "character-species", "character-notes"]) document.querySelector(`#${id}`).disabled = busy;
+    document.querySelector("#save").disabled = busy;
+  };
+  const renderCharacter = p => {
+    characterSnapshot = p.roleplay_character || "";
+    document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
+    document.querySelector("#character").value = characterSnapshot;
+    const thumbnail = characterSnapshot && p.roleplay_character_thumbnail;
+    const hasThumbnail = typeof thumbnail === "string" && thumbnail.length <= 90000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(thumbnail);
+    const image = document.querySelector("#saved-character-image");
+    if (hasThumbnail) image.src = thumbnail; else image.removeAttribute("src");
+    document.querySelector("#saved-character").hidden = !hasThumbnail;
+    updateCharacterButtons();
+  };
+  const characterStatus = document.querySelector("#character-status");
+  document.querySelector("#character").addEventListener("input", () => { updateCharacterButtons(); characterStatus.className=""; characterStatus.textContent=document.querySelector("#character").value.trim() === characterSnapshot ? "" : "Есть несохранённые изменения."; });
+  document.querySelector("#choose-character").addEventListener("click", () => document.querySelector("#character-file").click());
+  document.querySelector("#character-file").addEventListener("change", updateCharacterButtons);
+  document.querySelector("#save-character-description").addEventListener("click", async () => {
+    if (document.querySelector("#save-character-description").disabled) return;
+    characterBusy = true; updateAppearanceButtons(); characterStatus.className=""; characterStatus.textContent="Сохраняю описание…";
+    try {
+      const profile = await api("PATCH", {roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot});
+      renderCharacter(profile); characterStatus.className="ok"; characterStatus.textContent="Описание твоего персонажа сохранено.";
+    } catch(error) { characterStatus.className="error"; characterStatus.textContent=error.message; }
+    finally { characterBusy=false; updateAppearanceButtons(); }
+  });
+  document.querySelector("#analyze-character").addEventListener("click", async () => {
+    if (document.querySelector("#analyze-character").disabled) return;
+    const file = document.querySelector("#character-file").files[0];
+    if (!imageTypes.includes(file.type) || file.size > 20 * 1024 * 1024) { characterStatus.className="error"; characterStatus.textContent="Выбери JPEG, PNG или WebP до 20 МБ."; return; }
+    characterBusy=true; updateAppearanceButtons(); characterStatus.className=""; characterStatus.textContent="Разбираю твоего персонажа…";
+    try {
+      const headers = {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#character-species").value.trim(),notes:document.querySelector("#character-notes").value.trim()}))};
+      const profile=await api("POST",file,"/api/profile/character/appearance",headers);
+      renderCharacter(profile); document.querySelector("#character-file").value=""; document.querySelector("#character-species").value=""; document.querySelector("#character-notes").value="";
+      characterStatus.className="ok"; characterStatus.textContent="Твой облик сохранён. Проверь описание и исправь детали при необходимости.";
+    } catch(error) { characterStatus.className="error"; characterStatus.textContent=error.message; }
+    finally { characterBusy=false; updateAppearanceButtons(); }
+  });
+  for (const name of profileFields) document.querySelector(`#delta-${name}`).addEventListener("input", () => { updateAppearanceButtons(); const output=document.querySelector("#delta-profile-status"); output.className=""; output.textContent=JSON.stringify(profileDraft()) === JSON.stringify(savedProfile) ? "" : "Есть несохранённые изменения."; });
+  document.querySelector("#save-delta-profile").addEventListener("click", async () => {
+    if (document.querySelector("#save-delta-profile").disabled) return;
+    const output=document.querySelector("#delta-profile-status"); appearanceBusy=true; updateAppearanceButtons(); output.className=""; output.textContent="Сохраняю профиль…";
+    try {
+      const profile=await api("PATCH",{profile:profileDraft(),expected_appearance:savedDescription,expected_profile:savedProfile},"/api/profile/appearance/behavior");
+      renderAppearance(profile); output.className="ok"; output.textContent="Характер и поведение Дельты сохранены.";
+    } catch(error) { output.className="error"; output.textContent=error.message; }
+    finally { appearanceBusy=false; updateAppearanceButtons(); }
+  });
   const clearSelection = () => {
     selectionRevision++;
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -436,7 +538,7 @@
     document.querySelector("#appearance").textContent = "Не удалось загрузить облик.";
     appearanceFail(error);
   });
-  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; button.disabled=true; status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { button.disabled=false; } });
+  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; settingsBusy=true; updateAppearanceButtons(); status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { settingsBusy=false; updateAppearanceButtons(); } });
   document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });
 </script>
 </body>

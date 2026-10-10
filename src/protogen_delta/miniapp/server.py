@@ -4,12 +4,13 @@ import asyncio
 import json
 from dataclasses import asdict
 from importlib.resources import files
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import unquote
 
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
+from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.conversation_safety import (
     reference_is_child,
@@ -62,6 +63,18 @@ def _profile(
         "roleplay_active": state.roleplay_active,
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
+        "roleplay_character_thumbnail": (
+            state.roleplay_character_thumbnail if state.roleplay_character else ""
+        ),
+        "roleplay_character_restricted": state.roleplay_character_restricted,
+        "delta_appearance_profile": (
+            asdict(
+                AppearanceProfile.decode(state.delta_appearance_profile)
+                or AppearanceProfile()
+            )
+            if state.delta_appearance
+            else asdict(AppearanceProfile())
+        ),
         "delta_appearance": state.delta_appearance,
         "delta_appearance_thumbnail": (
             state.delta_appearance_thumbnail if state.delta_appearance else ""
@@ -132,6 +145,13 @@ class MiniAppServer:
                     "/api/profile/appearance/species", self._set_appearance_species
                 ),
                 web.delete("/api/profile/appearance", self._reset_appearance),
+                web.patch(
+                    "/api/profile/appearance/behavior", self._set_appearance_profile
+                ),
+                web.post(
+                    "/api/profile/character/appearance",
+                    self._upload_character_appearance,
+                ),
                 web.get("/health", self._health),
                 web.post("/api/tools/{tool}", self._run_tool),
             ]
@@ -219,6 +239,7 @@ class MiniAppServer:
             "roleplay_active",
             "roleplay_configuration",
             "roleplay_character",
+            "expected_character",
             "roleplay_preferences",
             "roleplay_boundaries",
             "roleplay_stopword",
@@ -249,9 +270,18 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text="Некорректная конфигурация Дельты")
         character = payload.get("roleplay_character")
         if character is not None and (
-            not isinstance(character, str) or len(character) > _MAX_PROFILE_FIELD_CHARS
+            not isinstance(character, str) or len(character) > 2000
         ):
             raise web.HTTPBadRequest(text="Описание персонажа слишком длинное")
+        expected_character = payload.get("expected_character")
+        if expected_character is not None and (
+            not isinstance(expected_character, str) or len(expected_character) > 2000
+        ):
+            raise web.HTTPBadRequest(text="Некорректная исходная версия персонажа")
+        if character is not None and user.id in self._appearance_pending:
+            raise web.HTTPConflict(
+                text="Дождись обработки картинки перед изменением персонажа."
+            )
         preferences = payload.get("roleplay_preferences")
         if preferences is not None and (
             not isinstance(preferences, str)
@@ -270,6 +300,16 @@ class MiniAppServer:
                 raise web.HTTPForbidden(
                     text="Ты сообщил, что тебе нет 18. Доступен обычный режим общения."
                 )
+            if character is not None and (
+                (
+                    expected_character is not None
+                    and expected_character != state.roleplay_character
+                )
+                or (state.roleplay_character_thumbnail and expected_character is None)
+            ):
+                raise web.HTTPConflict(
+                    text="Персонаж уже изменился. Открой панель заново."
+                )
             previous_mode = state.content_mode
             if stopword is not None:
                 state.roleplay_stopword = stopword
@@ -286,7 +326,14 @@ class MiniAppServer:
                 state.roleplay_configuration = configuration
             if character is not None:
                 state.roleplay_character = character.strip()
-                if reference_is_child(state.roleplay_character):
+                if not state.roleplay_character:
+                    state.roleplay_character_thumbnail = ""
+                    state.roleplay_character_restricted = False
+                elif reference_is_child(state.roleplay_character):
+                    state.roleplay_character_restricted = True
+                if state.roleplay_character_restricted or reference_is_child(
+                    state.roleplay_character
+                ):
                     state.stop_roleplay()
             if preferences is not None:
                 state.roleplay_preferences = preferences.strip()
@@ -305,6 +352,8 @@ class MiniAppServer:
             state.stop_roleplay()
             state.roleplay_configuration = "male"
             state.roleplay_character = ""
+            state.roleplay_character_thumbnail = ""
+            state.roleplay_character_restricted = False
             state.roleplay_fetishes = ()
             state.roleplay_preferences = ""
             state.roleplay_boundaries = ""
@@ -317,7 +366,12 @@ class MiniAppServer:
             state, user, appearance_upload_enabled=self._response_engine is not None
         )
 
-    async def _upload_appearance(self, request: web.Request) -> web.Response:
+    async def _upload_character_appearance(self, request: web.Request) -> web.Response:
+        return await self._upload_appearance(request, target="user")
+
+    async def _upload_appearance(
+        self, request: web.Request, *, target: Literal["delta", "user"] = "delta"
+    ) -> web.Response:
         """Принять один файл только от подписанного владельца профиля."""
         user = self._authenticate(request)
         if self._response_engine is None:
@@ -382,7 +436,15 @@ class MiniAppServer:
                         text="Подожди 10 секунд перед следующей картинкой.",
                         headers={"Retry-After": "10"},
                     )
-                if options:
+                if target == "user":
+                    await self._response_engine.set_roleplay_character_from_image(
+                        user.id,
+                        image,
+                        thumbnail=thumbnail,
+                        species_hint=options.get("species", ""),
+                        reference_notes=options.get("notes", ""),
+                    )
+                elif options:
                     await self._response_engine.set_delta_appearance_from_image(
                         user.id,
                         image,
@@ -426,6 +488,7 @@ class MiniAppServer:
             state.delta_appearance = ""
             state.delta_species = ""
             state.delta_appearance_thumbnail = ""
+            state.delta_appearance_profile = ""
             state.delta_reference_restricted = False
             payload = self._profile(state, user)
         return web.json_response(payload, headers={"Cache-Control": "no-store"})
@@ -480,6 +543,44 @@ class MiniAppServer:
             async with self._user_states.use(user.id) as state:
                 payload = self._profile(state, user)
             return web.json_response(payload, headers={"Cache-Control": "no-store"})
+        finally:
+            self._appearance_pending.discard(user.id)
+
+    async def _set_appearance_profile(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if self._response_engine is None:
+            raise web.HTTPServiceUnavailable(text="Смена профиля сейчас недоступна.")
+        if user.id in self._appearance_pending:
+            raise web.HTTPConflict(text="Облик уже обрабатывается. Подожди немного.")
+        self._appearance_pending.add(user.id)
+        try:
+            try:
+                payload = await request.json()
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload)
+                    != {"profile", "expected_appearance", "expected_profile"}
+                    or not isinstance(payload["expected_appearance"], str)
+                    or not 1 <= len(payload["expected_appearance"]) <= 2000
+                ):
+                    raise ValueError("Нужны профиль и исходная версия облика.")
+                await self._response_engine.set_delta_appearance_profile(
+                    user.id,
+                    AppearanceProfile.from_payload(payload["profile"]),
+                    expected_appearance=payload["expected_appearance"],
+                    expected_profile=AppearanceProfile.from_payload(
+                        payload["expected_profile"]
+                    ),
+                )
+            except (ValueError, RecursionError) as error:
+                raise web.HTTPBadRequest(text=str(error)) from error
+            except ResponseBusyError as error:
+                raise web.HTTPConflict(
+                    text="Бот ещё отвечает. Попробуй после ответа."
+                ) from error
+            async with self._user_states.use(user.id) as state:
+                result = self._profile(state, user)
+            return web.json_response(result, headers={"Cache-Control": "no-store"})
         finally:
             self._appearance_pending.discard(user.id)
 

@@ -4,8 +4,9 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
+from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.conversation_safety import (
@@ -41,6 +42,9 @@ from protogen_delta.services.appearance_analysis import (
 )
 from protogen_delta.services.appearance_description import (
     validate_description,
+)
+from protogen_delta.services.appearance_profile_context import (
+    appearance_profile_context,
 )
 from protogen_delta.services.capabilities import is_capability_overview
 from protogen_delta.services.creator_messages import CreatorMessageService
@@ -445,6 +449,8 @@ class ResponseEngine:
                 user_state.stop_roleplay()
             user_state.roleplay_active = True
             user_state.roleplay_character = character
+            user_state.roleplay_character_thumbnail = ""
+            user_state.roleplay_character_restricted = reference_is_child(character)
 
         appearance_change = await self._update_delta_appearance(
             user_message,
@@ -545,6 +551,7 @@ class ResponseEngine:
             user_state.content_mode == "adult"
             and not user_state.age_restricted
             and not user_state.delta_reference_restricted
+            and not user_state.roleplay_character_restricted
             and not reference_is_child(user_state.roleplay_character)
         )
         state_context = build_state_context(
@@ -594,7 +601,8 @@ class ResponseEngine:
                 "частей твоего тела берутся из этого облика; неописанные и неясные "
                 "детали остаются неизвестными. Он заменяет несовместимые детали "
                 "базового тела. Назначение принято приложением: не отвергай его "
-                "из-за другого базового вида. Личность и имя остаются прежними. "
+                "из-за другого базового вида. Имя Дельты сохраняется. Внешность сама "
+                "по себе не задаёт характер; ручной профиль учитывается отдельно в RP. "
                 "Источник называй «выбранный образ». Смена внешности не назначает "
                 "действия, место или продолжение старой сцены; обычный вопрос "
                 "об облике получает обычный ответ."
@@ -611,6 +619,8 @@ class ResponseEngine:
             )
 
         if is_rp:
+            if profile_context := appearance_profile_context(user_state):
+                scene_context.append(profile_context)
             gender = (
                 "женская; говори о себе в женском роде"
                 if user_state.roleplay_configuration == "female"
@@ -675,6 +685,7 @@ class ResponseEngine:
             user_state.content_mode == "adult"
             and not user_state.age_restricted
             and not user_state.delta_reference_restricted
+            and not user_state.roleplay_character_restricted
             and not reference_is_child(user_state.roleplay_character)
         )
         if adult_allowed:
@@ -1075,6 +1086,8 @@ class ResponseEngine:
                     )
                 state.delta_appearance = description
                 if expected_appearance is None:
+                    state.delta_appearance_profile = ""
+                if expected_appearance is None:
                     state.delta_reference_restricted = reference_is_child(description)
                 elif reference_is_child(description):
                     state.delta_reference_restricted = True
@@ -1090,6 +1103,82 @@ class ResponseEngine:
                         else ""
                     )
             return description
+        finally:
+            self._delivering_users.remove(user_id)
+
+    async def set_delta_appearance_profile(
+        self,
+        user_id: int,
+        profile: AppearanceProfile,
+        *,
+        expected_appearance: str,
+        expected_profile: AppearanceProfile,
+    ) -> None:
+        """Сохранить ручные черты только для текущего собственного облика."""
+        profile = AppearanceProfile.from_payload(asdict(profile))
+        if user_id in self._delivering_users:
+            raise ResponseBusyError
+        self._delivering_users.add(user_id)
+        try:
+            async with self._user_states.use_conversation(user_id) as state:
+                current = AppearanceProfile.decode(state.delta_appearance_profile)
+                if (
+                    not state.delta_appearance
+                    or state.delta_appearance != expected_appearance
+                    or current != expected_profile
+                ):
+                    raise ValueError(
+                        "Облик или его профиль изменился. Открой панель заново."
+                    )
+                state.delta_appearance_profile = profile.encode()
+        finally:
+            self._delivering_users.remove(user_id)
+
+    async def set_roleplay_character_from_image(
+        self,
+        user_id: int,
+        image: ImageInput,
+        *,
+        thumbnail: str = "",
+        species_hint: str = "",
+        reference_notes: str = "",
+    ) -> str:
+        """Прочитать референс персонажа пользователя, сохранив облик Дельты."""
+        notes = validate_reference_notes(reference_notes)
+        hint = validate_species_hint(species_hint)
+        if user_id in self._delivering_users:
+            raise ResponseBusyError
+        self._delivering_users.add(user_id)
+        try:
+            async with self._user_states.use_conversation(user_id) as state:
+                caption = "Референс RP-персонажа пользователя, не Дельты. " + repr(
+                    notes
+                )
+                rules = (
+                    "Только нейтральное описание внешности явно взрослого персонажа; "
+                    "при детском или неясном возрасте исключи интимные детали."
+                    if state.content_mode == "adult" and not state.age_restricted
+                    else "Не включай откровенные сексуальные подробности."
+                )
+                try:
+                    result = await AppearanceAnalyzer(self._appearance_model).analyze(
+                        (image,), caption, rules, species_hint=hint, subject="user"
+                    )
+                except (
+                    DeepSeekError,
+                    ValueError,
+                    TimeoutError,
+                    RecursionError,
+                ) as error:
+                    raise AppearanceAnalysisError from error
+                state.roleplay_character = result.description
+                state.roleplay_character_thumbnail = thumbnail
+                state.roleplay_character_restricted = (
+                    result.minor_reference or reference_is_child(caption)
+                )
+                if state.roleplay_character_restricted:
+                    state.stop_roleplay()
+                return result.description
         finally:
             self._delivering_users.remove(user_id)
 
@@ -1167,6 +1256,7 @@ class ResponseEngine:
             user_state.delta_appearance = ""
             user_state.delta_species = ""
             user_state.delta_appearance_thumbnail = ""
+            user_state.delta_appearance_profile = ""
             user_state.delta_reference_restricted = False
             return "cleared"
         if not images or not has_delta_appearance_intent(user_message):
@@ -1207,6 +1297,8 @@ class ResponseEngine:
             )
             return None
 
+        if not same_character:
+            user_state.delta_appearance_profile = ""
         user_state.delta_appearance = result.description
         user_state.delta_species = result.species.encode()
         user_state.delta_reference_restricted = (

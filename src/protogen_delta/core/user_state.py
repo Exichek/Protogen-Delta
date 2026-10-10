@@ -129,6 +129,9 @@ class PersistentUserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_appearance_profile: str = ""
+    roleplay_character_thumbnail: str = ""
+    roleplay_character_restricted: bool = False
     content_mode: ContentMode = "unselected"
     age_restricted: bool = False
     delta_reference_restricted: bool = False
@@ -171,6 +174,9 @@ class UserStatePersistence(Protocol):
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_appearance_profile: str = "",
+        roleplay_character_thumbnail: str = "",
+        roleplay_character_restricted: bool = False,
         content_mode: ContentMode = "unselected",
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
@@ -214,6 +220,9 @@ class UserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_appearance_profile: str = ""
+    roleplay_character_thumbnail: str = ""
+    roleplay_character_restricted: bool = False
     content_mode: ContentMode = "unselected"
     age_restricted: bool = False
     delta_reference_restricted: bool = False
@@ -288,6 +297,9 @@ class UserState:
         self.delta_appearance = ""
         self.delta_species = ""
         self.delta_appearance_thumbnail = ""
+        self.delta_appearance_profile = ""
+        self.roleplay_character_thumbnail = ""
+        self.roleplay_character_restricted = False
         self.delta_reference_restricted = False
         self.roleplay_stopword = "стоп"
         self.content_mode = "unselected"
@@ -452,6 +464,9 @@ class UserStateStore:
                                     delta_appearance=state.delta_appearance,
                                     delta_species=state.delta_species,
                                     delta_appearance_thumbnail=state.delta_appearance_thumbnail,
+                                    delta_appearance_profile=state.delta_appearance_profile,
+                                    roleplay_character_thumbnail=state.roleplay_character_thumbnail,
+                                    roleplay_character_restricted=state.roleplay_character_restricted,
                                     content_mode=state.content_mode,
                                     age_restricted=state.age_restricted,
                                     delta_reference_restricted=state.delta_reference_restricted,
@@ -595,6 +610,13 @@ class UserStateStore:
             state.delta_species = persistent_state.delta_species
             state.delta_appearance_thumbnail = (
                 persistent_state.delta_appearance_thumbnail
+            )
+            state.delta_appearance_profile = persistent_state.delta_appearance_profile
+            state.roleplay_character_thumbnail = (
+                persistent_state.roleplay_character_thumbnail
+            )
+            state.roleplay_character_restricted = (
+                persistent_state.roleplay_character_restricted
             )
             state.content_mode = persistent_state.content_mode
             state.age_restricted = persistent_state.age_restricted

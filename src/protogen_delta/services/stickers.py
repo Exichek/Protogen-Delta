@@ -10,7 +10,8 @@ from time import monotonic
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
-from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.core.conversation_safety import reference_is_child
+from protogen_delta.core.user_state import UserState, UserStateStore
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
 from protogen_delta.services.sticker_capabilities import correct_sticker_capability
 
@@ -39,6 +40,16 @@ _CONTEXT_PATTERNS = {
     "playful": r"[:;]-?[pр3]|;-?\)|\b(?:uwu|owo)\b|[😜😝]",
     "love": r"[❤💜💕]",
 }
+
+
+def _adult_stickers_allowed(state: UserState) -> bool:
+    return (
+        state.content_mode == "adult"
+        and not state.age_restricted
+        and not state.delta_reference_restricted
+        and not state.roleplay_character_restricted
+        and not reference_is_child(state.roleplay_character)
+    )
 
 
 def sticker_reply_tags(text: str) -> set[str]:
@@ -177,7 +188,7 @@ class ContextualStickerService:
         """Передать модели фактическую доступность пака для текущего пользователя."""
         state = self._user_states.get(user_id)
         available = sum(
-            state.content_mode == "adult" or entry.rating == "safe"
+            _adult_stickers_allowed(state) or entry.rating == "safe"
             for entry in self._repository.get_all()
         )
         if self._chance == 0 or not available:
@@ -197,7 +208,7 @@ class ContextualStickerService:
         """Проверить, включены ли реакции и доступны ли стикеры по возрастному режиму."""
         state = self._user_states.get(user_id)
         return self._chance > 0 and any(
-            state.content_mode == "adult" or entry.rating == "safe"
+            _adult_stickers_allowed(state) or entry.rating == "safe"
             for entry in self._repository.get_all()
         )
 
@@ -270,7 +281,7 @@ class ContextualStickerService:
             entry
             for entry in self._repository.get_all()
             if (tags.intersection(entry.tags) or requested and entry.rating == "safe")
-            and (state.content_mode == "adult" or entry.rating == "safe")
+            and (_adult_stickers_allowed(state) or entry.rating == "safe")
             and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
         ]
         if not entries:
