@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Self
 
-PROFILE_FIELDS = ("personality", "behavior", "preferences", "boundaries")
+PROFILE_FIELDS = ("personality", "behavior", "preferences", "boundaries", "fetishes")
 PROFILE_FIELD_LIMIT = 1000
 
 
@@ -14,14 +14,21 @@ class AppearanceProfile:
     behavior: str = ""
     preferences: str = ""
     boundaries: str = ""
+    fetishes: str = ""
 
     @classmethod
     def from_payload(cls, value: object) -> Self:
-        if not isinstance(value, dict) or set(value) != set(PROFILE_FIELDS):
-            raise ValueError("Нужны характер, поведение, предпочтения и границы.")
+        fields = set(PROFILE_FIELDS)
+        legacy_fields = fields - {"fetishes"}
+        if not isinstance(value, dict) or set(value) not in (
+            fields,
+            legacy_fields,
+        ):
+            raise ValueError("Нужны все поля профиля персонажа.")
+
         parts: list[str] = []
         for name in PROFILE_FIELDS:
-            text = value[name]
+            text = value.get(name, "")
             if not isinstance(text, str) or len(text) > PROFILE_FIELD_LIMIT:
                 raise ValueError("Каждое поле профиля — текст до 1000 знаков.")
             parts.append(text.strip())

@@ -41,7 +41,13 @@ def test_delta_profile_persists_without_changing_user_or_image(tmp_path: Path) -
         server = MiniAppServer(TOKEN, states, response_engine=engine)
         payload = {
             "profile": asdict(
-                AppearanceProfile("Упрямый", "Говорит коротко", "Загадки", "Без драк")
+                AppearanceProfile(
+                    "Упрямый",
+                    "Говорит коротко",
+                    "Загадки",
+                    "Без драк",
+                    fetishes="TEST_EXTRA_VALUE",
+                )
             ),
             "expected_appearance": "Синяя шерсть Дельты",
             "expected_profile": asdict(AppearanceProfile()),
@@ -383,3 +389,17 @@ def test_profile_migration_keeps_old_private_and_group_rows(tmp_path: Path) -> N
 @pytest.mark.parametrize("value", ["{", "[]", '{"unexpected":"field"}', "x" * 16385])
 def test_invalid_stored_profile_is_not_context(value: str) -> None:
     assert AppearanceProfile.decode(value) is None
+
+
+def test_legacy_profile_loads_without_new_field() -> None:
+    legacy = {
+        "personality": "Старый характер",
+        "behavior": "Старое поведение",
+        "preferences": "Старые предпочтения",
+        "boundaries": "Старые границы",
+    }
+
+    profile = AppearanceProfile.decode(json.dumps(legacy))
+
+    assert profile is not None
+    assert asdict(profile) == {**legacy, "fetishes": ""}
