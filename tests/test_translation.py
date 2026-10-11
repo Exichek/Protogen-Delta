@@ -18,6 +18,7 @@ from test_deepseek_service import _create_response, _create_service
 from test_miniapp import TOKEN, _signed_init_data
 from test_miniapp_appearance import _image
 
+from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.user_state import ConversationTurn, UserStateStore
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
@@ -526,5 +527,35 @@ def test_docx_export_worker_returns_full_text_and_rejects_invalid_output() -> No
                 NativeWorkPool._decode("translation_docx", {"document": raw})
         with pytest.raises(ValueError):
             make_translated_docx(b" ")
+
+    asyncio.run(scenario())
+
+
+def test_translation_health_covers_file_reading_before_model_requests() -> None:
+    async def scenario() -> None:
+        translator, _ = _translator()
+        tools = MiniAppTools(AsyncMock(), Mock(), translator=translator)
+        health = RuntimeHealth()
+        health.add_diagnostics("translation", tools.translation_snapshot)
+        started, finish = asyncio.Event(), asyncio.Event()
+
+        async def read_file() -> bytes:
+            started.set()
+            await finish.wait()
+            return b"Hello"
+
+        task = asyncio.create_task(
+            tools.translate_file(
+                42, read_file, "note.txt", "text/plain", "document", "auto", "ru"
+            )
+        )
+        await started.wait()
+        snapshot = health.snapshot()["diagnostics"]["translation"]
+        assert snapshot["active"] == 1 and snapshot["waiting"] == 0
+        finish.set()
+        await task
+        assert health.snapshot()["diagnostics"]["translation"]["active"] == 0
+        with pytest.raises(ValueError):
+            health.add_diagnostics("private-user-data", tools.translation_snapshot)
 
     asyncio.run(scenario())
