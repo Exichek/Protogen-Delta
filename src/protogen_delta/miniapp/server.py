@@ -43,6 +43,12 @@ from protogen_delta.services.response_engine import (
     ResponseBusyError,
     ResponseEngine,
 )
+from protogen_delta.services.translation import (
+    MAX_TRANSLATION_OUTPUT_CHARS,
+    TranslationError,
+    TranslationService,
+)
+from protogen_delta.services.translation_document import make_translated_docx
 
 _MAX_PROFILE_FIELD_CHARS = 1000
 
@@ -132,6 +138,8 @@ class MiniAppServer:
         self._appearance_pending: set[int] = set()
         self._appearance_slots = asyncio.Semaphore(2)
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
+        self._translation_export_slots = asyncio.Semaphore(2)
+        self._translation_export_limiter = UserRateLimiter(cooldown_seconds=2)
         self._runner: web.AppRunner | None = None
 
     def application(self) -> web.Application:
@@ -159,6 +167,8 @@ class MiniAppServer:
                 ),
                 web.get("/health", self._health),
                 web.post("/api/tools/{tool}", self._run_tool),
+                web.post("/api/tools/translate/file", self._translate_file),
+                web.post("/api/tools/translate/export", self._export_translation),
             ]
         )
         return application
@@ -643,6 +653,127 @@ class MiniAppServer:
         finally:
             self._appearance_pending.discard(user.id)
 
+    async def _translate_file(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if self._tools is None:
+            raise web.HTTPServiceUnavailable(text="Переводчик сейчас недоступен.")
+        try:
+            raw = request.headers.get("X-Translation-Options", "")
+            if len(raw) > 3000:
+                raise ValueError("Слишком длинные параметры перевода.")
+            options = json.loads(unquote(raw, errors="strict"))
+            if not isinstance(options, dict) or set(options) - {
+                "mode",
+                "source",
+                "target",
+                "file_name",
+            }:
+                raise ValueError("Некорректные параметры перевода.")
+            mode = options.get("mode")
+            source = options.get("source", "auto")
+            target = options.get("target", "en")
+            name = options.get("file_name", "document")
+            if not all(
+                isinstance(v, str) for v in (mode, source, target, name)
+            ) or mode not in {"image", "document"}:
+                raise ValueError("Выбери изображение или документ и языки перевода.")
+            if len(name) > 160:
+                raise ValueError("Имя файла слишком длинное.")
+            TranslationService.validate_languages(source, target)
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(text="Проверь файл и языки перевода.") from error
+        if (
+            request.content_length is not None
+            and request.content_length > MAX_APPEARANCE_BYTES
+        ):
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_APPEARANCE_BYTES,
+                actual_size=request.content_length,
+                text="Файл должен быть до 20 МБ.",
+            )
+
+        async def read_file() -> bytes:
+            async with asyncio.timeout(90):
+                data = await request.clone(
+                    client_max_size=MAX_APPEARANCE_BYTES + 1
+                ).read()
+            if len(data) > MAX_APPEARANCE_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=MAX_APPEARANCE_BYTES,
+                    actual_size=len(data),
+                    text="Файл должен быть до 20 МБ.",
+                )
+            return data
+
+        try:
+            result = await self._tools.translate_file(
+                user.id, read_file, name, request.content_type, mode, source, target
+            )
+        except ToolsBusyError as error:
+            raise web.HTTPTooManyRequests(text=str(error)) from error
+        except TranslationError as error:
+            raise web.HTTPBadGateway(text=str(error)) from error
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Перевод занял слишком много времени. Раздели документ на части."
+            ) from error
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def _export_translation(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if not self._translation_export_limiter.allow(user.id):
+            raise web.HTTPTooManyRequests(
+                text="Подожди пару секунд перед следующим скачиванием."
+            )
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(
+                    self._translation_export_slots.acquire(), timeout=0.1
+                )
+                acquired = True
+            except TimeoutError as error:
+                raise web.HTTPTooManyRequests(
+                    text="Создание файла занято. Попробуй позже."
+                ) from error
+            async with asyncio.timeout(90):
+                payload = await request.clone(
+                    client_max_size=MAX_TRANSLATION_OUTPUT_CHARS * 12 + 1024
+                ).json()
+                if not isinstance(payload, dict) or set(payload) != {"text"}:
+                    raise ValueError("Нужен текст перевода.")
+                text = payload["text"]
+                if (
+                    not isinstance(text, str)
+                    or not text.strip()
+                    or len(text) > MAX_TRANSLATION_OUTPUT_CHARS
+                ):
+                    raise ValueError("Некорректный размер перевода.")
+                data = await self._native_work.run(
+                    make_translated_docx, text.encode("utf-8")
+                )
+            return web.Response(
+                body=data,
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={
+                    "Cache-Control": "no-store",
+                    "Content-Disposition": 'attachment; filename="translation.docx"',
+                },
+            )
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(
+                text="Не удалось создать DOCX из этого текста."
+            ) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Не удалось создать файл вовремя. Попробуй ещё раз."
+            ) from error
+        finally:
+            if acquired:
+                self._translation_export_slots.release()
+
     async def _run_tool(self, request: web.Request) -> web.Response:
         """Авторизовать владельца до разбора тела и запуска инструмента."""
         user = self._authenticate(request)
@@ -663,10 +794,23 @@ class MiniAppServer:
                 if not isinstance(url, str):
                     raise ValueError("Нужна ссылка на видео.")
                 result = await self._tools.download(user.id, url.strip())
+            elif tool == "translate":
+                text = payload.get("text")
+                source = payload.get("source", "auto")
+                target = payload.get("target", "en")
+                if (
+                    not isinstance(text, str)
+                    or not isinstance(source, str)
+                    or not isinstance(target, str)
+                ):
+                    raise ValueError("Укажи текст и языки перевода.")
+                result = await self._tools.translate(user.id, text, source, target)
             else:
                 raise web.HTTPNotFound(text="Такого инструмента нет.")
         except ToolsBusyError as error:
             raise web.HTTPTooManyRequests(text=str(error)) from error
+        except TranslationError as error:
+            raise web.HTTPBadGateway(text=str(error)) from error
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error)) from error
         except TelegramAPIError as error:

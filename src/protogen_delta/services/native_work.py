@@ -28,6 +28,10 @@ MAX_NATIVE_INPUT = 20 * 1024 * 1024
 MAX_NATIVE_OUTPUT = 16 * 1024 * 1024
 MAX_SPEECH_OUTPUT = 20 * 1024 * 1024
 _OPERATIONS = {
+    (
+        "protogen_delta.services.translation_document",
+        "make_translated_docx",
+    ): "translation_docx",
     ("protogen_delta.services.documents", "extract_document"): "document",
     (
         "protogen_delta.services.animation_frames",
@@ -247,6 +251,13 @@ class NativeWorkPool:
                 if not 0 < len(clip) <= 2 * 1024 * 1024:
                     raise ValueError("clip")
                 return clip
+            if operation == "translation_docx":
+                document = base64.b64decode(value["document"], validate=True)
+                if not 0 < len(document) <= 16 * 1024 * 1024 or not document.startswith(
+                    b"PK"
+                ):
+                    raise ValueError("document")
+                return document
             if operation == "audio":
                 from protogen_delta.services.audio_analysis import AudioAnalysis
 

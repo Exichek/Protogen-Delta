@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 import logging
 import re
 from collections.abc import Collection, Sequence
@@ -476,6 +477,57 @@ class DeepSeekService:
         )
 
         return _chat_reply(response)
+
+    async def translate_text(
+        self, system_prompt: str, user_message: str, images: Sequence[ImageInput] = ()
+    ) -> str:
+        """Перевести отдельный текст без истории, инструментов и персонажа."""
+        started_at = perf_counter()
+        content: str | list[dict[str, Any]] = user_message
+        if images:
+            content = [{"type": "text", "text": user_message}]
+            for image in images:
+                content.append(
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {"image_label": image.label}, ensure_ascii=False
+                        ),
+                    }
+                )
+                content.append(
+                    {"type": "image_url", "image_url": {"url": image.data_url()}}
+                )
+        try:
+            response = await self._complete(
+                client=self._client.with_options(timeout=60.0, max_retries=0),
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    cast(
+                        ChatCompletionMessageParam, {"role": "user", "content": content}
+                    ),
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=16384,
+                **self._provider_options,
+            )
+        except OpenAIError as error:
+            raise _translate_openai_error(error) from error
+        _log_request_metrics(
+            request_type="translation",
+            started_at=started_at,
+            response=response,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=0,
+        )
+        if getattr(response.choices[0], "finish_reason", None) == "length":
+            raise DeepSeekAPIError(
+                "Перевод достиг лимита длины. Сократи исходный текст."
+            )
+        return response.choices[0].message.content or ""
 
     async def _chat_with_tools(
         self,
