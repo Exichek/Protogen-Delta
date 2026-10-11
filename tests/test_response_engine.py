@@ -584,7 +584,8 @@ def test_response_engine_adds_fetish_context_and_role() -> None:
     assert "## Контекст текущего сообщения" in prompt
     assert "бондаж" in prompt
     assert "По мере роста возбуждения" in prompt
-    assert "Не добавляй другие фетиши" in prompt
+    assert "Не вводи произвольные фетиши из справочника." in prompt
+    assert "Исключение — предпочтения текущего облика Дельты" in prompt
     assert "не бессрочное согласие" in prompt
     assert "совершить действие над пользователем" in prompt
 
