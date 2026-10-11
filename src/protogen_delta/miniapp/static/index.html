@@ -171,6 +171,7 @@
       <p class="muted" id="delta-profile-hint">Для текущего облика. Заполни вручную: эти сведения не определяются по картинке.</p>
       <label for="delta-fetishes">Фетиши и предпочтения</label>
       <textarea id="delta-fetishes" maxlength="1000" rows="3" placeholder="Например: Бдсм, кроссдрессинг, унижения, риминг" disabled></textarea>
+      <p class="muted" id="delta-fetish-topics" role="status" aria-live="polite">Распознанные темы: пока нет.</p>
       <label for="delta-personality">Характер Дельты</label>
       <textarea id="delta-personality" maxlength="1000" rows="3" placeholder="Например: любопытный, упрямый, сдержанный; постепенно открывается собеседнику" disabled></textarea>
       <label for="delta-behavior">Манера поведения Дельты</label>
@@ -255,6 +256,10 @@
   const emptyProfile = () => Object.fromEntries(profileFields.map(name => [name, ""]));
   const profileDraft = () => Object.fromEntries(profileFields.map(name => [name, document.querySelector(`#delta-${name}`).value.trim()]));
   let savedProfile = emptyProfile(), characterBusy = false, settingsBusy = false, characterSnapshot = "";
+  let savedTopicText = "Распознанные темы: пока нет.";
+  const updateAppearanceTopicHint = () => {
+    document.querySelector("#delta-fetish-topics").textContent = document.querySelector("#delta-fetishes").value.trim() === savedProfile.fetishes ? savedTopicText : "Распознанные темы обновятся после сохранения.";
+  };
   let appearanceBusy = false, clipboardBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null, selectionRevision = 0;
   let selectedCharacterFile = null, characterPreviewUrl = null, characterSelectionRevision = 0, imagePasteTarget = "delta";
   const updateAppearanceButtons = () => {
@@ -279,12 +284,15 @@
     document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
     for (const name of profileFields) document.querySelector(`#delta-${name}`).disabled = busy || !appearanceEnabled || !customAppearance;
+    updateAppearanceTopicHint();
     document.querySelector("#save-delta-profile").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || JSON.stringify(profileDraft()) === JSON.stringify(savedProfile);
     updateCharacterButtons();
   };
   const renderAppearance = (p, preserveProfileDraft=false) => {
     const nextDescription = p.delta_appearance || "";
     const nextProfile = {...emptyProfile(), ...(p.delta_appearance_profile || {})};
+    const topics = (p.delta_appearance_topics || []).map(topic => topic.name);
+    savedTopicText = topics.length ? `Распознанные темы: ${topics.join(", ")}.` : "Распознанные темы: пока нет.";
     const keepDraft = preserveProfileDraft && nextDescription === savedDescription && JSON.stringify(nextProfile) === JSON.stringify(savedProfile);
     savedDescription = nextDescription; savedProfile = nextProfile;
     if (!keepDraft) {
