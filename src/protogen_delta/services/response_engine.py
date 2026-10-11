@@ -48,6 +48,7 @@ from protogen_delta.services.appearance_preferences_query import (
     is_appearance_preferences_query,
 )
 from protogen_delta.services.appearance_profile_context import (
+    appearance_fetishes_context,
     appearance_profile_context,
 )
 from protogen_delta.services.capabilities import is_capability_overview
@@ -638,9 +639,21 @@ class ResponseEngine:
                 "Дельты. Коротко подтверди это."
             )
 
+        fetish_context = ""
+
         if is_rp:
             if profile_context := appearance_profile_context(user_state):
                 scene_context.append(profile_context)
+
+            if adult_allowed and use_personal_facts:
+                fetish_context = appearance_fetishes_context(
+                    user_state,
+                    self._config.fetish_triggers,
+                    self._config.fetish_names,
+                )
+                if fetish_context:
+                    scene_context.append(fetish_context)
+
             gender = (
                 "женская; говори о себе в женском роде"
                 if user_state.roleplay_configuration == "female"
@@ -940,6 +953,7 @@ class ResponseEngine:
                 and bool(
                     current_fetishes
                     or (is_rp and user_state.roleplay_fetishes)
+                    or (is_rp and fetish_context)
                     or mood == "horny"
                 )
             ),
@@ -1493,8 +1507,12 @@ class ResponseEngine:
                 f"интимные мотивы: {', '.join(names)}. Сохраняй их как направление "
                 "сцены между сообщениями. По мере роста возбуждения делай именно "
                 "эти мотивы заметнее и интенсивнее, но не пытайся использовать их "
-                "все в каждом ходе. Не добавляй другие фетиши из справочника, пока "
-                "пользователь сам явно их не введёт. Этот список означает только "
+                "все в каждом ходе. Не вводи произвольные фетиши из справочника. "
+                "Исключение — предпочтения текущего облика Дельты, "
+                "если они отдельно переданы в RP-контексте: Дельта может "
+                "самостоятельно предлагать их в подходящий момент, "
+                "учитывая согласие и границы персонажей. "
+                "Этот список означает только "
                 "ранее введённые мотивы, а не бессрочное согласие: свежая просьба "
                 "остановить, ослабить или изменить конкретный элемент всегда важнее."
             )
