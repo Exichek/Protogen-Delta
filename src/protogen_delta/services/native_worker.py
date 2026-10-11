@@ -38,6 +38,14 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
             from protogen_delta.services.audio_analysis import analyze_audio
 
             return {"analysis": asdict(analyze_audio(data))}
+        if operation == "translation_docx":
+            from protogen_delta.services.translation_document import (
+                make_translated_docx,
+            )
+
+            return {
+                "document": base64.b64encode(make_translated_docx(data)).decode("ascii")
+            }
         if operation == "tags":
             from protogen_delta.services.music import audio_tags
 

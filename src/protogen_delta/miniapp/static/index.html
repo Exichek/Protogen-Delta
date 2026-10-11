@@ -43,11 +43,42 @@
     #appearance-status, #character-status { margin-top:12px; min-height:20px; font-size:14px; }
     #appearance-file-name, #character-file-name { overflow-wrap:anywhere; font-size:13px; }
     button.small-action { width:auto; padding:8px 12px; font-size:13px; margin-top:8px; }
-    .tabs { display:grid; grid-template-columns:1fr 1fr; gap:10px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
+    .tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
     .tabs button { margin-top:0; opacity:.65; }
     .tabs button[aria-selected="true"] { opacity:1; }
     .tool-status { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:12px; }
     .error { color:#ff7d88; } .ok { color:#62dca4; }
+    body.translation-view main { width:min(100%,1160px); }
+    .translator { margin-top:12px; }
+    .translator h2 { font-size:21px; margin:0 0 14px; }
+    .translation-modes { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+    .translation-modes button { width:auto; margin:0; padding:10px 14px; display:flex; align-items:center; gap:7px; font-size:14px; border:1px solid #8797af55; background:transparent; color:var(--tg-theme-text-color,#eef4ff); border-radius:24px; }
+    .translation-modes button[aria-pressed="true"] { background:var(--tg-theme-button-color,#6c5ce7); color:var(--tg-theme-button-text-color,#fff); border-color:transparent; }
+    .translation-modes svg { width:18px; height:18px; }
+    .translation-languages { display:grid; grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr); align-items:end; gap:10px; margin-bottom:12px; }
+    .translation-languages label { margin-top:0; }
+    .translation-languages select { min-width:0; width:100%; }
+    .translation-languages button { height:44px; margin:0; padding:0; font-size:24px; color:var(--tg-theme-text-color,#eef4ff); background:transparent; }
+    .translation-panes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .translation-pane { min-width:0; padding:14px; border:1px solid #8797af44; border-radius:18px; background:var(--tg-theme-bg-color,#0c1420); }
+    .translation-pane.result-pane { background:var(--tg-theme-secondary-bg-color,#162333); }
+    .translation-pane label { margin:0 0 10px; }
+    .translation-pane textarea { display:block; width:100%; height:clamp(180px,32vh,330px); min-height:0; max-height:330px; resize:none; overflow:auto; scrollbar-gutter:stable; overscroll-behavior:contain; outline:0; padding:0 6px 0 0; border-radius:0; background:transparent; line-height:1.55; font-size:17px; }
+    .translation-pane textarea::-webkit-scrollbar { width:8px; }
+    .translation-pane textarea::-webkit-scrollbar-track { background:#8797af22; border-radius:8px; }
+    .translation-pane textarea::-webkit-scrollbar-thumb { background:#8797af88; border-radius:8px; }
+    .translation-footer { display:flex; justify-content:space-between; align-items:center; gap:10px; min-height:36px; margin-top:12px; font-size:13px; color:var(--tg-theme-hint-color,#95a4b8); }
+    .translation-footer button { width:auto; margin:0; padding:7px 10px; font-size:13px; background:transparent; color:var(--tg-theme-text-color,#eef4ff); }
+    .translation-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    .translation-actions button { margin:0; width:auto; padding:10px 16px; }
+    .translation-upload { border:1px dashed #8797af66; border-radius:12px; text-align:center; padding:16px; margin-bottom:14px; }
+    .translation-upload.drag-over { border-color:var(--tg-theme-button-color,#6c5ce7); }
+    .translation-upload button { width:auto; margin:8px 4px; padding:10px 14px; font-size:14px; }
+    .translation-upload img { display:block; width:100%; max-height:210px; object-fit:contain; margin:10px auto; border-radius:8px; }
+    #translation-file-name { overflow-wrap:anywhere; font-size:13px; }
+    #translation-status { min-height:22px; }
+    @media (max-width:650px) { .translation-panes { grid-template-columns:1fr; } .translation-pane textarea { height:clamp(165px,26vh,250px); max-height:250px; } }
+    @media (max-width:380px) { .tabs button { padding:11px 6px; font-size:13px; } .translation-modes button { padding:9px 10px; } .translation-languages { gap:6px; grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); } .translation-languages select { padding:10px 5px; font-size:14px; } }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
     @media (max-width:380px) { .appearance-actions { grid-template-columns:1fr; } }
   </style>
@@ -58,6 +89,7 @@
   <nav class="tabs" role="tablist" aria-label="Разделы Дельты">
     <button id="tab-rp" role="tab" aria-controls="rp-panel" aria-selected="true">RP и облик</button>
     <button id="tab-tools" role="tab" aria-controls="tools-panel" aria-selected="false">Полезное</button>
+    <button id="tab-translate" role="tab" aria-controls="translate-panel" aria-selected="false">Переводчик</button>
   </nav>
   <div id="rp-panel" role="tabpanel" aria-labelledby="tab-rp">
   <section class="card">
@@ -205,6 +237,45 @@
       <div id="download-status" class="tool-status" role="status"></div>
       <details><summary>Как это работает?</summary><p class="muted">YouTube, Instagram, TikTok, Vimeo, VK и VK Видео, включая клипы, X/Twitter. Подойдут ссылки vk.com, vk.ru, vkvideo.ru, x.com и twitter.com. Для X поддерживаются видео и GIF: анимация придёт в чат как GIF. Ссылки fixupx.com и fxtwitter.com тоже подойдут. Нужна ссылка на пост: из нескольких роликов берём первый, ссылка /video/N выбирает нужный. Одно видео до 10 минут и 100 МБ. Крупные файлы автоматически сжимаются для отправки в Telegram; качество может снизиться. Маленькие видео отправляются без сжатия. Результат придёт в личный чат с ботом. Загрузка и сжатие могут занять до четырёх минут; доступ зависит от ограничений сайта. Некоторые ролики YouTube требуют входа или подтверждения возраста; для них нужна настроенная сессия аккаунта бота на YouTube. Приватные видео и плейлисты не поддерживаются. Новый запрос — через 30 секунд. Языковая модель не используется.</p></details>
     </section>
+  </div>
+  <div id="translate-panel" class="translator" role="tabpanel" aria-labelledby="tab-translate" hidden>
+    <h2>Переводчик Дельты</h2>
+    <div class="translation-modes" role="group" aria-label="Что переводить">
+      <button type="button" data-translation-mode="text" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 5h12M9 3v2M5 9c2 4 5 7 9 9M13 5c-1 6-5 10-10 13M15 21l4-10 4 10M17 17h4"/></svg>Текст</button>
+      <button type="button" data-translation-mode="image" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="M3 17l6-6 4 4 3-3 5 5"/></svg>Изображения</button>
+      <button type="button" data-translation-mode="document" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v5h5M8 12h8M8 16h8"/></svg>Документы</button>
+    </div>
+    <div class="translation-languages">
+      <div><label for="translation-source">Исходный язык</label><select id="translation-source"></select></div>
+      <button id="translation-swap" type="button" aria-label="Поменять языки местами" title="Поменять языки местами" disabled>⇄</button>
+      <div><label for="translation-target">Язык перевода</label><select id="translation-target"></select></div>
+    </div>
+    <div class="translation-panes">
+      <section class="translation-pane">
+        <div id="translation-upload" class="translation-upload" tabindex="0" aria-label="Загрузить файл для перевода" hidden>
+          <p id="translation-upload-hint" class="muted"></p>
+          <input id="translation-file" type="file" hidden>
+          <button id="translation-choose" type="button">Выбрать файл</button>
+          <button id="translation-paste" type="button" class="clipboard-button" hidden>Вставить картинку</button>
+          <img id="translation-preview" alt="Изображение для перевода" hidden>
+          <p id="translation-file-name" class="muted"></p>
+        </div>
+        <label id="translation-input-label" for="translation-input">Исходный текст</label>
+        <textarea id="translation-input" maxlength="5000" placeholder="Введите текст" spellcheck="false"></textarea>
+        <div class="translation-footer"><span id="translation-count">0 / 5000</span><button id="translation-clear" type="button">Очистить</button></div>
+      </section>
+      <section class="translation-pane result-pane">
+        <label for="translation-output">Перевод</label>
+        <textarea id="translation-output" placeholder="Перевод" readonly spellcheck="false"></textarea>
+        <div class="translation-footer"><span id="translation-detected"></span><button id="translation-copy" type="button" disabled>Копировать</button></div>
+      </section>
+    </div>
+    <div class="translation-actions">
+      <button id="translation-submit" type="button" disabled>Перевести</button>
+      <button id="translation-txt" type="button" class="clipboard-button" disabled>Скачать TXT</button>
+      <button id="translation-docx" type="button" class="clipboard-button" disabled>Скачать DOCX</button>
+    </div>
+    <div id="translation-status" class="tool-status" role="status" aria-live="polite"></div>
   </div>
 </main>
 <script>
@@ -543,6 +614,7 @@
     });
   }
   document.addEventListener("paste", event => {
+    if (!document.querySelector("#translate-panel").hidden) return;
     if (event.defaultPrevented || event.target?.closest?.("input,textarea,[contenteditable]")) return;
     const input=Object.values(imageInputs).find(input => input.area.contains(event.target)) || imageInputs[imagePasteTarget];
     if (!canPasteImage(input)) return;
@@ -576,9 +648,108 @@
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
   });
-  for (const name of ["rp", "tools"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
-    for (const tab of ["rp", "tools"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
+  for (const name of ["rp", "tools", "translate"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
+    for (const tab of ["rp", "tools", "translate"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
+    document.body.classList.toggle("translation-view", name === "translate");
   });
+  const translationLanguages=[['ru','Русский'],['en','Английский'],['uk','Украинский'],['be','Белорусский'],['de','Немецкий'],['fr','Французский'],['es','Испанский'],['it','Итальянский'],['pt','Португальский'],['pl','Польский'],['nl','Нидерландский'],['cs','Чешский'],['tr','Турецкий'],['kk','Казахский'],['zh','Китайский'],['ja','Японский'],['ko','Корейский'],['ar','Арабский'],['hi','Хинди'],['ka','Грузинский']];
+  const translationPanel=document.querySelector('#translate-panel'), translationInput=document.querySelector('#translation-input'), translationOutput=document.querySelector('#translation-output'), translationSource=document.querySelector('#translation-source'), translationTarget=document.querySelector('#translation-target'), translationStatus=document.querySelector('#translation-status'), translationUpload=document.querySelector('#translation-upload'), translationFileInput=document.querySelector('#translation-file'), translationPreview=document.querySelector('#translation-preview');
+  for (const [select, items] of [[translationSource,[['auto','Определить язык'],...translationLanguages]],[translationTarget,translationLanguages]]) for(const [code,label] of items) {const option=document.createElement('option'); option.value=code; option.textContent=label; select.append(option);}
+  translationSource.value='auto'; translationTarget.value='ru';
+  let translationMode='text', translationBusy=false, translationExportBusy=false, translationRevision=0, translationDetected=null, translationPreviewUrl=null, translationDraft='';
+  const translationFiles={image:null,document:null};
+  const translationLanguageName=code=>translationLanguages.find(item=>item[0]===code)?.[1] || '';
+  const updateTranslationButtons=()=>{
+    const validText=translationInput.value.trim() && translationInput.value.length<=5000;
+    document.querySelector('#translation-submit').disabled=translationBusy || (translationMode==='text' ? !validText : !translationFiles[translationMode]);
+    document.querySelector('#translation-swap').disabled=translationBusy || translationMode!=='text' || (translationSource.value==='auto' && !translationDetected) || translationOutput.value.length>5000;
+    for(const id of ['translation-copy','translation-txt','translation-docx']) document.querySelector(`#${id}`).disabled=translationBusy || translationExportBusy || !translationOutput.value;
+    for(const id of ['translation-choose','translation-paste']) document.querySelector(`#${id}`).disabled=translationBusy;
+    document.querySelector('#translation-count').textContent=translationMode==='text' ? `${translationInput.value.length} / 5000` : (translationInput.value ? `${translationInput.value.length} символов` : '');
+  };
+  const invalidateTranslation=()=>{
+    translationRevision++; translationDetected=null; translationOutput.value=''; document.querySelector('#translation-detected').textContent='';
+    translationStatus.className='tool-status'; translationStatus.textContent=translationBusy ? 'Запрос ещё выполняется. Изменённый текст переведи повторно.' : '';
+    updateTranslationButtons();
+  };
+  const renderTranslationFile=()=>{
+    if(translationPreviewUrl) {URL.revokeObjectURL(translationPreviewUrl); translationPreviewUrl=null;}
+    const file=translationFiles[translationMode]; translationPreview.hidden=true; translationPreview.removeAttribute('src');
+    document.querySelector('#translation-file-name').textContent=file ? `${file.name} · ${(file.size/1024/1024).toFixed(2)} МБ` : '';
+    if(file && translationMode==='image') {translationPreviewUrl=URL.createObjectURL(file); translationPreview.src=translationPreviewUrl; translationPreview.hidden=false;}
+  };
+  const chooseTranslationFile=file=>{
+    if(!file || translationMode==='text' || translationBusy) return;
+    if(!file.size || file.size>20*1024*1024) {translationStatus.className='tool-status error'; translationStatus.textContent='Выбери файл размером до 20 МБ.'; return;}
+    if(translationMode==='image' && !['image/jpeg','image/png','image/webp'].includes(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {translationStatus.className='tool-status error'; translationStatus.textContent='Поддерживаются JPEG, PNG и WebP.'; return;}
+    translationFiles[translationMode]=file; translationInput.value=''; invalidateTranslation(); renderTranslationFile();
+  };
+  for(const button of document.querySelectorAll('[data-translation-mode]')) button.addEventListener('click',()=>{
+    if(translationMode==='text') translationDraft=translationInput.value;
+    translationMode=button.dataset.translationMode; invalidateTranslation();
+    for(const other of document.querySelectorAll('[data-translation-mode]')) other.setAttribute('aria-pressed',String(other===button));
+    translationInput.readOnly=translationMode!=='text'; translationInput.value=translationMode==='text' ? translationDraft : '';
+    translationInput.placeholder=translationMode==='text' ? 'Введите текст' : 'Здесь появится прочитанный текст';
+    document.querySelector('#translation-input-label').textContent=translationMode==='text' ? 'Исходный текст' : 'Текст из файла';
+    translationUpload.hidden=translationMode==='text'; document.querySelector('#translation-paste').hidden=translationMode!=='image';
+    translationFileInput.accept=translationMode==='image' ? 'image/jpeg,image/png,image/webp' : '.pdf,.docx,.xlsx,.txt,.md,.csv,.json,.html,.xml,.yaml,.yml,.log,.py,.js,.ts';
+    document.querySelector('#translation-upload-hint').textContent=translationMode==='image' ? 'Перетащите картинку или вставьте из буфера. JPEG, PNG, WebP до 20 МБ.' : 'Перетащите документ. PDF, DOCX, XLSX и текстовые файлы до 20 МБ; до 60000 символов, 40 страниц PDF или 4 страниц скана. Результат — текст перевода.';
+    renderTranslationFile(); updateTranslationButtons();
+  });
+  translationInput.addEventListener('input',()=>{if(translationMode==='text') translationDraft=translationInput.value; invalidateTranslation();});
+  for(const select of [translationSource,translationTarget]) select.addEventListener('change',invalidateTranslation);
+  document.querySelector('#translation-clear').addEventListener('click',()=>{translationInput.value=''; if(translationMode==='text') translationDraft=''; else translationFiles[translationMode]=null; invalidateTranslation(); renderTranslationFile();});
+  document.querySelector('#translation-swap').addEventListener('click',()=>{
+    const source=translationSource.value==='auto' ? translationDetected : translationSource.value;
+    if(!source || translationBusy || translationMode!=='text' || translationOutput.value.length>5000) return;
+    translationInput.value=translationOutput.value || translationInput.value; translationDraft=translationInput.value;
+    translationSource.value=translationTarget.value; translationTarget.value=source; invalidateTranslation();
+  });
+  document.querySelector('#translation-choose').addEventListener('click',()=>{translationFileInput.value=''; translationFileInput.click();});
+  translationFileInput.addEventListener('change',()=>chooseTranslationFile(translationFileInput.files[0]));
+  translationUpload.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer?.types || []).includes('Files')) {event.preventDefault(); if(!translationBusy) translationUpload.classList.add('drag-over');}});
+  translationUpload.addEventListener('dragleave',()=>translationUpload.classList.remove('drag-over'));
+  translationUpload.addEventListener('drop',event=>{translationUpload.classList.remove('drag-over'); const file=event.dataTransfer?.files?.[0]; if(file) {event.preventDefault(); chooseTranslationFile(file);}});
+  translationPanel.addEventListener('paste',event=>{if(translationMode!=='image' || translationBusy) return; const file=Array.from(event.clipboardData?.files || []).find(item=>item.type.startsWith('image/')) || Array.from(event.clipboardData?.items || []).find(item=>item.kind==='file' && item.type.startsWith('image/'))?.getAsFile(); if(file) {event.preventDefault(); chooseTranslationFile(file);}});
+  document.querySelector('#translation-paste').addEventListener('click',async()=>{
+    const revision=translationRevision;
+    try {
+      if(!navigator.clipboard?.read) throw new Error('Используй Ctrl+V в области загрузки или выбери файл.');
+      const items=await navigator.clipboard.read(); const item=items.find(item=>item.types.some(type=>['image/png','image/jpeg','image/webp'].includes(type)));
+      if(!item) throw new Error('В буфере нет картинки.');
+      const type=item.types.find(type=>['image/png','image/jpeg','image/webp'].includes(type)); const blob=await item.getType(type);
+      if(translationMode==='image' && translationRevision===revision) chooseTranslationFile(new File([blob],`clipboard.${type.split('/')[1]}`,{type}));
+    } catch(error) {if(translationMode==='image' && translationRevision===revision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message || 'Не удалось прочитать буфер. Выбери файл.';}}
+  });
+  document.querySelector('#translation-submit').addEventListener('click',async()=>{
+    if(translationBusy) return;
+    const revision=translationRevision, mode=translationMode, source=translationSource.value, target=translationTarget.value, text=translationInput.value, file=translationFiles[mode];
+    translationBusy=true; updateTranslationButtons(); translationStatus.className='tool-status'; translationStatus.textContent=mode==='text' ? 'Перевожу…' : 'Читаю файл и перевожу… Большой документ может занять несколько минут.';
+    try {
+      if(!initData) throw new Error('Открой переводчик внутри Telegram.');
+      const result=mode==='text' ? await api('POST',{text,source,target},'/api/tools/translate') : await api('POST',file,'/api/tools/translate/file',{'X-Translation-Options':encodeURIComponent(JSON.stringify({mode,source,target,file_name:file.name.slice(0,160)}))});
+      if(revision!==translationRevision) return;
+      translationOutput.value=result.text; translationDetected=result.detected_source;
+      if(mode!=='text') translationInput.value=result.source_text || '';
+      document.querySelector('#translation-detected').textContent=source==='auto' && translationDetected ? `Определён язык: ${translationLanguageName(translationDetected)}` : '';
+      translationStatus.textContent='Готово.'; translationStatus.className='tool-status ok';
+    } catch(error) {if(revision===translationRevision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message;}}
+    finally {translationBusy=false; if(revision!==translationRevision) translationStatus.textContent='Данные изменились. Нажми «Перевести» для нового запроса.'; updateTranslationButtons();}
+  });
+  document.querySelector('#translation-copy').addEventListener('click',async()=>{try {await navigator.clipboard.writeText(translationOutput.value); translationStatus.className='tool-status ok'; translationStatus.textContent='Перевод скопирован.';} catch {translationOutput.focus(); translationOutput.select(); translationStatus.textContent='Перевод выделен. Скопируй его вручную.';}});
+  const downloadTranslation=(blob,extension)=>{const url=URL.createObjectURL(blob), link=document.createElement('a'); link.href=url; link.download=`translation-${translationTarget.value}.${extension}`; document.body.append(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000);};
+  document.querySelector('#translation-txt').addEventListener('click',()=>{if(translationOutput.value) downloadTranslation(new Blob(['\ufeff',translationOutput.value],{type:'text/plain;charset=utf-8'}),'txt');});
+  document.querySelector('#translation-docx').addEventListener('click',async()=>{
+    if(!translationOutput.value || translationExportBusy) return;
+    const text=translationOutput.value, revision=translationRevision; translationExportBusy=true; updateTranslationButtons(); translationStatus.textContent='Создаю DOCX…';
+    try {
+      const response=await fetch('/api/tools/translate/export',{method:'POST',headers:{'X-Telegram-Init-Data':initData,'Content-Type':'application/json'},body:JSON.stringify({text})});
+      if(!response.ok) throw new Error(await response.text());
+      const blob=await response.blob(); if(revision===translationRevision) {downloadTranslation(blob,'docx'); translationStatus.className='tool-status ok'; translationStatus.textContent='DOCX готов к скачиванию.';}
+    } catch(error) {if(revision===translationRevision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message;}}
+    finally {translationExportBusy=false; updateTranslationButtons();}
+  });
+  updateTranslationButtons();
   const toolCall = async (button, statusId, tool, body, done) => {
     const output=document.querySelector(statusId); button.disabled=true; output.className="tool-status"; output.textContent="Обрабатываю…";
     try { if (!initData) throw new Error("Открой панель внутри Telegram."); const result=await api("POST", body, `/api/tools/${tool}`); done(result, output); }

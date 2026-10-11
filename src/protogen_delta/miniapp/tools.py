@@ -1,17 +1,19 @@
-"""Инструменты Mini App без вызовов языковой модели."""
+"""Инструменты Mini App и отдельный текстовый перевод."""
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import FSInputFile
 
+from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.utilities import _id_keyboard
 from protogen_delta.services.media_download import MediaDownloader
+from protogen_delta.services.translation import TranslationError, TranslationService
 
 
 class ToolsBusyError(ValueError):
@@ -25,12 +27,77 @@ class MiniAppTools:
         self,
         bot: Bot,
         downloader: MediaDownloader,
+        *,
+        translator: TranslationService | None = None,
     ) -> None:
         self._bot = bot
         self._downloader = downloader
         self._pending: set[int] = set()
         self._slots = asyncio.Semaphore(2)
         self._download_limiter = UserRateLimiter(cooldown_seconds=30)
+        self._translator = translator
+        self._translation_pending: set[int] = set()
+        self._translation_slots = asyncio.Semaphore(2)
+        self._translation_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._translation_metrics = OperationMetrics(capacity=2)
+
+    def translation_snapshot(self) -> OperationSnapshot:
+        return self._translation_metrics.snapshot()
+
+    async def translate(
+        self, user_id: int, text: str, source: str, target: str
+    ) -> dict[str, object]:
+        """Ограничить параллельные переводы, не затрагивая чат и загрузчик."""
+        async with self._translation_slot(user_id):
+            assert self._translator is not None
+            return await self._translator.translate(text, source, target)
+
+    async def translate_file(
+        self,
+        user_id: int,
+        read_file: Callable[[], Awaitable[bytes]],
+        file_name: str,
+        mime_type: str,
+        mode: str,
+        source: str,
+        target: str,
+    ) -> dict[str, object]:
+        async with self._translation_slot(user_id):
+            assert self._translator is not None
+            async with asyncio.timeout(300):
+                return await self._translator.translate_file(
+                    await read_file(), file_name, mime_type, mode, source, target
+                )
+
+    @asynccontextmanager
+    async def _translation_slot(self, user_id: int) -> AsyncIterator[None]:
+        if self._translator is None:
+            raise TranslationError("Переводчик сейчас недоступен.")
+        if user_id in self._translation_pending:
+            raise ToolsBusyError("Предыдущий перевод ещё выполняется.")
+        self._translation_pending.add(user_id)
+        acquired = False
+        try:
+            with self._translation_metrics.measure(queued=True) as measurement:
+                try:
+                    await asyncio.wait_for(
+                        self._translation_slots.acquire(), timeout=0.1
+                    )
+                    acquired = True
+                except TimeoutError as error:
+                    raise ToolsBusyError(
+                        "Переводчик занят. Попробуй чуть позже."
+                    ) from error
+                if not self._translation_limiter.allow(user_id):
+                    raise ToolsBusyError(
+                        "Подожди пару секунд перед следующим переводом."
+                    )
+                measurement.start()
+                yield
+        finally:
+            self._translation_pending.discard(user_id)
+            if acquired:
+                self._translation_slots.release()
 
     async def lookup_id(self, user_id: int, target: str) -> dict[str, object]:
         """Не раскрывать приватные чаты по произвольному числовому ID."""

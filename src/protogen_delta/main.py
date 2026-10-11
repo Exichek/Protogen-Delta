@@ -80,6 +80,7 @@ from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
+from protogen_delta.services.translation import TranslationService
 from protogen_delta.services.user_facts import UserFactsService
 
 logger = logging.getLogger(__name__)
@@ -505,6 +506,10 @@ async def main() -> None:
         await memories_repository.enable_proactive_for_all()
 
         if settings.mini_app_server_enabled:
+            mini_app_tools = MiniAppTools(
+                bot, downloader, translator=TranslationService(deepseek, native_work)
+            )
+            health.add_diagnostics("translation", mini_app_tools.translation_snapshot)
             mini_app_server = MiniAppServer(
                 settings.telegram_token,
                 user_states,
@@ -513,7 +518,7 @@ async def main() -> None:
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
                 response_engine=response_engine,
                 on_mode_change=on_mode_change,
-                tools=MiniAppTools(bot, downloader),
+                tools=mini_app_tools,
                 native_work=native_work,
                 runtime_health=health,
                 fetish_triggers=fetish_triggers,
