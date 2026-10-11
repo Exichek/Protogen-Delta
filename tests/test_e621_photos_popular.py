@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import date, timedelta
 from io import BytesIO
@@ -208,7 +209,7 @@ def test_popular_menu_browses_without_tags_and_preserves_preferences(
 
 
 def test_old_preferences_schema_migrates_without_reset(tmp_path: Path) -> None:
-    with sqlite3.connect(tmp_path / "e621.db") as connection:
+    with closing(sqlite3.connect(tmp_path / "e621.db")) as connection, connection:
         connection.execute(
             "CREATE TABLE search_preferences (user_id INTEGER PRIMARY KEY, "
             "media_filter TEXT NOT NULL, search_order TEXT NOT NULL, result_count INTEGER NOT NULL)"

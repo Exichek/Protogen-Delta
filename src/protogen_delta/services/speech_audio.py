@@ -23,6 +23,10 @@ def prepare_speech_audio(data: bytes) -> bytes:
                 samples.extend(chunk[: limit - len(samples)])
             if len(samples) >= limit:
                 break
+        if len(samples) < limit:
+            for converted in resampler.resample(None):
+                chunk = converted.to_ndarray().tobytes()
+                samples.extend(chunk[: limit - len(samples)])
     if not samples:
         raise ValueError("audio_empty")
     output = io.BytesIO()

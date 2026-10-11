@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import quote
@@ -361,7 +362,7 @@ def test_profile_migration_keeps_old_private_and_group_rows(tmp_path: Path) -> N
                 state.delta_appearance = "old appearance"
                 state.roleplay_character = "old character"
                 state.delta_appearance_thumbnail = "old thumbnail"
-        with sqlite3.connect(tmp_path / "user_states.db") as db:
+        with closing(sqlite3.connect(tmp_path / "user_states.db")) as db, db:
             for table in ("user_states", "conversation_states"):
                 for column in (
                     "delta_appearance_profile",
