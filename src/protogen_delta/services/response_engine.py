@@ -43,6 +43,10 @@ from protogen_delta.services.appearance_analysis import (
 from protogen_delta.services.appearance_description import (
     validate_description,
 )
+from protogen_delta.services.appearance_preferences_query import (
+    appearance_preferences_reply,
+    is_appearance_preferences_query,
+)
 from protogen_delta.services.appearance_profile_context import (
     appearance_profile_context,
 )
@@ -438,6 +442,22 @@ class ResponseEngine:
             if not remaining:
                 return PreparedReply("RP-режим завершён.")
             user_message = remaining
+
+        if (
+            not images
+            and attachment_text is None
+            and model_message_override is None
+            and is_appearance_preferences_query(user_message)
+        ):
+            reply = (
+                appearance_preferences_reply(
+                    user_state, self._config.fetish_triggers, self._config.fetish_names
+                )
+                if use_personal_facts
+                else "Личные настройки облика показываю только по твоему отдельному "
+                "вопросу в личном чате."
+            )
+            return PreparedReply(reply, user_message, remember_history=False)
 
         configuration = scene_configuration(user_message) if not stopped else None
         character = scene_character(user_message) if not stopped else None

@@ -11,6 +11,9 @@ from protogen_delta.handlers.rp import (
     RP_DISABLED_REPLY,
     is_roleplay_stop_message,
 )
+from protogen_delta.services.appearance_preferences_query import (
+    is_appearance_preferences_query,
+)
 from protogen_delta.services.capabilities import is_capability_overview
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.stickers import ContextualStickerService
@@ -106,7 +109,11 @@ def create_text_router(
                     create_reply_delivery(
                         message,
                         bot,
-                        sticker_service,
+                        (
+                            None
+                            if is_appearance_preferences_query(message.text)
+                            else sticker_service
+                        ),
                         user_id=user_id,
                         format_capabilities=is_capability_overview(message.text),
                     ),

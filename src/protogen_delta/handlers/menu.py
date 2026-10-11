@@ -89,7 +89,7 @@ def _keyboard(page: str, mini_app_url: str | None) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Mini App",
+                    text="RP и функции",
                     web_app=WebAppInfo(url=mini_app_url),
                 )
             ]

@@ -44,7 +44,7 @@ def test_menu_shows_sections_and_optional_mini_app() -> None:
     assert {button.text for button in buttons} >= {
         "💬 Общение и RP",
         "🎨 Арты",
-        "🚀 Открыть Mini App",
+        "RP и функции",
     }
     mini_button = next(button for button in buttons if button.web_app is not None)
     assert mini_button.web_app.url == "https://delta.example/app"

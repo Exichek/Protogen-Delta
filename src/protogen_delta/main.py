@@ -516,6 +516,8 @@ async def main() -> None:
                 tools=MiniAppTools(bot, downloader),
                 native_work=native_work,
                 runtime_health=health,
+                fetish_triggers=fetish_triggers,
+                fetish_names=fetish_names,
             )
             await mini_app_server.start()
 
@@ -531,6 +533,7 @@ async def main() -> None:
             bot=bot,
             deepseek=deepseek,
             repository=memories_repository,
+            user_states=user_states,
             system_prompt=core_prompt,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
