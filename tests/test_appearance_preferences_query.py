@@ -209,6 +209,7 @@ def test_failed_delivery_can_retry_without_history_or_model_calls() -> None:
         delivered = AsyncMock()
         await engine.respond_and_deliver(42, QUESTION, delivered)
         delivered.assert_awaited_once()
+        assert delivered.await_args is not None
         assert "SAVED_VALUE" in delivered.await_args.args[0]
         assert not state.history and state.reply_count == 1
         model.chat.assert_not_awaited()
@@ -229,24 +230,30 @@ def test_metadata_reply_does_not_trigger_sticker_reaction() -> None:
     router = create_text_router(engine, sticker_service=stickers)
     asyncio.run(_call_first_handler(router, message))
     answer.assert_awaited_once()
+    assert answer.await_args is not None
     assert "SAVED_VALUE" in answer.await_args.args[0]
     stickers.maybe_send.assert_not_awaited()
     model.chat.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "options",
-    [
-        {"attachment_text": "Содержимое документа"},
-        {"model_message_override": "Содержимое вложения"},
-    ],
-)
-def test_attachments_keep_normal_model_handling(options: dict[str, str]) -> None:
+@pytest.mark.parametrize("attachment", ["document", "override"])
+def test_attachments_keep_normal_model_handling(attachment: str) -> None:
     engine, _, model, *_ = _create_engine()
     state = engine._user_states.get(42)
     state.delta_appearance = "Облик"
     state.delta_appearance_profile = AppearanceProfile(fetishes="SAVED_VALUE").encode()
-    reply = asyncio.run(engine.respond(42, QUESTION, **options))
+    reply = asyncio.run(
+        engine.respond(
+            42,
+            QUESTION,
+            attachment_text=(
+                "Содержимое документа" if attachment == "document" else None
+            ),
+            model_message_override=(
+                "Содержимое вложения" if attachment == "override" else None
+            ),
+        )
+    )
     assert reply == "Ответ"
     model.chat.assert_awaited_once()
     assert "SAVED_VALUE" not in model.chat.await_args.kwargs["system_prompt"]
