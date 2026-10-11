@@ -169,6 +169,8 @@
     <div id="delta-profile-panel">
       <p><b>Характер и поведение этого облика Дельты</b></p>
       <p class="muted" id="delta-profile-hint">Для текущего облика. Заполни вручную: эти сведения не определяются по картинке.</p>
+      <label for="delta-fetishes">Фетиши и предпочтения</label>
+      <textarea id="delta-fetishes" maxlength="1000" rows="3" placeholder="Например: Бдсм, кроссдрессинг, унижения, риминг" disabled></textarea>
       <label for="delta-personality">Характер Дельты</label>
       <textarea id="delta-personality" maxlength="1000" rows="3" placeholder="Например: любопытный, упрямый, сдержанный; постепенно открывается собеседнику" disabled></textarea>
       <label for="delta-behavior">Манера поведения Дельты</label>
@@ -249,7 +251,7 @@
   const appearanceEditor = document.querySelector("#appearance-editor");
   const editText = document.querySelector("#appearance-edit-text");
   let appearanceEditing = false, savedDescription = "", editOriginal = "", savedSpecies = null;
-  const profileFields = ["personality", "behavior", "preferences", "boundaries"];
+  const profileFields = ["personality", "behavior", "preferences", "fetishes", "boundaries"];
   const emptyProfile = () => Object.fromEntries(profileFields.map(name => [name, ""]));
   const profileDraft = () => Object.fromEntries(profileFields.map(name => [name, document.querySelector(`#delta-${name}`).value.trim()]));
   let savedProfile = emptyProfile(), characterBusy = false, settingsBusy = false, characterSnapshot = "";
