@@ -31,7 +31,7 @@ class RuntimeHealth:
     def add_diagnostics(
         self, name: str, snapshot: Callable[[], OperationSnapshot]
     ) -> None:
-        if name not in {"llm", "audio", "native", "whisper"}:
+        if name not in {"llm", "audio", "native", "whisper", "translation"}:
             raise ValueError("Неизвестная подсистема диагностики")
         self._diagnostics[name] = snapshot
 

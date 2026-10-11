@@ -44,11 +44,13 @@ def test_require_string_dict_rejects_invalid_value() -> None:
 
 @pytest.mark.parametrize("pack_available", [None, True, False])
 @pytest.mark.parametrize("provider", ["deepseek", "openrouter"])
+@pytest.mark.parametrize("mini_app_enabled", [False, True])
 def test_main_builds_application_and_starts_polling(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     pack_available: bool | None,
     provider: str,
+    mini_app_enabled: bool,
 ) -> None:
     """main должен собрать приложение и запустить polling."""
     settings = Settings(
@@ -64,6 +66,7 @@ def test_main_builds_application_and_starts_polling(
         admin_ids=frozenset({123}),
         brave_search_api_key="brave-key",
         conversation_history_limit=12,
+        mini_app_server_enabled=mini_app_enabled,
         user_state_retention_seconds=3600.0,
     )
 
@@ -257,6 +260,11 @@ def test_main_builds_application_and_starts_polling(
     speech_transcriber_constructor_mock = Mock(return_value=speech_transcriber)
 
     set_commands_mock = AsyncMock()
+    mini_app_mock = Mock()
+    mini_app_mock.start = AsyncMock()
+    mini_app_mock.close = AsyncMock()
+    mini_app_constructor = Mock(return_value=mini_app_mock)
+    monkeypatch.setattr(main_module, "MiniAppServer", mini_app_constructor)
 
     monkeypatch.setattr(
         main_module,
@@ -625,6 +633,13 @@ def test_main_builds_application_and_starts_polling(
     )
 
     deepseek_mock.close.assert_awaited_once_with()
+    if mini_app_enabled:
+        mini_app_mock.start.assert_awaited_once_with()
+        mini_app_mock.close.assert_awaited_once_with()
+        tools = mini_app_constructor.call_args.kwargs["tools"]
+        assert tools._translator._model is deepseek_mock
+    else:
+        mini_app_constructor.assert_not_called()
     bot_mock.session.close.assert_awaited_once_with()
 
 
