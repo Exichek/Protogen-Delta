@@ -36,6 +36,7 @@ from protogen_delta.services.appearance_image import (
     prepare_appearance_upload,
 )
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
@@ -107,6 +108,8 @@ class MiniAppServer:
         tools: MiniAppTools | None = None,
         native_work: WorkRunner | None = None,
         runtime_health: RuntimeHealth | None = None,
+        fetish_triggers: FetishTriggers | None = None,
+        fetish_names: dict[str, str] | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -124,6 +127,8 @@ class MiniAppServer:
         self._tools = tools
         self._native_work = native_work or NativeWorkPool(2)
         self._runtime_health = runtime_health
+        self._fetish_triggers = fetish_triggers or {}
+        self._fetish_names = fetish_names or {}
         self._appearance_pending: set[int] = set()
         self._appearance_slots = asyncio.Semaphore(2)
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
@@ -362,9 +367,17 @@ class MiniAppServer:
         return web.json_response(response, headers={"Cache-Control": "no-store"})
 
     def _profile(self, state: UserState, user: MiniAppUser) -> dict[str, Any]:
-        return _profile(
+        response = _profile(
             state, user, appearance_upload_enabled=self._response_engine is not None
         )
+        appearance_profile = cast(dict[str, str], response["delta_appearance_profile"])
+        response["delta_appearance_topics"] = [
+            {"key": key, "name": self._fetish_names.get(key, key)}
+            for key in detect_fetishes(
+                appearance_profile["fetishes"], self._fetish_triggers
+            )
+        ]
+        return response
 
     async def _upload_character_appearance(self, request: web.Request) -> web.Response:
         return await self._upload_appearance(request, target="user")
