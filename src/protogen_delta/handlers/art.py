@@ -2,11 +2,15 @@
 
 import logging
 import random
+from typing import Literal
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.images import ImagesRepository
 
 logger = logging.getLogger(__name__)
@@ -15,28 +19,54 @@ logger = logging.getLogger(__name__)
 def create_art_router(
     images_repository: ImagesRepository,
     art_chat_id: int,
+    admin_ids: frozenset[int] = frozenset(),
+    sources: ArtSourcesRepository | None = None,
+    user_states: UserStateStore | None = None,
 ) -> Router:
     """Создать роутер для работы с артами."""
     router = Router(name=__name__)
 
-    @router.message(F.photo)
+    def is_admin(message: Message) -> bool:
+        return message.from_user is not None and message.from_user.id in admin_ids
+
+    def allowed(message: Message) -> bool:
+        chats = sources.get_all() if sources is not None else [art_chat_id]
+        return message.chat.id in chats and is_admin(message)
+
+    def allowed_channel(message: Message) -> bool:
+        # У поста канала обычно нет from_user. Доверяем только источнику,
+        # который явно подключил администратор приложения.
+        chats = sources.get_all() if sources is not None else [art_chat_id]
+        return (
+            getattr(message.chat, "type", None) == "channel"
+            and message.chat.id in chats
+        )
+
+    @router.channel_post(F.photo, allowed_channel)
+    @router.message(F.photo, allowed)
     async def save_photo(message: Message) -> None:
-        """Сохранить арт, присланный в разрешённую группу."""
-        if message.chat.id != art_chat_id:
+        """Сохранить арт из разрешённой группы или канала."""
+        if not (allowed(message) or allowed_channel(message)):
             return
 
         if not message.photo:
             return
 
-        file_id = message.photo[-1].file_id
+        photo = message.photo[-1]
+        file_id = photo.file_id
+        unique_id = getattr(photo, "file_unique_id", None)
 
-        if images_repository.add(file_id):
+        if images_repository.add(
+            file_id,
+            file_unique_id=unique_id if isinstance(unique_id, str) else None,
+        ):
             logger.info("Сохранён новый арт: %s", file_id)
 
-    @router.message(F.document.mime_type.startswith("image/"))
+    @router.channel_post(F.document.mime_type.startswith("image/"), allowed_channel)
+    @router.message(F.document.mime_type.startswith("image/"), allowed)
     async def save_document(message: Message) -> None:
-        """Сохранить изображение из разрешённой группы."""
-        if message.chat.id != art_chat_id:
+        """Сохранить изображение-документ из разрешённой группы или канала."""
+        if not (allowed(message) or allowed_channel(message)):
             return
 
         document = message.document
@@ -48,7 +78,12 @@ def create_art_router(
         ):
             return
 
-        if images_repository.add(document.file_id):
+        unique_id = getattr(document, "file_unique_id", None)
+        if images_repository.add(
+            document.file_id,
+            kind="document",
+            file_unique_id=unique_id if isinstance(unique_id, str) else None,
+        ):
             logger.info(
                 "Сохранён новый арт-документ: %s",
                 document.file_id,
@@ -62,19 +97,136 @@ def create_art_router(
     @router.message(Command("randomart"))
     async def random_art(message: Message) -> None:
         """Отправить случайный арт из локального хранилища."""
+        if message.from_user is None or user_states is None:
+            await message.answer(
+                "Коллекция доступна только в режиме 18+. Выбери режим через /adult."
+            )
+            return
+        async with user_states.use(message.from_user.id) as state:
+            if state.content_mode != "adult":
+                await message.answer(
+                    "Коллекция доступна только в режиме 18+. Выбери режим через /adult."
+                )
+                return
+            # Держим блокировку до отправки: смена возраста не обгоняет выдачу.
+            await send_random_art(message)
+
+    async def send_random_art(message: Message) -> None:
         images = images_repository.get_all()
 
         if not images:
-            await message.answer("База пустая 😢 сначала добавь арты.")
+            await message.answer(
+                "В локальной коллекции /randomart пока нет артов. "
+                "Администратор может добавить фото командой /addimage в ответ "
+                "на него. Успешные результаты /e6 тоже пополняют коллекцию."
+            )
             return
 
         file_id = random.choice(images)
 
-        await message.answer_photo(
+        try:
+            kind = images_repository.get_kind(file_id)
+            if kind == "document":
+                await message.answer_document(file_id, caption="🎨 Лови артик!")
+            elif kind == "video":
+                await message.answer_video(file_id, caption="🎨 Лови артик!")
+            elif kind == "animation":
+                await message.answer_animation(file_id, caption="🎨 Лови артик!")
+            else:
+                await message.answer_photo(file_id, caption="🎨 Лови артик!")
+        except TelegramAPIError:
+            logger.warning(
+                "Не удалось отправить случайный арт: %s",
+                file_id,
+                exc_info=True,
+            )
+
+            await message.answer("Не смог отправить арт 😢 попробуй ещё раз.")
+            return
+
+        logger.info(
+            "Выдан случайный арт: %s",
             file_id,
-            caption="🎨 Лови артик!",
         )
 
-        logger.info("Выдан случайный арт: %s", file_id)
+    @router.message(Command("artchat"))
+    async def art_chat(message: Message) -> None:
+        if not is_admin(message):
+            await message.answer("⛔ У тебя нет доступа к этой команде.")
+            return
+        if sources is None:
+            await message.answer("Управление группами не настроено.")
+            return
+        parts = (message.text or "").split()
+        if len(parts) == 1 or parts[1] == "list":
+            await message.answer(
+                "Источники артов (группы и каналы): "
+                + ", ".join(map(str, sources.get_all()))
+                + f"\nВ коллекции: {images_repository.count()} артов."
+            )
+            return
+        try:
+            if parts[1] not in ("add", "remove") or len(parts) > 3:
+                raise ValueError
+            chat_id = int(parts[2]) if len(parts) == 3 else message.chat.id
+            changed = sources.change(chat_id, add=parts[1] == "add")
+        except ValueError:
+            await message.answer(
+                "Используй /artchat add -100123, /artchat remove -100123 или /artchat list."
+            )
+            return
+        await message.answer(
+            "Список источников обновлён. Сохранённые арты остаются в коллекции."
+            if changed
+            else "Список уже в таком состоянии."
+        )
+
+    @router.message(Command("addimage"))
+    async def add_image(message: Message) -> None:
+        if not is_admin(message):
+            await message.answer("⛔ У тебя нет доступа к этой команде.")
+            return
+        replied = message.reply_to_message
+        kind: Literal["photo", "document"] = "photo"
+        unique_id: str | None = None
+        parts = (message.text or "").split(maxsplit=1)
+        if replied is not None and replied.photo:
+            ids = [replied.photo[-1].file_id]
+            unique_id = getattr(replied.photo[-1], "file_unique_id", None)
+        elif (
+            replied is not None
+            and replied.document is not None
+            and (replied.document.mime_type or "").startswith("image/")
+        ):
+            ids = [replied.document.file_id]
+            kind = "document"
+            unique_id = getattr(replied.document, "file_unique_id", None)
+        else:
+            ids = parts[1].replace(",", " ").split() if len(parts) == 2 else []
+        if not ids or len(ids) > 100 or any(len(value) > 512 for value in ids):
+            await message.answer(
+                "Ответь /addimage на фото или передай до 100 file_id через пробел/запятую."
+            )
+            return
+        added = (
+            int(images_repository.add(ids[0], kind=kind, file_unique_id=unique_id))
+            if isinstance(unique_id, str)
+            else images_repository.add_many(ids, kind=kind)
+        )
+        await message.answer(
+            f"Добавлено артов: {added}. Уже были: {len(set(ids)) - added}."
+        )
+
+    def archive_without_command(message: Message) -> bool:
+        chats = sources.get_all() if sources is not None else [art_chat_id]
+        return message.chat.id in chats and not (message.text or "").startswith("/")
+
+    @router.channel_post(archive_without_command)
+    @router.message(archive_without_command)
+    async def ignore_archive_content(message: Message) -> None:
+        """Остановить разговорные роутеры для остальных сообщений источника."""
+        # Фото и документы уже сохранены выше. Видео, GIF, подписи и обычный
+        # текст в архиве не должны запускать анализ, скачивание или ответы.
+        del message
 
     return router

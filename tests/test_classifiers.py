@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.mood import MoodClassifier
@@ -52,8 +52,8 @@ def test_insult_classifier_returns_known_types(
     )
 
 
-def test_insult_classifier_converts_direct_question() -> None:
-    """Direct со знаком вопроса должен считаться question."""
+def test_insult_classifier_preserves_meaning_with_unrelated_question() -> None:
+    """Вопрос в другой части сообщения не меняет тип оскорбления."""
     deepseek, mock = _create_deepseek_mock()
     mock.classify.return_value = "direct"
 
@@ -63,10 +63,10 @@ def test_insult_classifier_converts_direct_question() -> None:
     )
 
     result = asyncio.run(
-        classifier.classify("Ты тупой?"),
+        classifier.classify("Ты идиот. Который час?"),
     )
 
-    assert result == "question"
+    assert result == "direct"
 
 
 def test_insult_classifier_returns_none_for_unknown_result() -> None:
@@ -89,7 +89,7 @@ def test_insult_classifier_returns_none_for_unknown_result() -> None:
 def test_insult_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek не должна ломать классификацию оскорбления."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = InsultClassifier(
         deepseek=deepseek,
@@ -124,6 +124,7 @@ def test_insult_classifier_rejects_empty_prompt() -> None:
         ("horny", "horny"),
         ("angry", "angry"),
         ("playful", "playful"),
+        ("neutral", "neutral"),
     ],
 )
 def test_mood_classifier_returns_known_moods(
@@ -150,8 +151,8 @@ def test_mood_classifier_returns_known_moods(
     )
 
 
-def test_mood_classifier_uses_playful_for_unknown_result() -> None:
-    """Неизвестное настроение должно заменяться на playful."""
+def test_mood_classifier_uses_neutral_for_unknown_result() -> None:
+    """Неизвестная реакция должна заменяться на neutral."""
     deepseek, mock = _create_deepseek_mock()
     mock.classify.return_value = "unknown"
 
@@ -164,13 +165,13 @@ def test_mood_classifier_uses_playful_for_unknown_result() -> None:
         classifier.classify("Сообщение"),
     )
 
-    assert result == "playful"
+    assert result == "neutral"
 
 
 def test_mood_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek должна возвращать None."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = MoodClassifier(
         deepseek=deepseek,
@@ -249,7 +250,7 @@ def test_fetish_role_classifier_returns_unknown_for_invalid_result() -> None:
 def test_fetish_role_classifier_handles_deepseek_error() -> None:
     """Ошибка DeepSeek должна возвращать unknown."""
     deepseek, mock = _create_deepseek_mock()
-    mock.classify.side_effect = RuntimeError("API error")
+    mock.classify.side_effect = DeepSeekError("API error")
 
     classifier = FetishRoleClassifier(
         deepseek=deepseek,

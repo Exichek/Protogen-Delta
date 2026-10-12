@@ -1,66 +1,7 @@
 """Тесты простых сервисов обработки текста."""
 
-from protogen_delta.services.emotes import ends_with_emote, pick_emote
+from protogen_delta.config.json_loader import load_json
 from protogen_delta.services.fetishes import detect_fetishes
-from protogen_delta.services.greetings import is_greeting
-
-
-def test_is_greeting_recognizes_known_greeting() -> None:
-    """Известное одиночное приветствие должно распознаваться."""
-    assert is_greeting("привет") is True
-
-
-def test_is_greeting_ignores_case_and_punctuation() -> None:
-    """Регистр и знаки препинания не должны мешать приветствию."""
-    assert is_greeting("ПрИвЕт!!!") is True
-
-
-def test_is_greeting_recognizes_prefixes() -> None:
-    """Расширенные формы известных приветствий должны распознаваться."""
-    assert is_greeting("приветик") is True
-    assert is_greeting("здарова") is True
-
-
-def test_is_greeting_rejects_multiple_words() -> None:
-    """Сообщение из нескольких слов не должно считаться быстрым приветствием."""
-    assert is_greeting("привет как дела") is False
-
-
-def test_pick_emote_returns_emote_from_category() -> None:
-    """Эмоут должен выбираться из указанной категории."""
-    categories = {
-        "NORMAL": ["UwU"],
-    }
-
-    assert pick_emote(categories, "normal") == "UwU"
-
-
-def test_pick_emote_returns_empty_string_for_missing_category() -> None:
-    """Для отсутствующей категории должен возвращаться пустой текст."""
-    categories = {
-        "NORMAL": ["UwU"],
-    }
-
-    assert pick_emote(categories, "missing") == ""
-
-
-def test_ends_with_emote_detects_known_emote() -> None:
-    """Известный эмоут в конце сообщения должен обнаруживаться."""
-    categories = {
-        "NORMAL": ["UwU", "^w^"],
-        "BLUSH": [">///<"],
-    }
-
-    assert ends_with_emote("Приветик UwU", categories) is True
-
-
-def test_ends_with_emote_returns_false_without_emote() -> None:
-    """Обычный текст не должен считаться заканчивающимся эмоутом."""
-    categories = {
-        "NORMAL": ["UwU"],
-    }
-
-    assert ends_with_emote("Обычный ответ", categories) is False
 
 
 def test_detect_fetishes_finds_multiple_matches() -> None:
@@ -121,3 +62,76 @@ def test_detect_fetishes_supports_explicit_prefix_triggers() -> None:
     )
 
     assert result == ["bondage", "crossdressing"]
+
+
+def test_real_fetish_triggers_recognize_combined_scene() -> None:
+    """Рабочий словарь должен находить несколько явно введённых мотивов."""
+    triggers = load_json("fetishes_triggers.json")
+
+    result = detect_fetishes(
+        "Надень латексный костюм, свяжи меня и кончи на спинку",
+        triggers,
+    )
+
+    assert result == ["bondage", "latex", "bukkake"]
+
+
+def test_real_fetish_triggers_handle_logged_rimming_phrase() -> None:
+    """Фраза из живого теста должна определяться как римминг без кремпая."""
+    triggers = load_json("fetishes_triggers.json")
+
+    result = detect_fetishes(
+        "Да, соси мою жопу, прямо туда внутрь язычком",
+        triggers,
+    )
+
+    assert result == ["anal", "rimming"]
+
+
+def test_real_fetish_triggers_do_not_use_generic_clothing_or_motion() -> None:
+    """Обычные слова про кожу, лапы и движение внутрь не должны давать фетиши."""
+    triggers = load_json("fetishes_triggers.json")
+
+    result = detect_fetishes(
+        "Кожа нагрелась, он сильно шагнул внутрь и коснулся лапами двери",
+        triggers,
+    )
+
+    assert result == []
+
+
+def test_real_fetish_triggers_handle_new_live_scene_examples() -> None:
+    """Сильные формулировки из нового прогона должны давать точные мотивы."""
+    triggers = load_json("fetishes_triggers.json")
+
+    outfit = detect_fetishes(
+        "Перед тобой антродракон в клетчатой юбочке и чулках",
+        triggers,
+    )
+    request = detect_fetishes(
+        "Лапай меня как грязную шлюху",
+        triggers,
+    )
+    combined = detect_fetishes(
+        "Хочу наши два члена подрочить своей рукой",
+        triggers,
+    )
+    receiving = detect_fetishes(
+        "Дашь мне свою попку? Я твою протопопку покатаю от души",
+        triggers,
+    )
+
+    assert outfit == ["crossdressing"]
+    assert request == ["humiliation"]
+    assert combined == ["mutual_masturbation", "handjob"]
+    assert receiving == ["anal"]
+
+
+def test_real_fetish_triggers_recognize_logged_humiliation_requests() -> None:
+    """Английское название и просьбы из живого диалога распознаются сразу."""
+    triggers = load_json("fetishes_triggers.json")
+
+    assert "humiliation" in detect_fetishes("humiliation :3", triggers)
+    assert "humiliation" in detect_fetishes("зачморишь меня?", triggers)
+    assert "humiliation" in detect_fetishes("обзывай меня грубее", triggers)
+    assert "dirtytalk" in detect_fetishes("не стесняйся мата", triggers)

@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +32,11 @@ class InsultClassifier:
                 self._prompt,
                 user_message,
             )
-        except Exception:
+        except DeepSeekError:
             logger.exception("Ошибка определения типа оскорбления")
             return "none"
 
         logger.info("Классификация оскорбления: %s", result)
-
-        # Модель иногда определяет вопрос как direct,
-        # поэтому знак вопроса используем как дополнительную подстраховку.
-        if result == "direct" and "?" in user_message:
-            logger.info("Тип оскорбления исправлен на question по знаку '?'")
-            return "question"
 
         if result == "general":
             return "general"

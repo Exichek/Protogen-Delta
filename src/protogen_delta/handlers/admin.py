@@ -1,15 +1,84 @@
 """Админские команды Telegram-бота."""
 
 import asyncio
+import logging
 import time
+from datetime import datetime, timedelta
+from html import escape
 
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
+from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.state import BotState
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.user_statistics import (
+    STATS_ZONE,
+    UserStatisticsRepository,
+)
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.user_statistics import activity_chart
+
+logger = logging.getLogger(__name__)
+
+MAX_LIST_IMAGES = 200
+LIST_IMAGES_DELAY_SECONDS = 1.0
+
+
+def _art_word(count: int) -> str:
+    """Вернуть правильную форму слова «арт» для количества."""
+    last_two_digits = count % 100
+
+    if 11 <= last_two_digits <= 14:
+        return "артов"
+
+    last_digit = count % 10
+
+    if last_digit == 1:
+        return "арт"
+
+    if 2 <= last_digit <= 4:
+        return "арта"
+
+    return "артов"
+
+
+def _parse_list_images_count(
+    text: str | None,
+) -> int | None:
+    """Получить количество артов из команды /listimages."""
+    parts = (text or "").strip().split(maxsplit=1)
+
+    if len(parts) == 1:
+        return 1
+
+    raw_count = parts[1].strip()
+
+    if not raw_count.isdigit():
+        return None
+
+    count = int(raw_count)
+
+    if count < 1:
+        return None
+
+    return min(count, MAX_LIST_IMAGES)
+
+
+def _parse_image_ids(
+    text: str | None,
+) -> list[str]:
+    """Получить уникальные file_id из команды /removeimage."""
+    parts = (text or "").strip().split(maxsplit=1)
+
+    if len(parts) < 2:
+        return []
+
+    file_ids = [file_id.strip() for file_id in parts[1].split(",") if file_id.strip()]
+
+    return list(dict.fromkeys(file_ids))
 
 
 def create_admin_router(
@@ -17,6 +86,9 @@ def create_admin_router(
     users_repository: UsersRepository,
     bot_state: BotState,
     admin_ids: frozenset[int],
+    user_statistics: UserStatisticsRepository | None = None,
+    *,
+    runtime_health: RuntimeHealth | None = None,
 ) -> Router:
     """Создать роутер административных команд."""
     router = Router(name=__name__)
@@ -29,11 +101,83 @@ def create_admin_router(
         """Сообщить пользователю об отсутствии доступа."""
         await message.answer("⛔ У тебя нет доступа к этой команде.")
 
+    @router.message(Command("userstats"))
+    async def user_stats(message: Message) -> None:
+        """Статистика доступна администратору только в личном чате."""
+        if not is_admin(message):
+            await deny_access(message)
+            return
+        if message.chat.type != "private":
+            await message.answer(
+                "Статистику пользователя смотри в личном чате: /userstats <ID>."
+            )
+            return
+        parts = (message.text or "").split()
+        user_id = message.from_user.id if message.from_user else 0
+        if (
+            len(parts) == 2
+            and parts[1].isascii()
+            and parts[1].isdigit()
+            and 0 < len(parts[1]) <= 18
+            and int(parts[1]) > 0
+        ):
+            user_id = int(parts[1])
+        elif len(parts) > 1:
+            await message.answer("Укажи Telegram ID: /userstats 123456789")
+            return
+        elif message.reply_to_message and message.reply_to_message.from_user:
+            user_id = message.reply_to_message.from_user.id
+        if user_statistics is None:
+            await message.answer("Учёт активности сейчас недоступен.")
+            return
+        now = time.time()
+        stats = await user_statistics.get(user_id, now)
+        if stats is None:
+            await message.answer("Сообщений этого пользователя с начала учёта ещё нет.")
+            return
+        today = datetime.fromtimestamp(now, STATS_ZONE).date()
+        counts = [
+            sum(
+                count
+                for day, count in stats.daily
+                if day >= (today - timedelta(days=n - 1)).isoformat()
+            )
+            for n in (1, 7, 30)
+        ]
+
+        def stamp(value: float) -> str:
+            return datetime.fromtimestamp(value, STATS_ZONE).strftime("%d.%m.%Y %H:%M")
+
+        caption = (
+            f"👤 {stats.name}"
+            + (f" (@{stats.username})" if stats.username else "")
+            + f"\nID: {stats.user_id}\nПервый учтённый контакт: {stamp(stats.first_seen)}"
+            + f"\nПоследнее сообщение: {stamp(stats.last_seen)}"
+            + f"\nСообщения сегодня / 7 дн / 30 дн / всего: {counts[0]} / {counts[1]} / {counts[2]} / {stats.total}"
+            + f"\nУчёт начат: {stamp(stats.tracking_started)} (МСК)."
+            + "\nГрафик за 365 дней. Дни до начала учёта не восстановлены."
+        )
+        chart = await asyncio.to_thread(activity_chart, stats, now)
+        await message.answer_photo(
+            BufferedInputFile(chart, filename="activity.png"),
+            caption=caption,
+            parse_mode=None,
+        )
+
     @router.message(Command("listimages"))
     async def list_images(message: Message) -> None:
         """Показать последние сохранённые арты."""
         if not is_admin(message):
             await deny_access(message)
+            return
+
+        count = _parse_list_images_count(message.text)
+
+        if count is None:
+            await message.answer(
+                "⚠️ Укажи положительное целое количество артов.\n"
+                "Пример: /listimages 10"
+            )
             return
 
         images = images_repository.get_all()
@@ -42,26 +186,37 @@ def create_admin_router(
             await message.answer("📂 База артов пуста.")
             return
 
-        text = message.text or ""
-        parts = text.strip().split(maxsplit=1)
-
-        count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
-        count = max(1, min(count, 200))
-
         last_images = images[-count:][::-1]
 
-        await message.answer(f"📂 Показываю последние {len(last_images)} артов:")
+        await message.answer(
+            f"📂 Показываю: {len(last_images)} " f"{_art_word(len(last_images))}."
+        )
 
-        for file_id in last_images:
+        for index, file_id in enumerate(last_images):
             try:
-                await message.answer_photo(
+                send = (
+                    message.answer_document
+                    if images_repository.get_kind(file_id) == "document"
+                    else message.answer_photo
+                )
+                await send(
                     file_id,
-                    caption=f"<code>{file_id}</code>",
+                    caption=f"<code>{escape(file_id)}</code>",
                     parse_mode="HTML",
                 )
-                await asyncio.sleep(1)
-            except Exception as error:
-                await message.answer(f"⚠️ Ошибка с {file_id}: {error}")
+            except TelegramAPIError:
+                logger.warning(
+                    "Не удалось отправить арт с file_id=%s",
+                    file_id,
+                    exc_info=True,
+                )
+
+                await message.answer(f"⚠️ Не удалось отправить арт с ID: {file_id}")
+
+            if index < len(last_images) - 1:
+                await asyncio.sleep(
+                    LIST_IMAGES_DELAY_SECONDS,
+                )
 
     @router.message(Command("removeimage"))
     async def remove_image(message: Message) -> None:
@@ -70,18 +225,13 @@ def create_admin_router(
             await deny_access(message)
             return
 
-        text = message.text or ""
-        parts = text.strip().split(maxsplit=1)
+        ids_to_remove = _parse_image_ids(message.text)
 
-        if len(parts) < 2:
+        if not ids_to_remove:
             await message.answer(
                 "⚠️ Укажи ID артов через запятую.\n" "Пример: /removeimage id1,id2,id3"
             )
             return
-
-        ids_to_remove = [
-            file_id.strip() for file_id in parts[1].split(",") if file_id.strip()
-        ]
 
         removed = 0
         not_found = 0
@@ -95,10 +245,10 @@ def create_admin_router(
         reply: list[str] = []
 
         if removed:
-            reply.append(f"✅ Удалено: {removed} артов")
+            reply.append(f"✅ Удалено: {removed} {_art_word(removed)}")
 
         if not_found:
-            reply.append(f"⚠️ Не найдено: {not_found} артов")
+            reply.append(f"⚠️ Не найдено: {not_found} " f"{_art_word(not_found)}")
 
         await message.answer("\n".join(reply) if reply else "⚠️ Ничего не удалено.")
 
@@ -115,7 +265,7 @@ def create_admin_router(
             await message.answer("📂 База артов пуста.")
             return
 
-        await message.answer(f"📂 В базе {count} артов.")
+        await message.answer(f"📂 В базе {count} {_art_word(count)}.")
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
@@ -124,7 +274,7 @@ def create_admin_router(
             await deny_access(message)
             return
 
-        uptime = int(time.time() - bot_state.start_time)
+        uptime = int(time.monotonic() - bot_state.start_time)
         hours = uptime // 3600
         minutes = (uptime % 3600) // 60
         seconds = uptime % 60
@@ -133,9 +283,37 @@ def create_admin_router(
             "📊 Статус бота:\n"
             f"• Uptime: {hours:02d}:{minutes:02d}:{seconds:02d}\n"
             f"• Пользователей: {users_repository.count()}\n"
-            f"• Ответов отправлено: {bot_state.reply_count}\n"
-            f"• Настроение: {bot_state.mood}"
+            f"• Ответов отправлено: {bot_state.reply_count}"
         )
+
+        if runtime_health is not None:
+            health = runtime_health.snapshot()
+            reply += "\n• Telegram polling: " + (
+                "работает" if health["polling"] else "нет свежего подтверждения"
+            )
+            names = {
+                "llm": "Модель диалога",
+                "audio": "Аудиомодель",
+                "native": "Декодеры",
+                "whisper": "Whisper",
+            }
+            outcomes = {
+                "unknown": "ещё нет запросов",
+                "ok": "успех",
+                "failed": "ошибка",
+                "cancelled": "отмена",
+            }
+            for name, data in health.get("diagnostics", {}).items():
+                capacity = data["capacity"]
+                active = str(data["active"]) + (f"/{capacity}" if capacity else "")
+                reply += (
+                    f"\n• {names[name]}: выполняется {active}, очередь {data['waiting']}; "
+                    f"завершено {data['completed']}, ошибок {data['failed']}; "
+                    f"последний исход — {outcomes[data['last_result']]}"
+                )
+                if data["recent_p95_ms"] is not None:
+                    reply += f"; p95 {data['recent_p95_ms']} мс, ожидание {data['queue_p95_ms']} мс"
+            reply += "\nМетрики с запуска; задержки по последним 128 операциям. Проверочных API-запросов нет."
 
         await message.answer(reply)
 
@@ -148,10 +326,16 @@ def create_admin_router(
 
         help_text = (
             "📖 Админские команды:\n\n"
+            "/addimage — добавить фото ответом или по file_id\n"
+            "/artchat list|add|remove — группы и каналы с артами\n"
             "/listimages <N> — показать последние N артов\n"
             "/removeimage <id1,id2,...> — удалить арты по ID\n"
             "/artcount — показать количество артов\n"
             "/status — показать статус бота\n"
+            "/userstats <ID> — активность пользователя и график (в личке)\n"
+            "/stickers — настроить контекстный стикерпак\n"
+            "/message <user_id> <текст> — сообщение от создателя\n"
+            "/broadcast <текст> — рассылка с подтверждением (только создатель)\n"
             "/ping — проверить доступность\n"
             "/ownhelp — показать эту справку"
         )

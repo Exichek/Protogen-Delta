@@ -6,10 +6,13 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 UNKNOWN_COMMAND_REPLIES = (
-    "Бзз... команда не найдена, ты че там удумал челик?🐾",
+    "Бзз... команда не найдена, ты че там удумал?🐾",
     "Такой команды нет в моей прошивке! UwU",
     "Ошибка 4787: команда не существует >w<",
     "Бзз! Ты ввёл что-то странное, попробуй /help 💜",
+    "Попробуй снова",
+    "Try again?",
+    "Oh stop it, you! Unknown command. :)",
 )
 
 
