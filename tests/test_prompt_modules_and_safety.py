@@ -26,14 +26,19 @@ from protogen_delta.services.prompt_composer import PromptComposer, PromptSectio
 
 
 @pytest.mark.parametrize("kind", ["text", "caption", "forwarded", "ordinary"])
-def test_age_middleware_handles_own_statement_before_file_processing(kind: str) -> None:
+@pytest.mark.parametrize(
+    "declaration", ["мне 16 лет", "Привет, мне пятнадцать", "I’m 15", "Я в 9 классе"]
+)
+def test_age_middleware_handles_own_statement_before_file_processing(
+    kind: str, declaration: str
+) -> None:
     async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
         message, answer = _message()
         raw = cast(Mock, message)
         raw.from_user = SimpleNamespace(id=42, is_bot=False)
-        message.text = "мне 16 лет" if kind in {"text", "forwarded"} else None
-        message.caption = "мне 16 лет" if kind == "caption" else None
+        message.text = declaration if kind in {"text", "forwarded"} else None
+        message.caption = declaration if kind == "caption" else None
         raw.forward_origin = SimpleNamespace() if kind == "forwarded" else None
         handler = AsyncMock()
         await AgeSafetyMiddleware(engine)(handler, message, {})
@@ -138,7 +143,9 @@ def test_minor_callback_interrupts_pending_delivery() -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("signal", ["стоп", "Мне 16 лет"])
+@pytest.mark.parametrize(
+    "signal", ["стоп", "Мне 16 лет", "Привет, мне 15 лет", "I’m 15", "Я школьник"]
+)
 def test_safety_signal_cancels_pending_reply_before_delivery(signal: str) -> None:
     async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
@@ -260,8 +267,12 @@ def test_quotes_other_people_and_unrelated_numbers_are_not_self_age(text: str) -
 
 
 @pytest.mark.parametrize("chat_id", [None, -100])
+@pytest.mark.parametrize(
+    "declaration",
+    ["Мне 16 лет", "Привет, мне пятнадцать", "I’m 15", "Учусь в 9 классе"],
+)
 def test_declared_minor_disables_adult_and_survives_restart(
-    tmp_path: Path, chat_id: int | None
+    tmp_path: Path, chat_id: int | None, declaration: str
 ) -> None:
     async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
@@ -271,7 +282,7 @@ def test_declared_minor_disables_adult_and_survives_restart(
             state.content_mode = "adult"
         async with states.use_conversation(42, chat_id) as state:
             state.roleplay_active = True
-        reply = await engine.respond(42, "Мне 16 лет", chat_id=chat_id)
+        reply = await engine.respond(42, declaration, chat_id=chat_id)
         assert "выключен" in reply
         model.chat.assert_not_awaited()
         restored = UserStateStore(persistence=UserStateRepository(tmp_path))
