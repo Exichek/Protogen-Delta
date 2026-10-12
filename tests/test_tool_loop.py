@@ -1,0 +1,227 @@
+"""Полный обмен assistant/tool с сохранением идентификаторов вызовов."""
+
+import asyncio
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from openai.types.chat import ChatCompletionMessage
+
+import protogen_delta.services.deepseek as module
+from protogen_delta.services.deepseek import (
+    DeepSeekAPIError,
+    DeepSeekService,
+    _forced_web_tool,
+)
+from protogen_delta.services.tools import Tool, ToolExecutor, ToolRegistry
+
+
+def response(count: int = 0, args: str = "{}") -> SimpleNamespace:
+    message = ChatCompletionMessage.model_validate(
+        {
+            "role": "assistant",
+            "content": "Итог" if not count else None,
+            "tool_calls": [
+                {
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {"name": "test", "arguments": args},
+                }
+                for i in range(count)
+            ]
+            or None,
+        }
+    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_loop_returns_tool_results_with_matching_id(
+    monkeypatch: pytest.MonkeyPatch, invalid: bool
+) -> None:
+    handler = AsyncMock(return_value={"value": 123})
+    client = Mock()
+    client.chat.completions.create = AsyncMock(
+        side_effect=[response(1, "{" if invalid else "{}"), response()]
+    )
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)])),
+    )
+    assert asyncio.run(service.chat("system", "question")) == "Итог"
+    messages = client.chat.completions.create.await_args_list[-1].kwargs["messages"]
+    output = next(m for m in messages if m["role"] == "tool")
+    assert output["tool_call_id"] == "call_0"
+    assert json.loads(output["content"])["ok"] is not invalid
+    assert handler.await_count == (0 if invalid else 1)
+    assert (
+        client.chat.completions.create.await_args.kwargs["extra_body"]["thinking"][
+            "type"
+        ]
+        == "disabled"
+    )
+
+
+def test_loop_caps_execution_and_stops_ignoring_model_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = AsyncMock(return_value={})
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response(4))
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)])),
+    )
+    assert "Не удалось" in asyncio.run(service.chat("system", "question"))
+    assert handler.await_count == 6
+    assert client.chat.completions.create.await_count == 4
+    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == "none"
+    client.chat.completions.create.return_value = response(7)
+    with pytest.raises(DeepSeekAPIError):
+        asyncio.run(service.chat("system", "question"))
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Найди в интернете новости про Python", "web_search"),
+        ("В интернете найди новости про Python", "web_search"),
+        ("Посмотри в сети свежую цену", "web_search"),
+        ("Открой https://example.org/article", "fetch_web_page"),
+        ("Не ищи в интернете, просто предположи", None),
+        ("Что такое TCP?", None),
+    ],
+)
+def test_explicit_web_requests_choose_required_tool(
+    message: str, expected: str | None
+) -> None:
+    """Явная просьба должна детерминированно выбрать web-инструмент."""
+    assert _forced_web_tool(message, {"web_search", "fetch_web_page"}) == expected
+
+
+def test_loop_forces_web_search_for_explicit_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Первый запрос модели должен принудительно использовать web_search."""
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock(return_value={})
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "web_search", "search", {"query": "query"}, ("query",), handler
+                    ),
+                    Tool("fetch_web_page", "fetch", {"url": "url"}, ("url",), handler),
+                ]
+            )
+        ),
+    )
+    asyncio.run(service.chat("system", "Найди в интернете последние новости"))
+    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "web_search"},
+    }
+
+
+def test_chat_skips_tool_schemas_when_composer_selects_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry([Tool("test", "test", {}, (), AsyncMock(return_value={}))])
+        ),
+    )
+
+    assert asyncio.run(service.chat("system", "Привет", tool_names=())) == "Итог"
+    assert "tools" not in client.chat.completions.create.await_args.kwargs
+
+
+def test_chat_handles_selected_tool_that_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Запрос к отсутствующему Brave не должен возвращать все остальные схемы."""
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "fetch_web_page",
+                        "fetch",
+                        {"url": "url"},
+                        ("url",),
+                        AsyncMock(return_value={}),
+                    )
+                ]
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        service.chat(
+            "system",
+            "Найди актуальные новости",
+            tool_names={"web_search"},
+        )
+    )
+
+    assert result == "Итог"
+    kwargs = client.chat.completions.create.await_args.kwargs
+    assert "tools" not in kwargs
+    assert "Поиск по интернету не настроен" in kwargs["messages"][1]["content"]
+
+
+def test_chat_exposes_only_requested_live_data_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=response())
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock(return_value={})
+    tools = [
+        Tool("get_current_time", "time", {}, (), handler),
+        Tool("get_exchange_rate", "rate", {}, (), handler),
+        Tool("get_weather", "weather", {}, (), handler),
+        Tool("fetch_web_page", "fetch", {}, (), handler),
+        Tool("unused", "unused", {}, (), handler),
+    ]
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry(tools)),
+    )
+    selected = {
+        "get_current_time",
+        "get_exchange_rate",
+        "get_weather",
+        "fetch_web_page",
+    }
+
+    assert asyncio.run(service.chat("system", "данные", tool_names=selected)) == "Итог"
+    schemas = client.chat.completions.create.await_args.kwargs["tools"]
+    assert {schema["function"]["name"] for schema in schemas} == selected

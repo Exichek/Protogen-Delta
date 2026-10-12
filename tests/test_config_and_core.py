@@ -135,6 +135,32 @@ def test_load_prompt_returns_stripped_text(
     assert result == "SYSTEM PROMPT"
 
 
+def test_load_prompt_supports_subdirectories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Промпты должны загружаться и из вложенных каталогов."""
+    personality_dir = tmp_path / "personality"
+    personality_dir.mkdir()
+
+    path = personality_dir / "core.txt"
+
+    path.write_text(
+        "\n  CORE PROMPT  \n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        prompt_loader_module,
+        "PROMPTS_DIR",
+        tmp_path,
+    )
+
+    result = load_prompt("personality/core.txt")
+
+    assert result == "CORE PROMPT"
+
+
 def test_load_prompt_raises_for_missing_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,6 +199,41 @@ def test_setup_logging_uses_requested_level(
     )
 
 
+def test_setup_logging_adds_context_filter_to_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Настройка логов должна добавлять корреляционный фильтр обработчикам."""
+    handler_mock = Mock()
+    root_logger_mock = Mock()
+    root_logger_mock.handlers = [handler_mock]
+
+    real_logging = logging_config_module.logging
+
+    logging_mock = Mock()
+    logging_mock.INFO = real_logging.INFO
+    logging_mock.basicConfig = Mock()
+    logging_mock.getLogger = Mock(
+        return_value=root_logger_mock,
+    )
+
+    monkeypatch.setattr(
+        logging_config_module,
+        "logging",
+        logging_mock,
+    )
+
+    setup_logging("info")
+
+    handler_mock.addFilter.assert_called_once()
+
+    context_filter = handler_mock.addFilter.call_args.args[0]
+
+    assert isinstance(
+        context_filter,
+        logging_config_module.LogContextFilter,
+    )
+
+
 def test_setup_logging_rejects_unknown_level() -> None:
     """Неизвестный уровень логирования должен приводить к ошибке."""
     with pytest.raises(
@@ -202,12 +263,42 @@ def test_set_commands_configures_telegram_menu() -> None:
 
     assert [command.command for command in commands] == [
         "start",
-        "randomart",
+        "funcs",
+        "menu",
+        "e6",
+        "rp",
+        "adult",
+        "id",
+        "download",
+        "source",
+        "memory",
+        "reset",
         "help",
     ]
 
     assert [command.description for command in commands] == [
-        "🚀 Запустить бота",
-        "🎨 Случайный арт",
+        "🚀 Познакомиться с Дельтой",
+        "📋 Все функции и команды",
+        "⚙️ Панель возможностей",
+        "🔎 Поиск артов e621 по тегам",
+        "🎭 Управление RP — /rp off",
+        "🔞 Выбрать возрастной режим",
+        "🪪 Узнать Telegram ID",
+        "📥 Скачать публичное видео или GIF",
+        "🔎 Найти источник арта (ответом)",
+        "🧠 Мой постоянный профиль",
+        "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]
+
+    bot_mock.set_chat_menu_button.assert_awaited_once()
+
+
+def test_fetish_role_prompt_handles_imperative_direction() -> None:
+    """Классификатор должен отличать приказ Дельте от действия пользователя."""
+    prompt = load_prompt("fetish_role_classification.txt")
+
+    assert '"соси мою жопу" → active' in prompt
+    assert '"я сосу тебе" → passive' in prompt
+    assert "дай мне свою попку" not in prompt
+    assert "Повелительное наклонение" in prompt

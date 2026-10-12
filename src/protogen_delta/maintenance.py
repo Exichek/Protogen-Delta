@@ -1,0 +1,112 @@
+"""Копирование данных остановленного бота в новый каталог без перезаписи."""
+
+import argparse
+import json
+import shutil
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from protogen_delta.repositories.stickers import StickersRepository
+
+
+def copy_snapshot(source: Path, destination: Path) -> None:
+    """Проверить SQLite/JSON и создать отдельную копию для backup или restore.
+
+    Бот должен быть остановлен: SQLite backup согласован сам по себе,
+    но общей транзакции между SQLite и JSON-файлами нет.
+    """
+    source = source.resolve(strict=True)
+    destination = destination.absolute()
+    if destination.exists():
+        raise FileExistsError("Каталог назначения уже существует")
+    if not source.is_dir():
+        raise ValueError("Источник должен быть каталогом данных")
+
+    payloads: dict[str, bytes] = {}
+    for filename, key, value_type in (
+        ("users.json", "USERS", int),
+        ("images.json", "IMAGES", str),
+    ):
+        payload = (source / filename).read_bytes()
+        data = json.loads(payload)
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get(key), list)
+            or not all(type(item) is value_type for item in data[key])
+        ):
+            raise ValueError(f"Некорректный формат {filename}")
+        payloads[filename] = payload
+
+    databases = [(source / "user_states.db", "user_states")]
+    memories_database = source / "memories.db"
+    if memories_database.exists():
+        databases.append((memories_database, "memories"))
+    for filename, table in (
+        ("user_facts.db", "user_facts"),
+        ("user_statistics.db", "stats_users"),
+    ):
+        database = source / filename
+        if database.exists():
+            databases.append((database, table))
+    e621_database = source / "e621.db"
+    if e621_database.exists():
+        databases.append((e621_database, "shown_posts"))
+    art_sources = source / "art_sources.json"
+    if art_sources.exists():
+        payload = art_sources.read_bytes()
+        chats = json.loads(payload).get("CHATS")
+        if not isinstance(chats, list) or not all(type(x) is int for x in chats):
+            raise ValueError("Некорректный формат art_sources.json")
+        payloads[art_sources.name] = payload
+    stickers = source / "stickers.json"
+    if stickers.exists():
+        StickersRepository(source).get_all()
+        payloads[stickers.name] = stickers.read_bytes()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".delta-snapshot-", dir=destination.parent) as temp:
+        staging = Path(temp) / "data"
+        staging.mkdir()
+        for database, required_table in databases:
+            uri = database.as_uri() + "?mode=ro"
+            with (
+                closing(sqlite3.connect(uri, uri=True)) as src,
+                closing(sqlite3.connect(staging / database.name)) as dst,
+            ):
+                src.backup(dst)
+                if dst.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise ValueError("Проверка целостности SQLite не прошла")
+                dst.execute(f"SELECT 1 FROM {required_table} LIMIT 0")
+        for filename, payload in payloads.items():
+            (staging / filename).write_bytes(payload)
+        # Не подменяем существующие рабочие данные, даже пустой каталог.
+        destination.mkdir()
+        try:
+            for item in staging.iterdir():
+                shutil.copyfile(item, destination / item.name)
+        except BaseException:
+            shutil.rmtree(destination)
+            raise
+
+
+def main() -> None:
+    """Создать резервную копию или восстановить её в отдельный каталог."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("backup", "restore"))
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument(
+        "--bot-stopped",
+        action="store_true",
+        help="Подтверждение, что процесс бота остановлен",
+    )
+    args = parser.parse_args()
+    if not args.bot_stopped:
+        parser.error("Сначала остановите бот и добавьте --bot-stopped")
+    copy_snapshot(args.source, args.destination)
+    print(f"{args.action}: копия проверена и сохранена в {args.destination}")
+
+
+if __name__ == "__main__":
+    main()

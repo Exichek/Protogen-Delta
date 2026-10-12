@@ -7,31 +7,119 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from protogen_delta import __version__
+from protogen_delta.core.chat_scope import chat_scope_options
 from protogen_delta.core.message_utils import split_message
+from protogen_delta.core.user_state import ContentMode, UserStateStore
+from protogen_delta.handlers.adult import send_age_prompt
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.services.deepseek import (
+    DeepSeekError,
+    DeepSeekService,
+)
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
-FIRST_START_MESSAGE = (
-    f"Привет! Дельта v{__version__} — твой личный похотливый тостер к твоим услугам! 💖^w^💖\n\n"
-    "• ⚡ Зацени функционал моей прошивки:\n"
-    "• Болтать с тобой, троллить, стебать и просто поднимать настроение. "
-    "(つ≧▽≦)つ\n"
-    "• Поднимать настроение шутками и мемами, иногда с перчинкой. (≧▽≦)\n"
-    "• Показывать топовые арты. UwU  (/randomart)\n\n"
-    "• Устраивать ролевки (RP) в *звёздочках* — как актив/пассив >///<. "
-    "Просто начни первым, я только рад. ^w^\n"
-    "• Если запутаешься — спрашивай.\n"
+FIRST_START_PREFIXES = (
+    "Привет! Я Протоген Дельта — ИИ-ассистент.",
+    "Йоу! Я Протоген Дельта — ИИ-ассистент.",
+    "О, привет! Я Протоген Дельта — ИИ-ассистент.",
+    "О, приветик! Я Протоген Дельта — ИИ-ассистент.",
+    "Хей! Я Протоген Дельта — ИИ-ассистент.",
+    "Здорова! Я Протоген Дельта — ИИ-ассистент.",
+    "Ну привет! Я Протоген Дельта — ИИ-ассистент.",
+    "Рад встрече! Я Протоген Дельта — ИИ-ассистент.",
+    "Опа, новенький, привет! Я Протоген Дельта — ИИ-ассистент.",
+    "Хай! Я Протоген Дельта — ИИ-ассистент.",
 )
+
+FIRST_START_FALLBACK_BODY = (
+    "Со мной можно просто поболтать, спросить что-нибудь — "
+    "в том числе техническое — или устроить RP, начав действие "
+    "в *звёздочках*.\n\n"
+    "Весь список функций и команд — /funcs. Настройки — /menu."
+)
+
+REPEAT_START_FALLBACK = (
+    "Снова привет. Я на месте: можем просто поболтать, продолжить RP, "
+    "разобрать вопрос, текст или картинку. Все функции и команды — /funcs."
+)
+
+_FIRST_START_REQUEST = (
+    "Продолжи уже начатое первое знакомство с новым пользователем. "
+    "Не здоровайся и не представляйся заново."
+)
+
+_REPEAT_START_REQUEST = (
+    "Пользователь снова вызвал /start. Поприветствуй его заново одним живым "
+    "сообщением и кратко напомни о нескольких своих возможностях."
+)
+
+
+async def _generate_first_start_message(
+    deepseek: DeepSeekService,
+    prompt: str,
+) -> str:
+    """Сгенерировать живое первое приветствие с безопасным fallback."""
+    prefix = random.choice(FIRST_START_PREFIXES)
+
+    try:
+        generated = await deepseek.chat(
+            system_prompt=prompt,
+            user_message=_FIRST_START_REQUEST,
+        )
+    except DeepSeekError:
+        logger.warning(
+            "Не удалось сгенерировать первое приветствие через DeepSeek",
+            exc_info=True,
+        )
+        return f"{prefix}\n\n{FIRST_START_FALLBACK_BODY}"
+
+    generated = generated.strip()
+
+    if not generated:
+        logger.warning("DeepSeek вернул пустое первое приветствие")
+        return f"{prefix}\n\n{FIRST_START_FALLBACK_BODY}"
+
+    return f"{prefix}\n\n{generated}"
+
+
+async def _generate_repeat_start_message(
+    deepseek: DeepSeekService,
+    prompt: str,
+) -> str:
+    """Сгенерировать новое приветствие для уже зарегистрированного пользователя."""
+    try:
+        generated = await deepseek.chat(
+            system_prompt=prompt,
+            user_message=_REPEAT_START_REQUEST,
+        )
+    except DeepSeekError:
+        logger.warning(
+            "Не удалось сгенерировать повторное приветствие через DeepSeek",
+            exc_info=True,
+        )
+        return REPEAT_START_FALLBACK
+
+    generated = generated.strip()
+    if not generated:
+        logger.warning("DeepSeek вернул пустое повторное приветствие")
+        return REPEAT_START_FALLBACK
+    return generated
 
 
 def create_start_router(
     users_repository: UsersRepository,
-    start_messages: list[str],
+    deepseek: DeepSeekService,
+    first_start_prompt: str,
+    repeat_start_prompt: str | None = None,
+    user_states: UserStateStore | None = None,
+    sticker_service: ContextualStickerService | None = None,
 ) -> Router:
     """Создать роутер команды /start."""
     router = Router(name=__name__)
+    states = user_states or UserStateStore()
+    pending: set[int] = set()
 
     @router.message(Command("start"))
     async def start(message: Message) -> None:
@@ -42,20 +130,63 @@ def create_start_router(
             logger.warning("Команда /start получена без данных пользователя")
             return
 
-        if users_repository.add(user.id):
-            logger.info("Зарегистрирован новый пользователь: %s", user.id)
-
-            for chunk in split_message(FIRST_START_MESSAGE):
-                await message.answer(chunk)
-
+        if user.id in pending:
+            await message.answer("Я уже готовлю приветствие. Подожди немного.")
             return
 
-        if start_messages:
-            reply = random.choice(start_messages)
-        else:
-            reply = "Я уже запущен :D"
+        pending.add(user.id)
+        try:
+            async with states.use(user.id) as state:
+                await greet(message, user.id, state.content_mode)
+        finally:
+            pending.remove(user.id)
 
-        for chunk in split_message(reply):
-            await message.answer(chunk)
+    async def greet(
+        message: Message,
+        user_id: int,
+        content_mode: ContentMode,
+    ) -> None:
+        """Отправить приветствие под общей блокировкой состояния."""
+        if user_id not in users_repository.get_all():
+
+            reply = await _generate_first_start_message(
+                deepseek,
+                first_start_prompt,
+            )
+            if sticker_service is not None:
+                reply = sticker_service.correct_reply(user_id, reply)
+
+            for chunk in split_message(reply):
+                await message.answer(chunk)
+
+            users_repository.add(user_id)
+            logger.info("Зарегистрирован новый пользователь: %s", user_id)
+        else:
+            reply = await _generate_repeat_start_message(
+                deepseek,
+                repeat_start_prompt or first_start_prompt,
+            )
+            if sticker_service is not None:
+                reply = sticker_service.correct_reply(user_id, reply)
+
+            for chunk in split_message(reply):
+                await message.answer(chunk)
+
+        if sticker_service is not None:
+            try:
+                await sticker_service.maybe_send(
+                    chat_id=message.chat.id,
+                    user_id=user_id,
+                    context_text="привет",
+                    reply_text=reply,
+                    scope_chat_id=chat_scope_options(
+                        message.chat.id, message.chat.type
+                    ).get("chat_id"),
+                )
+            except Exception:
+                logger.exception("Не удалось обработать приветственный стикер")
+
+        if content_mode == "unselected":
+            await send_age_prompt(message, user_id)
 
     return router

@@ -2,24 +2,14 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, Mock, call
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
 
 import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
-
-
-def test_require_string_list_rejects_invalid_value() -> None:
-    """Список должен содержать только строки."""
-    with pytest.raises(
-        TypeError,
-        match="TEST должен содержать список строк",
-    ):
-        main_module._require_string_list(
-            ["ok", 123],
-            "TEST",
-        )
 
 
 def test_require_string_lists_rejects_invalid_value() -> None:
@@ -52,20 +42,32 @@ def test_require_string_dict_rejects_invalid_value() -> None:
         )
 
 
+@pytest.mark.parametrize("pack_available", [None, True, False])
+@pytest.mark.parametrize("provider", ["deepseek", "openrouter"])
+@pytest.mark.parametrize("mini_app_enabled", [False, True])
 def test_main_builds_application_and_starts_polling(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    pack_available: bool | None,
+    provider: str,
+    mini_app_enabled: bool,
 ) -> None:
     """main должен собрать приложение и запустить polling."""
     settings = Settings(
         telegram_token="telegram-token",
+        sticker_pack_enabled=pack_available is not None,
         deepseek_api_key="deepseek-key",
         art_chat_id=-1001234567890,
         deepseek_base_url="https://api.test.local",
         deepseek_model="test-model",
+        llm_provider=provider,
         log_level="INFO",
         data_dir=tmp_path,
         admin_ids=frozenset({123}),
+        brave_search_api_key="brave-key",
+        conversation_history_limit=12,
+        mini_app_server_enabled=mini_app_enabled,
+        user_state_retention_seconds=3600.0,
     )
 
     load_settings_mock = Mock(
@@ -75,6 +77,20 @@ def test_main_builds_application_and_starts_polling(
 
     bot_mock = Mock()
     bot_mock.delete_webhook = AsyncMock()
+    bot_mock.get_sticker_set = AsyncMock(
+        return_value=SimpleNamespace(
+            name="delta_sticksss",
+            stickers=[
+                SimpleNamespace(
+                    file_unique_id="AgAD_qUAAi5dCUo", file_id="greeting", emoji="👋"
+                )
+            ],
+        )
+    )
+    if pack_available is False:
+        bot_mock.get_sticker_set.side_effect = TelegramBadRequest(
+            method=Mock(), message="unavailable"
+        )
     bot_mock.session = Mock()
     bot_mock.session.close = AsyncMock()
 
@@ -92,48 +108,21 @@ def test_main_builds_application_and_starts_polling(
 
     register_error_handler_mock = Mock()
 
+    user_states = Mock(
+        name="user_states",
+    )
+    user_state_store_constructor_mock = Mock(
+        return_value=user_states,
+    )
+
+    user_state_repository = Mock(
+        name="user_state_repository",
+    )
+    user_state_repository_constructor_mock = Mock(
+        return_value=user_state_repository,
+    )
+
     json_data: dict[str, object] = {
-        "start_messages.json": {
-            "START_MESSAGES": [
-                "Я уже работаю",
-            ]
-        },
-        "personality.json": {
-            "GREETINGS": [
-                "Привет",
-            ],
-            "INSULTS": [
-                "Отвали",
-            ],
-            "HORNY": [
-                "Horny reply",
-            ],
-        },
-        "question_insult_replies.json": {
-            "QUESTION_INSULT_REPLIES": [
-                "Question reply",
-            ]
-        },
-        "emotes.json": {
-            "CATEGORIES": {
-                "NORMAL": [
-                    "UwU",
-                ],
-                "BLUSH": [
-                    ">///<",
-                ],
-                "INSULT": [
-                    ">:3",
-                ],
-            }
-        },
-        "mood.json": {
-            "MOODS": {
-                "playful": [
-                    "Playful reply",
-                ]
-            }
-        },
         "fetishes_triggers.json": {
             "bondage": [
                 "связал",
@@ -149,11 +138,25 @@ def test_main_builds_application_and_starts_polling(
     )
 
     prompts = {
+        "start_greeting.txt": "START GREETING PROMPT",
+        "repeat_start_greeting.txt": "REPEAT START GREETING PROMPT",
         "insult_classification.txt": "INSULT PROMPT",
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
-        "system.txt": "SYSTEM PROMPT",
-        "rp.txt": "RP PROMPT",
+        "personality/core.txt": "CORE PROMPT",
+        "personality/protogen_lore.txt": "LORE PROMPT",
+        "personality/body.txt": "BODY PROMPT",
+        "personality/rp.txt": "RP PROMPT",
+        "furry_species_reference": "SPECIES REFERENCE",
+        "adult_conversation_style": "ADULT CONVERSATION STYLE",
+        "personality/body_female": "OPTIONAL PROMPT",
+        "personality/adult_body_male": "OPTIONAL PROMPT",
+        "personality/adult_body_female": "OPTIONAL PROMPT",
+        "personality/adult_rp": "OPTIONAL PROMPT",
+        "conversation_technical": "OPTIONAL PROMPT",
+        "conversation_visual": "OPTIONAL PROMPT",
+        "voice_examples": "OPTIONAL PROMPT",
+        "scene_examples": "OPTIONAL PROMPT",
     }
 
     load_prompt_mock = Mock(
@@ -167,12 +170,39 @@ def test_main_builds_application_and_starts_polling(
         return_value=deepseek_mock,
     )
 
-    start_router = Mock(name="start_router")
-    help_router = Mock(name="help_router")
-    art_router = Mock(name="art_router")
-    admin_router = Mock(name="admin_router")
-    unknown_router = Mock(name="unknown_router")
-    text_router = Mock(name="text_router")
+    start_router = Mock(
+        name="start_router",
+    )
+    help_router = Mock(
+        name="help_router",
+    )
+    menu_router = Mock(
+        name="menu_router",
+    )
+    utilities_router = Mock(
+        name="utilities_router",
+    )
+    art_router = Mock(
+        name="art_router",
+    )
+    admin_router = Mock(
+        name="admin_router",
+    )
+    reset_router = Mock(
+        name="reset_router",
+    )
+    rp_router = Mock(
+        name="rp_router",
+    )
+    unknown_router = Mock(
+        name="unknown_router",
+    )
+    text_router = Mock(
+        name="text_router",
+    )
+    adult_router = Mock(
+        name="adult_router",
+    )
 
     create_start_router_mock = Mock(
         return_value=start_router,
@@ -180,11 +210,23 @@ def test_main_builds_application_and_starts_polling(
     create_help_router_mock = Mock(
         return_value=help_router,
     )
+    create_menu_router_mock = Mock(
+        return_value=menu_router,
+    )
+    create_utilities_router_mock = Mock(
+        return_value=utilities_router,
+    )
     create_art_router_mock = Mock(
         return_value=art_router,
     )
     create_admin_router_mock = Mock(
         return_value=admin_router,
+    )
+    create_reset_router_mock = Mock(
+        return_value=reset_router,
+    )
+    create_rp_router_mock = Mock(
+        return_value=rp_router,
     )
     create_unknown_router_mock = Mock(
         return_value=unknown_router,
@@ -192,8 +234,37 @@ def test_main_builds_application_and_starts_polling(
     create_text_router_mock = Mock(
         return_value=text_router,
     )
+    create_adult_router_mock = Mock(
+        return_value=adult_router,
+    )
+    media_router = Mock(
+        name="media_router",
+    )
+    create_media_router_mock = Mock(
+        return_value=media_router,
+    )
+    document_router = Mock(
+        name="document_router",
+    )
+    create_document_router_mock = Mock(
+        return_value=document_router,
+    )
+    voice_router = Mock(
+        name="voice_router",
+    )
+    create_voice_router_mock = Mock(
+        return_value=voice_router,
+    )
+    speech_transcriber = Mock(name="speech_transcriber")
+    speech_transcriber.close = AsyncMock()
+    speech_transcriber_constructor_mock = Mock(return_value=speech_transcriber)
 
     set_commands_mock = AsyncMock()
+    mini_app_mock = Mock()
+    mini_app_mock.start = AsyncMock()
+    mini_app_mock.close = AsyncMock()
+    mini_app_constructor = Mock(return_value=mini_app_mock)
+    monkeypatch.setattr(main_module, "MiniAppServer", mini_app_constructor)
 
     monkeypatch.setattr(
         main_module,
@@ -222,6 +293,11 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "UserStateStore",
+        user_state_store_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "load_json",
         load_json_mock,
     )
@@ -247,6 +323,16 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "create_menu_router",
+        create_menu_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_utilities_router",
+        create_utilities_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "create_art_router",
         create_art_router_mock,
     )
@@ -254,6 +340,16 @@ def test_main_builds_application_and_starts_polling(
         main_module,
         "create_admin_router",
         create_admin_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_reset_router",
+        create_reset_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_rp_router",
+        create_rp_router_mock,
     )
     monkeypatch.setattr(
         main_module,
@@ -267,16 +363,91 @@ def test_main_builds_application_and_starts_polling(
     )
     monkeypatch.setattr(
         main_module,
+        "create_adult_router",
+        create_adult_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_media_router",
+        create_media_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_document_router",
+        create_document_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "create_voice_router",
+        create_voice_router_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "SpeechTranscriber",
+        speech_transcriber_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
         "set_commands",
         set_commands_mock,
     )
 
-    asyncio.run(main_module.main())
+    monkeypatch.setattr(
+        main_module,
+        "UserStateRepository",
+        user_state_repository_constructor_mock,
+    )
+
+    asyncio.run(
+        main_module.main(),
+    )
+
+    if pack_available is None:
+        bot_mock.get_sticker_set.assert_not_awaited()
+    else:
+        bot_mock.get_sticker_set.assert_awaited_once_with("delta_sticksss")
+    if pack_available is True:
+        assert len(main_module.StickersRepository(tmp_path).get_all()) == 1
+    else:
+        assert main_module.StickersRepository(tmp_path).get_all() == []
 
     load_settings_mock.assert_called_once_with()
 
+    assert load_prompt_mock.call_args_list == [
+        call("insult_classification.txt"),
+        call("mood_classification.txt"),
+        call("fetish_role_classification.txt"),
+        call("start_greeting.txt"),
+        call("repeat_start_greeting.txt"),
+        call("personality/core.txt"),
+        call("personality/protogen_lore.txt"),
+        call("personality/body.txt"),
+        call("personality/rp.txt"),
+        call("furry_species_reference"),
+        call("adult_conversation_style"),
+        call("personality/body_female"),
+        call("personality/adult_body_male"),
+        call("personality/adult_body_female"),
+        call("personality/adult_rp"),
+        call("conversation_technical"),
+        call("conversation_visual"),
+        call("voice_examples"),
+        call("scene_examples"),
+    ]
+
     setup_logging_mock.assert_called_once_with(
         "INFO",
+    )
+
+    user_state_repository_constructor_mock.assert_called_once_with(
+        tmp_path,
+    )
+
+    user_state_store_constructor_mock.assert_called_once_with(
+        history_limit=12,
+        history_ttl_seconds=604800.0,
+        retention_seconds=3600.0,
+        persistence=user_state_repository,
     )
 
     bot_constructor_mock.assert_called_once_with(
@@ -291,21 +462,264 @@ def test_main_builds_application_and_starts_polling(
         api_key="deepseek-key",
         base_url="https://api.test.local",
         model="test-model",
+        disable_thinking=True,
+        tools=ANY,
     )
 
-    assert dispatcher_mock.include_router.call_count == 6
+    create_start_router_mock.assert_called_once()
+
+    create_text_router_mock.assert_called_once_with(
+        ANY,
+        rate_limiter=ANY,
+        bot=bot_mock,
+        sticker_service=ANY,
+    )
+
+    start_router_call = create_start_router_mock.call_args
+
+    assert start_router_call is not None
+
+    assert isinstance(
+        start_router_call.kwargs["users_repository"],
+        main_module.UsersRepository,
+    )
+    assert start_router_call.kwargs["deepseek"] is deepseek_mock
+    assert start_router_call.kwargs["first_start_prompt"].startswith(
+        "START GREETING PROMPT\n\n"
+    )
+    assert start_router_call.kwargs["repeat_start_prompt"].startswith(
+        "REPEAT START GREETING PROMPT\n\n"
+    )
+
+    create_reset_router_mock.assert_called_once()
+
+    reset_router_call = create_reset_router_mock.call_args
+
+    assert reset_router_call is not None
+    assert len(reset_router_call.args) == 3
+    inputs = reset_router_call.kwargs["input_operations"]
+    assert isinstance(inputs, main_module.InputOperations)
+    outer = dispatcher_mock.message.outer_middleware.call_args_list
+    assert len(outer) == 3
+    assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
+    assert outer[0].args[0]._operations is inputs
+    assert isinstance(outer[1].args[0], main_module.UserStatisticsMiddleware)
+    assert outer[1].args[0]._input_operations is inputs
+    for router in (text_router, media_router, document_router, voice_router):
+        router.message.middleware.assert_called_once()
+        inner = router.message.middleware.call_args.args[0]
+        assert isinstance(inner, main_module.MemoryInputsMiddleware)
+        assert inner._operations is inputs
+    for router in (start_router, art_router, adult_router, reset_router, rp_router):
+        router.message.middleware.assert_not_called()
+
+    reset_response_engine = reset_router_call.args[0]
+    reset_users_repository = reset_router_call.args[1]
+
+    assert isinstance(
+        reset_response_engine,
+        main_module.ResponseEngine,
+    )
+    if provider == "deepseek":
+        deepseek_mock.for_appearance.assert_called_once_with()
+        assert (
+            reset_response_engine._appearance_model
+            is deepseek_mock.for_appearance.return_value
+        )
+    else:
+        deepseek_mock.for_appearance.assert_not_called()
+        assert reset_response_engine._appearance_model is deepseek_mock
+    assert isinstance(
+        reset_users_repository,
+        main_module.UsersRepository,
+    )
+
+    create_rp_router_mock.assert_called_once_with(
+        reset_response_engine,
+    )
+
+    create_adult_router_mock.assert_called_once_with(
+        user_states, ANY, restrict_minor=ANY
+    )
+
+    assert dispatcher_mock.include_router.call_count == 20
+
+    dispatcher_mock.include_router.assert_any_call(
+        start_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        help_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        menu_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        utilities_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        art_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        admin_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        reset_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        rp_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        unknown_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        text_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        adult_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        media_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        document_router,
+    )
+    dispatcher_mock.include_router.assert_any_call(
+        voice_router,
+    )
+
+    create_media_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
+        sticker_service=ANY,
+        native_work=ANY,
+    )
+    create_document_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        rate_limiter=ANY,
+        sticker_service=ANY,
+        ocr_enabled=False,
+        native_work=ANY,
+    )
+    speech_transcriber_constructor_mock.assert_called_once_with(
+        model_size="small",
+        device="cpu",
+        compute_type="int8",
+        native_work=ANY,
+    )
+    create_voice_router_mock.assert_called_once_with(
+        reset_response_engine,
+        bot_mock,
+        speech_transcriber,
+        rate_limiter=ANY,
+        sticker_service=ANY,
+        audio_understanding=None,
+        music_recognition=None,
+        native_work=ANY,
+    )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
-        drop_pending_updates=True,
+        drop_pending_updates=False,
     )
 
-    set_commands_mock.assert_awaited_once_with(
-        bot_mock,
-    )
+    create_menu_router_mock.assert_called_once_with(None, user_states)
+    create_utilities_router_mock.assert_called_once_with(bot_mock)
+    set_commands_mock.assert_awaited_once_with(bot_mock, None)
 
     dispatcher_mock.start_polling.assert_awaited_once_with(
         bot_mock,
+        tasks_concurrency_limit=32,
     )
 
     deepseek_mock.close.assert_awaited_once_with()
+    if mini_app_enabled:
+        mini_app_mock.start.assert_awaited_once_with()
+        mini_app_mock.close.assert_awaited_once_with()
+        tools = mini_app_constructor.call_args.kwargs["tools"]
+        assert tools._translator._model is deepseek_mock
+    else:
+        mini_app_constructor.assert_not_called()
     bot_mock.session.close.assert_awaited_once_with()
+
+
+def test_create_bot_without_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Без настройки прокси Telegram-бот должен использовать обычную сессию."""
+    settings = Settings(
+        telegram_token="telegram-token",
+        deepseek_api_key="deepseek-key",
+        art_chat_id=-1001234567890,
+    )
+
+    bot_mock = Mock()
+    bot_constructor_mock = Mock(
+        return_value=bot_mock,
+    )
+    session_constructor_mock = Mock()
+
+    monkeypatch.setattr(
+        main_module,
+        "Bot",
+        bot_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "AiohttpSession",
+        session_constructor_mock,
+    )
+
+    result = main_module._create_bot(settings)
+
+    assert result is bot_mock
+
+    bot_constructor_mock.assert_called_once_with(
+        token="telegram-token",
+    )
+    session_constructor_mock.assert_not_called()
+
+
+def test_create_bot_with_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """При заданном URL Telegram-бот должен использовать proxy-сессию."""
+    settings = Settings(
+        telegram_token="telegram-token",
+        deepseek_api_key="deepseek-key",
+        art_chat_id=-1001234567890,
+        telegram_proxy_url="socks5://127.0.0.1:10808",
+    )
+
+    session_mock = Mock()
+    session_constructor_mock = Mock(
+        return_value=session_mock,
+    )
+
+    bot_mock = Mock()
+    bot_constructor_mock = Mock(
+        return_value=bot_mock,
+    )
+
+    monkeypatch.setattr(
+        main_module,
+        "AiohttpSession",
+        session_constructor_mock,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "Bot",
+        bot_constructor_mock,
+    )
+
+    result = main_module._create_bot(settings)
+
+    assert result is bot_mock
+
+    session_constructor_mock.assert_called_once_with(
+        proxy="socks5://127.0.0.1:10808",
+    )
+    bot_constructor_mock.assert_called_once_with(
+        token="telegram-token",
+        session=session_mock,
+    )

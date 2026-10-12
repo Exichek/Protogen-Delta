@@ -6,7 +6,13 @@ from unittest.mock import Mock
 
 import pytest
 from aiogram import Dispatcher
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import (
+    TelegramConflictError,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramUnauthorizedError,
+)
 from aiogram.types import ErrorEvent
 
 import protogen_delta.handlers.errors as errors_module
@@ -31,7 +37,7 @@ def _create_error_event(
 def test_handle_error_logs_forbidden_as_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Блокировка бота пользователем должна логироваться как warning."""
+    """Запрещённая отправка должна логироваться как warning."""
     warning_mock = Mock()
     error_mock = Mock()
 
@@ -51,13 +57,116 @@ def test_handle_error_logs_forbidden_as_warning(
         message="Forbidden",
     )
 
-    event = _create_error_event(exception)
+    asyncio.run(
+        handle_error(
+            _create_error_event(exception),
+        )
+    )
 
-    asyncio.run(handle_error(event))
+    warning_mock.assert_called_once()
+    error_mock.assert_not_called()
+
+
+def test_handle_error_logs_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flood control Telegram должен логировать время ожидания."""
+    warning_mock = Mock()
+
+    monkeypatch.setattr(
+        errors_module.logger,
+        "warning",
+        warning_mock,
+    )
+
+    exception = TelegramRetryAfter(
+        method=Mock(),
+        message="Too Many Requests",
+        retry_after=7,
+    )
+
+    asyncio.run(
+        handle_error(
+            _create_error_event(exception),
+        )
+    )
 
     warning_mock.assert_called_once_with(
-        "Пользователь заблокировал бота.",
+        "Telegram ограничил частоту запросов. " "Повтор возможен через %s сек.",
+        7,
     )
+
+
+def test_handle_error_logs_network_error_as_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сетевая ошибка Telegram должна логироваться как warning."""
+    warning_mock = Mock()
+
+    monkeypatch.setattr(
+        errors_module.logger,
+        "warning",
+        warning_mock,
+    )
+
+    exception = TelegramNetworkError(
+        method=Mock(),
+        message="Network error",
+    )
+
+    asyncio.run(
+        handle_error(
+            _create_error_event(exception),
+        )
+    )
+
+    warning_mock.assert_called_once()
+
+    call = warning_mock.call_args
+
+    assert call is not None
+    assert call.kwargs["exc_info"][1] is exception
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        TelegramUnauthorizedError(
+            method=Mock(),
+            message="Unauthorized",
+        ),
+        TelegramConflictError(
+            method=Mock(),
+            message="Conflict",
+        ),
+    ],
+)
+def test_handle_error_logs_critical_telegram_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    exception: TelegramUnauthorizedError | TelegramConflictError,
+) -> None:
+    """Критические ошибки запуска Telegram должны логироваться отдельно."""
+    critical_mock = Mock()
+    error_mock = Mock()
+
+    monkeypatch.setattr(
+        errors_module.logger,
+        "critical",
+        critical_mock,
+    )
+    monkeypatch.setattr(
+        errors_module.logger,
+        "error",
+        error_mock,
+    )
+
+    asyncio.run(
+        handle_error(
+            _create_error_event(exception),
+        )
+    )
+
+    critical_mock.assert_called_once()
     error_mock.assert_not_called()
 
 
@@ -75,9 +184,11 @@ def test_handle_error_logs_unexpected_exception(
 
     exception = RuntimeError("boom")
 
-    event = _create_error_event(exception)
-
-    asyncio.run(handle_error(event))
+    asyncio.run(
+        handle_error(
+            _create_error_event(exception),
+        )
+    )
 
     error_mock.assert_called_once()
 
