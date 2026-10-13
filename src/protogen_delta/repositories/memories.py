@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from protogen_delta.core.memory_search import (
+    SEARCH_VERSION,
+    memory_index_text,
+    memory_terms,
+)
+
 MemoryKind = Literal["grievance", "funny", "topic"]
 
 
@@ -17,6 +23,7 @@ class Memory:
     kind: MemoryKind
     text: str
     created_at: float
+    importance: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,14 +46,50 @@ class MemoriesRepository:
         self._initialize()
 
     async def remember(
-        self, user_id: int, kind: MemoryKind, text: str, created_at: float
+        self,
+        user_id: int,
+        kind: MemoryKind,
+        text: str,
+        created_at: float,
+        *,
+        importance: int = 1,
     ) -> None:
-        """Сохранить уникальный эпизод и удалить самые старые сверх лимита."""
-        await asyncio.to_thread(self._remember_sync, user_id, kind, text, created_at)
+        """Сохранить эпизод; при переполнении сначала удалять менее важные."""
+        if type(importance) is not int or not 1 <= importance <= 3:
+            raise ValueError("importance должен быть целым числом от 1 до 3")
+        await asyncio.to_thread(
+            self._remember_sync, user_id, kind, text, created_at, importance
+        )
 
     async def recent(self, user_id: int, limit: int = 8) -> list[Memory]:
         """Вернуть последние эпизоды от новых к старым."""
         return await asyncio.to_thread(self._recent_sync, user_id, limit)
+
+    async def search(self, user_id: int, query: str, limit: int = 3) -> list[Memory]:
+        """Искать во всех эпизодах этого пользователя, учитывая важность."""
+        terms = memory_terms(query, limit=16)
+        if limit <= 0 or not terms:
+            return []
+        return await asyncio.to_thread(self._search_sync, user_id, terms, limit)
+
+    def _search_sync(
+        self, user_id: int, terms: tuple[str, ...], limit: int
+    ) -> list[Memory]:
+        # Только нормализованные слова; операторы пользователя не становятся MATCH.
+        expression = " OR ".join(f'"{term}"' for term in terms)
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT m.kind, m.text, m.created_at, m.importance
+                FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid
+                WHERE memories_fts MATCH ? AND m.user_id = ?
+                ORDER BY bm25(memories_fts) * (1 + 0.15 * (m.importance - 1)),
+                         m.created_at DESC, m.id DESC
+                LIMIT ?
+                """,
+                (expression, user_id, limit),
+            ).fetchall()
+        return [Memory(*row) for row in rows]
 
     async def note_user_activity(self, user_id: int, at: float) -> None:
         """Зафиксировать сообщение пользователя и сбросить счётчик молчания."""
@@ -111,11 +154,15 @@ class MemoriesRepository:
     def _forget_sources_sync(self, user_id: int, sources: tuple[str, ...]) -> None:
         with closing(self._connect()) as connection, connection:
             needles = tuple(source.casefold() for source in sources if source)
+            term_sets = tuple(set(memory_terms(source)) for source in sources if source)
             rows = connection.execute(
                 "SELECT id,text FROM memories WHERE user_id=?", (user_id,)
             ).fetchall()
             for row_id, text in rows:
-                if not any(source in text.casefold() for source in needles):
+                words = set(memory_terms(text))
+                if not any(source in text.casefold() for source in needles) and not any(
+                    terms and terms <= words for terms in term_sets
+                ):
                     continue
                 connection.execute(
                     "DELETE FROM memories WHERE user_id=? AND id=?",
@@ -128,7 +175,12 @@ class MemoriesRepository:
         return connection
 
     def _remember_sync(
-        self, user_id: int, kind: MemoryKind, text: str, created_at: float
+        self,
+        user_id: int,
+        kind: MemoryKind,
+        text: str,
+        created_at: float,
+        importance: int,
     ) -> None:
         clean = " ".join(text.split())[:500]
         if not clean:
@@ -136,19 +188,27 @@ class MemoriesRepository:
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
-                INSERT INTO memories(user_id, kind, text, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO memories(user_id, kind, text, created_at, search_text, importance)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, kind, text) DO UPDATE SET
-                    created_at = excluded.created_at
+                    created_at = excluded.created_at,
+                    importance = MAX(memories.importance, excluded.importance)
                 """,
-                (user_id, kind, clean, created_at),
+                (
+                    user_id,
+                    kind,
+                    clean,
+                    created_at,
+                    memory_index_text(clean),
+                    importance,
+                ),
             )
             connection.execute(
                 """
                 DELETE FROM memories
                 WHERE user_id = ? AND kind = ? AND id NOT IN (
                     SELECT id FROM memories WHERE user_id = ? AND kind = ?
-                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    ORDER BY importance DESC, created_at DESC, id DESC LIMIT ?
                 )
                 """,
                 (user_id, kind, user_id, kind, self._max_memories),
@@ -160,12 +220,12 @@ class MemoriesRepository:
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
-                SELECT kind, text, created_at FROM memories
+                SELECT kind, text, created_at, importance FROM memories
                 WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?
                 """,
                 (user_id, limit),
             ).fetchall()
-        return [Memory(kind=row[0], text=row[1], created_at=row[2]) for row in rows]
+        return [Memory(*row) for row in rows]
 
     def _note_user_activity_sync(self, user_id: int, at: float) -> None:
         with closing(self._connect()) as connection, connection:
@@ -253,6 +313,7 @@ class MemoriesRepository:
 
     def _initialize(self) -> None:
         with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS engagement (
                     user_id INTEGER PRIMARY KEY,
@@ -282,4 +343,79 @@ class MemoriesRepository:
                 """)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS memories_user_time ON memories(user_id, created_at DESC)"
+            )
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(memories)")
+            }
+            if "search_text" not in columns:
+                connection.execute(
+                    "ALTER TABLE memories ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
+                )
+            if "importance" not in columns:
+                connection.execute(
+                    "ALTER TABLE memories ADD COLUMN importance INTEGER NOT NULL DEFAULT 1"
+                )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS memory_search_version "
+                "(id INTEGER PRIMARY KEY CHECK(id = 1), version INTEGER NOT NULL)"
+            )
+            version = connection.execute(
+                "SELECT version FROM memory_search_version WHERE id = 1"
+            ).fetchone()
+            indexed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'"
+            ).fetchone()
+            connection.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5("
+                "search_text, content='memories', content_rowid='id', tokenize='unicode61')"
+            )
+            if not indexed or version != (SEARCH_VERSION,):
+                for trigger in (
+                    "memories_search_insert",
+                    "memories_search_delete",
+                    "memories_search_update",
+                ):
+                    connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+                rows = connection.execute("SELECT id, text FROM memories").fetchall()
+                connection.executemany(
+                    "UPDATE memories SET search_text = ? WHERE id = ?",
+                    [(memory_index_text(text), row_id) for row_id, text in rows],
+                )
+                connection.execute(
+                    "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')"
+                )
+                connection.execute(
+                    "INSERT INTO memory_search_version VALUES(1, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET version=excluded.version",
+                    (SEARCH_VERSION,),
+                )
+            connection.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_search_insert AFTER INSERT ON memories BEGIN
+                    INSERT INTO memories_fts(rowid, search_text) VALUES(new.id, new.search_text);
+                END
+                """)
+            connection.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_search_delete AFTER DELETE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, search_text)
+                    VALUES('delete', old.id, old.search_text);
+                END
+                """)
+            connection.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_search_update AFTER UPDATE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, search_text)
+                    VALUES('delete', old.id, old.search_text);
+                    INSERT INTO memories_fts(rowid, search_text) VALUES(new.id, new.search_text);
+                END
+                """)
+            # После временного отката старый код мог добавить записи без нормализации.
+            rows = connection.execute(
+                "SELECT id, text FROM memories WHERE search_text = ''"
+            ).fetchall()
+            connection.executemany(
+                "UPDATE memories SET search_text = ? WHERE id = ?",
+                [
+                    (normalized, row_id)
+                    for row_id, text in rows
+                    if (normalized := memory_index_text(text))
+                ],
             )
