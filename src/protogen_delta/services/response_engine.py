@@ -83,6 +83,7 @@ from protogen_delta.services.prompt_composer import (
     PromptSections,
 )
 from protogen_delta.services.rp_profile_context import saved_character_context
+from protogen_delta.services.rp_speech_style import roleplay_speech_style
 from protogen_delta.services.scene_continuity import scene_continuity_context
 from protogen_delta.services.species_catalog import species_catalog
 from protogen_delta.services.state_context import build_state_context
@@ -941,6 +942,9 @@ class ResponseEngine:
         fetish_context = ""
 
         if is_rp:
+            scene_context.append(
+                roleplay_speech_style(user_state.roleplay_allow_profanity)
+            )
             if profile_context := appearance_profile_context(user_state):
                 scene_context.append(profile_context)
 

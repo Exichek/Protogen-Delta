@@ -77,6 +77,7 @@ def _profile(
         "age_restricted": state.age_restricted,
         "delta_reference_restricted": state.delta_reference_restricted,
         "roleplay_stopword": state.roleplay_stopword,
+        "roleplay_allow_profanity": state.roleplay_allow_profanity,
         "roleplay_active": state.roleplay_active,
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
@@ -435,6 +436,7 @@ class MiniAppServer:
             "roleplay_preferences",
             "roleplay_boundaries",
             "roleplay_stopword",
+            "roleplay_allow_profanity",
         }
         if set(payload) - allowed:
             raise web.HTTPBadRequest(text="Переданы неизвестные настройки")
@@ -452,6 +454,11 @@ class MiniAppServer:
         ):
             raise web.HTTPBadRequest(text="Некорректный возрастной режим")
         roleplay_active = payload.get("roleplay_active")
+        allow_profanity = payload.get("roleplay_allow_profanity")
+        if "roleplay_allow_profanity" in payload and type(allow_profanity) is not bool:
+            raise web.HTTPBadRequest(
+                text="Настройка мата должна быть включена или выключена."
+            )
         if roleplay_active is not None and type(roleplay_active) is not bool:
             raise web.HTTPBadRequest(text="Некорректный RP-режим")
         configuration = payload.get("roleplay_configuration")
@@ -503,6 +510,8 @@ class MiniAppServer:
                     text="Персонаж уже изменился. Открой панель заново."
                 )
             previous_mode = state.content_mode
+            if allow_profanity is not None:
+                state.roleplay_allow_profanity = allow_profanity
             if stopword is not None:
                 state.roleplay_stopword = stopword
             if content_mode is not None:
@@ -549,6 +558,7 @@ class MiniAppServer:
             state.roleplay_fetishes = ()
             state.roleplay_preferences = ""
             state.roleplay_boundaries = ""
+            state.roleplay_allow_profanity = False
             state.emotions.arousal = 0.0
             response = self._profile(state, user)
         return web.json_response(response, headers={"Cache-Control": "no-store"})

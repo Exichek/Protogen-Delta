@@ -67,6 +67,7 @@ class UserStateRepository:
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -94,6 +95,7 @@ class UserStateRepository:
             age_restricted=age_restricted,
             delta_reference_restricted=delta_reference_restricted,
             roleplay_stopword=roleplay_stopword,
+            roleplay_allow_profanity=bool(roleplay_allow_profanity),
             history=history,
             history_updated_at=history_updated_at,
             history_expires_before=history_expires_before,
@@ -164,6 +166,7 @@ class UserStateRepository:
                         age_restricted,
                         delta_reference_restricted,
                         roleplay_stopword,
+                        roleplay_allow_profanity,
                         history,
                         history_updated_at
                     FROM {table}
@@ -205,6 +208,7 @@ class UserStateRepository:
             age_restricted,
             delta_reference_restricted,
             roleplay_stopword,
+            roleplay_allow_profanity,
             history,
             history_updated_at,
         ) = row
@@ -245,6 +249,7 @@ class UserStateRepository:
             age_restricted=bool(age_restricted),
             delta_reference_restricted=bool(delta_reference_restricted),
             roleplay_stopword=roleplay_stopword,
+            roleplay_allow_profanity=bool(roleplay_allow_profanity),
             history=self._decode_history(history),
             history_updated_at=history_updated_at,
         )
@@ -272,6 +277,7 @@ class UserStateRepository:
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -336,11 +342,12 @@ class UserStateRepository:
                         age_restricted,
                         delta_reference_restricted,
                         roleplay_stopword,
+                        roleplay_allow_profanity,
                         history,
                         history_updated_at
                     )
                     VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -366,7 +373,8 @@ class UserStateRepository:
                         content_mode = excluded.content_mode,
                         age_restricted = excluded.age_restricted,
                         delta_reference_restricted = excluded.delta_reference_restricted,
-                        roleplay_stopword = excluded.roleplay_stopword
+                        roleplay_stopword = excluded.roleplay_stopword,
+                        roleplay_allow_profanity = excluded.roleplay_allow_profanity
                         {history_update}
                     """,
                     (
@@ -396,6 +404,7 @@ class UserStateRepository:
                         int(age_restricted),
                         int(delta_reference_restricted),
                         roleplay_stopword,
+                        int(roleplay_allow_profanity),
                         encoded_history,
                         history_updated_at,
                     ),
@@ -486,6 +495,7 @@ class UserStateRepository:
                     ("age_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("delta_reference_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("roleplay_stopword", "TEXT NOT NULL DEFAULT 'стоп'"),
+                    ("roleplay_allow_profanity", "INTEGER NOT NULL DEFAULT 0"),
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_profile", "TEXT NOT NULL DEFAULT ''"),
