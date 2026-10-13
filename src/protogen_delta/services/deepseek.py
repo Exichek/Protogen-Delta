@@ -31,6 +31,7 @@ from protogen_delta.services.llm_accounting import (
     record_response_usage,
 )
 from protogen_delta.services.prompt_composer import PromptComposer
+from protogen_delta.services.source_access import current_source_owner
 from protogen_delta.services.tools import ToolExecutor, get_current_time
 
 logger = logging.getLogger(__name__)
@@ -385,7 +386,12 @@ class DeepSeekService:
             }
         ]
         if self._tools is not None and not json_response:
-            inventory = ", ".join(self._tools.registry.tools)
+            inventory = ", ".join(
+                name
+                for name in self._tools.registry.tools
+                if name not in {"read_source", "search_source"}
+                or current_source_owner.get() is not None
+            )
             messages.append(
                 {
                     "role": "system",
@@ -676,7 +682,9 @@ class DeepSeekService:
             for call in message.tool_calls:
                 if call.type != "function":
                     raise DeepSeekAPIError("Неподдерживаемый тип инструмента")
-                if calls_used >= 6:
+                if call.function.name not in available_tools:
+                    result = '{"ok":false,"error":"tool_not_allowed"}'
+                elif calls_used >= 6:
                     result = '{"ok":false,"error":"tool_budget_exhausted"}'
                 else:
                     result = await self._tools.execute(

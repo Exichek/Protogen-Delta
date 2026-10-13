@@ -12,6 +12,7 @@ from typing import Literal, Protocol
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.conversation_gate import ConversationGate
+from protogen_delta.core.emotional_memory import EmotionalMemory
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class EmotionalState:
     irritation: float = 0.0
     playfulness: float = 0.0
     arousal: float = 0.0
+    memory: EmotionalMemory = field(default_factory=EmotionalMemory)
 
     def adjust(
         self,
@@ -75,6 +77,7 @@ class EmotionalState:
             return
 
         elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
+        self.memory.decay(elapsed_seconds)
 
         self.adjust(
             warmth=-_WARMTH_DECAY_PER_HOUR * elapsed_hours,
@@ -507,6 +510,10 @@ class UserStateStore:
     def mark_history_updated(self, state: UserState) -> None:
         """Учесть доставленный ход, даже если заполненная история не изменилась."""
         state.history_updated_at = self._wall_clock()
+
+    def wall_clock(self) -> float:
+        """Общие часы для сохраняемых событий персонажа."""
+        return self._wall_clock()
 
     @asynccontextmanager
     async def use_conversation(

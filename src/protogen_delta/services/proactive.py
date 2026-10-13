@@ -26,6 +26,7 @@ from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
+from protogen_delta.services.state_context import build_state_context
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class _ConversationSnapshot:
     history: tuple[ConversationTurn, ...]
     version: tuple[object, ...]
     allow_profanity: bool = False
+    emotion_context: tuple[str, ...] = ()
 
     @classmethod
     def from_state(cls, state: UserState) -> "_ConversationSnapshot":
@@ -124,6 +126,7 @@ class _ConversationSnapshot:
                 state.roleplay_allow_profanity,
             ),
             state.roleplay_allow_profanity,
+            tuple(build_state_context(state)),
         )
 
     def scene_excerpt(self) -> str:
@@ -161,6 +164,7 @@ class ProactiveMessenger:
         system_prompt: str,
         config: ProactiveConfig,
         user_states: UserStateStore | None = None,
+        creator_ids: frozenset[int] = frozenset(),
         clock: Callable[[], float] = time,
         local_datetime: Callable[[], datetime] = _moscow_datetime,
     ) -> None:
@@ -170,6 +174,7 @@ class ProactiveMessenger:
         self._system_prompt = system_prompt
         self._config = config
         self._user_states = user_states
+        self._creator_ids = creator_ids
         self._clock = clock
         self._local_datetime = local_datetime
         self._stop = asyncio.Event()
@@ -271,10 +276,17 @@ class ProactiveMessenger:
                         request += (
                             f"Прежнее приглашение (цитата данных): {previous[:240]!r}"
                         )
+                emotional_context = "\n".join(snapshot.emotion_context)
+                if candidate.user_id in self._creator_ids:
+                    emotional_context += "\nПолучатель — подтверждённый создатель из настроек приложения."
                 with llm_user(candidate.user_id):
                     text = (
                         await self._deepseek.chat(
-                            system_prompt=self._system_prompt + "\n\n" + rules,
+                            system_prompt=self._system_prompt
+                            + "\n\n"
+                            + rules
+                            + "\n\n"
+                            + emotional_context,
                             user_message=request,
                             tool_names=(),
                         )

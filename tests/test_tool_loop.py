@@ -36,6 +36,36 @@ def response(count: int = 0, args: str = "{}") -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
 
 
+def test_model_cannot_execute_registered_tool_outside_selected_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forbidden = AsyncMock(return_value={"secret": "never"})
+    allowed = AsyncMock(return_value={})
+    client = Mock()
+    client.chat.completions.create = AsyncMock(side_effect=[response(1), response()])
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool("test", "forbidden", {}, (), forbidden),
+                    Tool("allowed", "allowed", {}, (), allowed),
+                ]
+            )
+        ),
+    )
+    assert (
+        asyncio.run(service.chat("system", "question", tool_names={"allowed"}))
+        == "Итог"
+    )
+    forbidden.assert_not_awaited()
+    messages = client.chat.completions.create.await_args.kwargs["messages"]
+    assert any("tool_not_allowed" in message.get("content", "") for message in messages)
+
+
 @pytest.mark.parametrize("invalid", [False, True])
 def test_loop_returns_tool_results_with_matching_id(
     monkeypatch: pytest.MonkeyPatch, invalid: bool

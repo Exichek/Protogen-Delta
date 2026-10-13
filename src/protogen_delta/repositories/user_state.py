@@ -9,6 +9,7 @@ from typing import cast
 
 from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
+from protogen_delta.core.emotional_memory import EmotionalMemory
 from protogen_delta.core.user_state import (
     ContentMode,
     ConversationTurn,
@@ -168,7 +169,8 @@ class UserStateRepository:
                         roleplay_stopword,
                         roleplay_allow_profanity,
                         history,
-                        history_updated_at
+                        history_updated_at,
+                        emotional_memory
                     FROM {table}
                     WHERE {where}
                     """,
@@ -211,6 +213,7 @@ class UserStateRepository:
             roleplay_allow_profanity,
             history,
             history_updated_at,
+            emotional_memory,
         ) = row
 
         species = AppearanceSpecies.decode(delta_species)
@@ -225,6 +228,11 @@ class UserStateRepository:
                 irritation=irritation,
                 playfulness=playfulness,
                 arousal=arousal,
+                memory=EmotionalMemory.decode(
+                    emotional_memory,
+                    legacy_joy=(warmth + playfulness) / 2,
+                    legacy_confidence=trust / 2,
+                ),
             ),
             relationship=RelationshipState(
                 familiarity=familiarity,
@@ -283,7 +291,7 @@ class UserStateRepository:
         history_expires_before: float | None = None,
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
-        table, _, key = self._scope(user_id)
+        table, where, key = self._scope(user_id)
         group = isinstance(user_id, tuple)
         extra_column = "chat_id," if group else ""
         extra_value = "?," if group else ""
@@ -410,6 +418,10 @@ class UserStateRepository:
                         history_updated_at,
                     ),
                 )
+                connection.execute(
+                    f"UPDATE {table} SET emotional_memory=? WHERE {where}",
+                    (emotions.memory.encode(), *key),
+                )
                 if history_expires_before is not None:
                     for history_table in ("user_states", "conversation_states"):
                         connection.execute(
@@ -504,6 +516,7 @@ class UserStateRepository:
                     ("roleplay_character_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
                     ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
+                    ("emotional_memory", "TEXT NOT NULL DEFAULT '{}'"),
                 ):
                     if name not in history_columns:
                         connection.execute(

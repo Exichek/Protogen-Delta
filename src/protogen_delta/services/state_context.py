@@ -1,5 +1,8 @@
 """Преобразование накопленного состояния в естественный контекст для модели."""
 
+from datetime import datetime, timezone
+
+from protogen_delta.core.emotional_memory import EMOTION_LABELS, EVENT_LABELS
 from protogen_delta.core.user_state import UserState
 
 
@@ -7,9 +10,34 @@ def build_state_context(
     user_state: UserState,
     *,
     include_intimate: bool = False,
+    show_system: bool = False,
 ) -> list[str]:
     """Собрать значимые описания накопленных эмоций и отношений."""
     context: list[str] = []
+
+    memory = user_state.emotions.memory
+    if memory.events or show_system:
+        context.append(
+            "Сохраняемое настроение Дельты (показатели 0–1): "
+            + "; ".join(
+                f"{label}={getattr(memory, name):.3f}"
+                for name, label in EMOTION_LABELS.items()
+            )
+        )
+        if memory.events:
+            context.append(
+                "Последние причины изменения — типы реально учтённых сигналов, без дословной переписки: "
+                + "; ".join(
+                    f"{datetime.fromtimestamp(event.at, timezone.utc).isoformat()} {EVENT_LABELS[event.kind]}"
+                    for event in memory.events[-3:]
+                )
+            )
+        if memory.creator_contacts:
+            context.append(
+                f"Ранее учтённых взаимодействий с создателем в этом чате: {memory.creator_contacts}. "
+                "Текущий статус создателя задаётся настройками, "
+                "а доверие и привязанность меняются по общению."
+            )
 
     relationship = user_state.relationship
     emotions = user_state.emotions

@@ -17,6 +17,30 @@ def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "9223372036854775808"])
+@pytest.mark.parametrize("name", ["CREATOR_IDS", "CODE_REVIEW_USER_IDS"])
+def test_creator_ids_reject_invalid_accounts(
+    monkeypatch: pytest.MonkeyPatch, value: str, name: str
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        load_settings()
+
+
+def test_creator_ids_preserve_legacy_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv("CREATOR_ID", "10")
+    monkeypatch.setenv("CREATOR_IDS", "20,20,30")
+    assert load_settings().recognized_creator_ids == frozenset({10, 20, 30})
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "invalid"])
 def test_history_ttl_environment_rejects_invalid_values(
     monkeypatch: pytest.MonkeyPatch, value: str

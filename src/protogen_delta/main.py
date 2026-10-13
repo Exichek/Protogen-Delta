@@ -29,6 +29,7 @@ from protogen_delta.handlers.actions import create_actions_router
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
+from protogen_delta.handlers.code_review import create_code_review_router
 from protogen_delta.handlers.creator import create_creator_router
 from protogen_delta.handlers.dialogue_archive import (
     ArchiveIncomingMiddleware,
@@ -61,6 +62,7 @@ from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.code_reviews import CodeReviewsRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.dialogue_archive import DialogueArchiveRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
@@ -75,6 +77,7 @@ from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.capabilities import build_capabilities
+from protogen_delta.services.code_review import CodeReviewService
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.dialogue_archive import DialogueArchiveService
@@ -92,6 +95,7 @@ from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.source_access import SourceAccess
 from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
@@ -167,6 +171,7 @@ async def main() -> None:
     transcriber: SpeechTranscriber | None = None
     reminders: ReminderService | None = None
     dialogue_archive: DialogueArchiveService | None = None
+    code_reviews: CodeReviewService | None = None
 
     try:
         usage_repository = LlmUsageRepository(
@@ -201,6 +206,7 @@ async def main() -> None:
         )
         bot.session.middleware.register(ArchiveOutgoingMiddleware(dialogue_archive))
         memories_repository = MemoriesRepository(settings.data_dir)
+        source_access = SourceAccess(settings.code_review_user_ids)
         bot.session.middleware.register(
             ProactiveOutgoingMiddleware(memories_repository)
         )
@@ -280,6 +286,7 @@ async def main() -> None:
             maximum_hours=settings.proactive_idle_max_seconds / 3600,
             followup_hours=settings.proactive_cooldown_seconds / 3600,
         )
+        core_prompt += "\n\n" + load_prompt("emotional_system")
         protogen_lore_prompt = load_prompt(
             "personality/protogen_lore.txt",
         )
@@ -297,6 +304,7 @@ async def main() -> None:
             disable_thinking=settings.llm_disable_thinking,
             tools=ToolExecutor(
                 default_registry(
+                    source_access=source_access,
                     proxy_url=settings.telegram_proxy_url,
                     brave_search_api_key=settings.brave_search_api_key,
                     dialogue_archive=(
@@ -372,6 +380,8 @@ async def main() -> None:
             config=response_engine_config,
             memory=memory,
             creator_id=settings.creator_id,
+            creator_ids=settings.recognized_creator_ids,
+            source_access=source_access,
             creator_messages=creator_messages,
             reply_transform=sticker_service.correct_reply,
             interaction_classifier=InteractionClassifier(
@@ -536,6 +546,10 @@ async def main() -> None:
         dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
         dispatcher.include_router(utilities_router)
+        code_reviews = CodeReviewService(
+            bot, deepseek, source_access, CodeReviewsRepository(settings.data_dir)
+        )
+        dispatcher.include_router(create_code_review_router(code_reviews))
         actions_router = create_actions_router(reminders)
         actions_router.message.middleware(MemoryInputsMiddleware(input_operations))
         dispatcher.include_router(actions_router)
@@ -603,6 +617,7 @@ async def main() -> None:
             deepseek=deepseek,
             repository=memories_repository,
             user_states=user_states,
+            creator_ids=settings.recognized_creator_ids,
             system_prompt=core_prompt,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
@@ -614,10 +629,13 @@ async def main() -> None:
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
         await reminders.start()
         dialogue_archive.start()
+        code_reviews.start()
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if code_reviews is not None:
+            await code_reviews.close()
         if reminders is not None:
             await reminders.close()
         if transcriber is not None:
