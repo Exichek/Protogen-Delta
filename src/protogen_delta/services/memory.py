@@ -7,6 +7,7 @@ from typing import Callable
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository, MemoryKind
 from protogen_delta.repositories.user_facts import FactsUpdate
+from protogen_delta.services.dialogue_archive import DialogueArchiveService
 from protogen_delta.services.insults import InsultType
 from protogen_delta.services.mood import MoodType
 from protogen_delta.services.user_facts import UserFactsService
@@ -22,11 +23,13 @@ class MemoryService:
         clock: Callable[[], float] = time,
         facts: UserFactsService | None = None,
         creator_messages: CreatorMessagesRepository | None = None,
+        dialogue_archive: DialogueArchiveService | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock
         self.facts = facts
         self._creator_messages = creator_messages
+        self.dialogue_archive = dialogue_archive
 
     async def observe_facts(self, user_id: int, text: str) -> FactsUpdate:
         if self.facts is None:
@@ -36,6 +39,10 @@ class MemoryService:
             await self._repository.forget_sources(
                 user_id, result.removed_sources + result.removed_values
             )
+            if self.dialogue_archive is not None:
+                await self.dialogue_archive.forget_sources(
+                    user_id, result.removed_sources + result.removed_values
+                )
         return result
 
     async def fact_context(self, user_id: int) -> list[str]:
@@ -48,6 +55,10 @@ class MemoryService:
         await self._repository.forget_sources(
             user_id, result.removed_sources + result.removed_values
         )
+        if self.dialogue_archive is not None:
+            await self.dialogue_archive.forget_sources(
+                user_id, result.removed_sources + result.removed_values
+            )
         return result
 
     async def note_message(
@@ -111,6 +122,8 @@ class MemoryService:
     async def delete_user(self, user_id: int) -> None:
         """Полностью удалить эпизодическую память и настройки пользователя."""
         await self._repository.delete_user(user_id)
+        if self.dialogue_archive is not None:
+            await self.dialogue_archive.delete_user(user_id)
         if self._creator_messages is not None:
             await self._creator_messages.delete_user(user_id)
         if self.facts is not None:

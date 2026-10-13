@@ -30,6 +30,11 @@ from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.creator import create_creator_router
+from protogen_delta.handlers.dialogue_archive import (
+    ArchiveIncomingMiddleware,
+    ArchiveOutgoingMiddleware,
+    archive_edit,
+)
 from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.download import create_download_router
 from protogen_delta.handlers.e621 import create_e621_router
@@ -53,6 +58,7 @@ from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
+from protogen_delta.repositories.dialogue_archive import DialogueArchiveRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
@@ -67,6 +73,7 @@ from protogen_delta.services.audio_understanding import AudioUnderstandingServic
 from protogen_delta.services.capabilities import build_capabilities
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.dialogue_archive import DialogueArchiveService
 from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
@@ -155,6 +162,7 @@ async def main() -> None:
     audio_understanding: AudioUnderstandingService | None = None
     transcriber: SpeechTranscriber | None = None
     reminders: ReminderService | None = None
+    dialogue_archive: DialogueArchiveService | None = None
 
     try:
         usage_repository = LlmUsageRepository(
@@ -182,6 +190,12 @@ async def main() -> None:
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
+        dialogue_archive = DialogueArchiveService(
+            DialogueArchiveRepository(settings.data_dir),
+            settings.dialogue_archive_user_ids,
+            settings.data_dir,
+        )
+        bot.session.middleware.register(ArchiveOutgoingMiddleware(dialogue_archive))
         memories_repository = MemoriesRepository(settings.data_dir)
         reminders = ReminderService(bot, RemindersRepository(settings.data_dir))
         health.add_diagnostics("reminders", reminders.snapshot)
@@ -203,6 +217,17 @@ async def main() -> None:
         )
         input_operations = InputOperations()
         dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        dispatcher.message.outer_middleware(
+            ArchiveIncomingMiddleware(dialogue_archive, input_operations)
+        )
+        dispatcher.edited_message.outer_middleware(
+            ReceiveInputsMiddleware(input_operations)
+        )
+        dispatcher.edited_message.outer_middleware(
+            ArchiveIncomingMiddleware(dialogue_archive, input_operations)
+        )
+        if settings.dialogue_archive_user_ids:
+            dispatcher.edited_message.register(archive_edit)
         dispatcher.message.outer_middleware(
             UserStatisticsMiddleware(
                 statistics_repository, user_states, input_operations
@@ -257,6 +282,9 @@ async def main() -> None:
                 default_registry(
                     proxy_url=settings.telegram_proxy_url,
                     brave_search_api_key=settings.brave_search_api_key,
+                    dialogue_archive=(
+                        dialogue_archive if settings.dialogue_archive_user_ids else None
+                    ),
                 )
             ),
         )
@@ -266,6 +294,7 @@ async def main() -> None:
             memories_repository,
             facts=UserFactsService(facts_repository, deepseek),
             creator_messages=creator_messages_repository,
+            dialogue_archive=dialogue_archive,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -568,6 +597,7 @@ async def main() -> None:
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
         await reminders.start()
+        dialogue_archive.start()
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
@@ -594,6 +624,8 @@ async def main() -> None:
                 await mini_app_server.close()
             if deepseek is not None:
                 await deepseek.close()
+            if dialogue_archive is not None:
+                await dialogue_archive.close()
         finally:
             await bot.session.close()
 
