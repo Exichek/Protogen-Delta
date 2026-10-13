@@ -54,6 +54,7 @@ class Settings:
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
     conversation_history_ttl_seconds: float = 604800.0
+    dialogue_archive_user_ids: frozenset[int] = frozenset()
     user_state_retention_seconds: float = 86400.0
     proactive_check_seconds: float = 300.0
     proactive_idle_seconds: float = 14400.0
@@ -107,6 +108,18 @@ def _parse_positive_int(
         raise ValueError(f"{name} должен быть больше нуля")
 
     return result
+
+
+def _parse_archive_ids(value: str) -> frozenset[int]:
+    """Архивировать только явно выбранные личные аккаунты."""
+    ids = frozenset(
+        _parse_positive_int(item.strip(), "DIALOGUE_ARCHIVE_USER_IDS")
+        for item in value.split(",")
+        if item.strip()
+    )
+    if any(user_id >= 2**63 for user_id in ids):
+        raise ValueError("DIALOGUE_ARCHIVE_USER_IDS содержит слишком большой ID")
+    return ids
 
 
 def _parse_non_negative_float(
@@ -400,6 +413,9 @@ def load_settings() -> Settings:
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
         conversation_history_ttl_seconds=conversation_history_ttl_seconds,
+        dialogue_archive_user_ids=_parse_archive_ids(
+            os.getenv("DIALOGUE_ARCHIVE_USER_IDS", "")
+        ),
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,
         proactive_idle_seconds=proactive_idle_seconds,

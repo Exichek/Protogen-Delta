@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 from unittest.mock import ANY, AsyncMock
 
@@ -16,6 +17,11 @@ from protogen_delta.core.user_state import (
     ConversationTurn,
     UserStateStore,
 )
+from protogen_delta.repositories.dialogue_archive import (
+    DialogueArchiveRepository,
+    DialogueMessage,
+)
+from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -25,6 +31,10 @@ from protogen_delta.services.deepseek import (
     DeepSeekService,
     DeepSeekTimeoutError,
     ImageInput,
+)
+from protogen_delta.services.dialogue_archive import (
+    DialogueArchiveService,
+    current_dialogue_owner,
 )
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
@@ -38,6 +48,51 @@ from protogen_delta.services.response_engine import (
 )
 
 TEST_USER_ID = 123456
+
+
+@pytest.mark.parametrize(
+    "scope", ["private", "group", "no_facts", "restricted", "other_owner"]
+)
+def test_archive_context_and_model_tool_keep_private_scope(
+    tmp_path: Path, scope: str
+) -> None:
+    async def run() -> None:
+        engine, _, model, _, _, _ = _create_engine()
+        archive = DialogueArchiveService(
+            DialogueArchiveRepository(tmp_path), frozenset({TEST_USER_ID}), tmp_path
+        )
+        await archive.repository.save(
+            TEST_USER_ID,
+            DialogueMessage("old", "user", "Проект ORBIT_ARCHIVE_930", 100),
+        )
+        memory = MemoryService(MemoriesRepository(tmp_path), dialogue_archive=archive)
+        engine._memory = memory
+        kwargs: dict[str, object] = {}
+        if scope == "group":
+            kwargs["chat_id"] = -100
+        if scope == "no_facts":
+            kwargs["use_personal_facts"] = False
+        if scope == "restricted":
+            engine._user_states.get(TEST_USER_ID).age_restricted = True
+        owner = TEST_USER_ID + 1 if scope == "other_owner" else TEST_USER_ID
+
+        async def chat(**arguments: object) -> str:
+            assert current_dialogue_owner.get() == (
+                owner if scope in {"private", "other_owner"} else None
+            )
+            return "Ответ"
+
+        model.chat.side_effect = chat
+        await engine.respond(owner, "Что помнишь о проекте?", **kwargs)  # type: ignore[arg-type]
+        call = model.chat.await_args
+        assert call is not None
+        assert ("ORBIT_ARCHIVE_930" in call.kwargs["system_prompt"]) is (
+            scope == "private"
+        )
+        assert ("search_dialogue" in call.kwargs["tool_names"]) is (scope == "private")
+        assert current_dialogue_owner.get() is None
+
+    asyncio.run(run())
 
 
 def _create_engine() -> tuple[
@@ -392,6 +447,7 @@ def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
     """Создатель и прошлые эпизоды должны попадать в динамический контекст."""
     engine, _, deepseek_mock, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
+    memory.dialogue_archive = None
     memory.context.return_value = ["Долговременный смешной момент"]
     engine._memory = cast(MemoryService, memory)
     engine._creator_id = TEST_USER_ID
@@ -420,6 +476,7 @@ def test_response_engine_keeps_replying_when_memory_storage_fails() -> None:
     """Сбой дополнительной памяти не должен ломать основной ответ."""
     engine, _, _, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
+    memory.dialogue_archive = None
     memory.context.side_effect = OSError("read failed")
     memory.note_message.side_effect = OSError("write failed")
     engine._memory = cast(MemoryService, memory)

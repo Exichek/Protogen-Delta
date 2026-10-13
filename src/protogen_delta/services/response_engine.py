@@ -64,6 +64,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekTimeoutError,
     ImageInput,
 )
+from protogen_delta.services.dialogue_archive import dialogue_owner
 from protogen_delta.services.fetishes import (
     FetishRole,
     FetishRoleClassifier,
@@ -743,6 +744,14 @@ class ResponseEngine:
                     user_message,
                     char_limit=self._config.memory_chars,
                 )
+                if (
+                    self._memory.dialogue_archive is not None
+                    and not user_state.age_restricted
+                ):
+                    archived_context = await self._memory.dialogue_archive.context(
+                        user_id, user_message
+                    )
+                    memory_context = archived_context + memory_context
             except Exception:
                 logger.exception(
                     "Не удалось загрузить эпизодическую память пользователя %s",
@@ -1039,21 +1048,36 @@ class ResponseEngine:
             tool_names = self._prompt_composer.select_tools(
                 user_message, history.recent
             )
-            if images:
-                reply = await self._deepseek.chat(
-                    system_prompt=prompt,
-                    user_message=model_user_message,
-                    history=history.recent,
-                    images=images,
-                    tool_names=tool_names,
-                )
-            else:
-                reply = await self._deepseek.chat(
-                    system_prompt=prompt,
-                    user_message=model_user_message,
-                    history=history.recent,
-                    tool_names=tool_names,
-                )
+            archive_owner = (
+                request.user_id
+                if request.use_personal_facts
+                and not request.user_state.age_restricted
+                and not gates.capability_overview
+                else None
+            )
+            if (
+                archive_owner is not None
+                and self._memory is not None
+                and self._memory.dialogue_archive is not None
+                and self._memory.dialogue_archive.enabled_for(archive_owner)
+            ):
+                tool_names |= {"search_dialogue"}
+            with dialogue_owner(archive_owner):
+                if images:
+                    reply = await self._deepseek.chat(
+                        system_prompt=prompt,
+                        user_message=model_user_message,
+                        history=history.recent,
+                        images=images,
+                        tool_names=tool_names,
+                    )
+                else:
+                    reply = await self._deepseek.chat(
+                        system_prompt=prompt,
+                        user_message=model_user_message,
+                        history=history.recent,
+                        tool_names=tool_names,
+                    )
         except LlmBudgetError as error:
             return PreparedReply(str(error))
 
