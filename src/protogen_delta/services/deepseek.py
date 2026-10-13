@@ -401,12 +401,13 @@ class DeepSeekService:
             )
 
         for turn in history:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": turn.user_message,
-                }
-            )
+            if not turn.proactive:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": turn.user_message,
+                    }
+                )
             messages.append(
                 {
                     "role": "assistant",

@@ -281,8 +281,8 @@ def test_stopping_proactive_generation_prevents_new_delivery() -> None:
         bot = AsyncMock()
         repo = AsyncMock()
         repo.due_candidates.return_value = [
-            SimpleNamespace(user_id=42),
-            SimpleNamespace(user_id=43),
+            SimpleNamespace(user_id=42, unanswered_count=0, activity_version=0),
+            SimpleNamespace(user_id=43, unanswered_count=0, activity_version=0),
         ]
         repo.recent.return_value = []
         model = AsyncMock()

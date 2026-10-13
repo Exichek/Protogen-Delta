@@ -68,7 +68,10 @@ def test_active_scene_uses_private_open_roleplay_turns(tmp_path: Path) -> None:
         assert excluded not in args["user_message"]
     assert "не продолжение RP" not in args["system_prompt"]
     assert "данные сцены" in args["system_prompt"]
-    assert tuple(state.history) == before and state.roleplay_active
+    assert tuple(state.history) == before + (
+        ConversationTurn("", "Продолжим сцену у моста?", proactive=True),
+    )
+    assert state.roleplay_active
     bot.send_message.assert_awaited_once_with(7, "Продолжим сцену у моста?")
 
 
@@ -126,7 +129,13 @@ def test_scene_fallback_invites_continuation_without_inventing_events(
     bot.send_message.assert_awaited_once_with(
         7, "Хочешь продолжить нашу RP-сцену с того места, где остановились?"
     )
-    assert not states.get(7).history
+    assert tuple(states.get(7).history) == (
+        ConversationTurn(
+            "",
+            "Хочешь продолжить нашу RP-сцену с того места, где остановились?",
+            proactive=True,
+        ),
+    )
 
 
 @pytest.mark.parametrize(

@@ -102,6 +102,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("E621_REQUEST_INTERVAL_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_CHECK_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_IDLE_SECONDS", raising=False)
+    monkeypatch.delenv("PROACTIVE_IDLE_MAX_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_COOLDOWN_SECONDS", raising=False)
     monkeypatch.delenv("WHISPER_MODEL_SIZE", raising=False)
     monkeypatch.delenv("WHISPER_DEVICE", raising=False)
@@ -150,9 +151,10 @@ def test_load_settings_with_defaults(
     assert settings.brave_search_api_key is None
     assert settings.e621_user_agent.startswith("ProtogenDelta/0.1")
     assert settings.e621_request_interval_seconds == 1.0
-    assert settings.proactive_check_seconds == 300.0
-    assert settings.proactive_idle_seconds == 14400.0
-    assert settings.proactive_cooldown_seconds == 86400.0
+    assert settings.proactive_check_seconds == 30.0
+    assert settings.proactive_idle_seconds == 5400.0
+    assert settings.proactive_idle_max_seconds == 10800.0
+    assert settings.proactive_cooldown_seconds == 72000.0
     assert settings.rate_limit_seconds == 2.0
     assert settings.rate_limit_retention_seconds == 300.0
     assert settings.conversation_history_limit == 8

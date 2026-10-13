@@ -227,7 +227,12 @@ class PromptComposer:
             for turn in older:
                 user = " ".join(turn.user_message.split())[:350]
                 assistant = " ".join(turn.assistant_message.split())[:350]
-                lines.append(f"- Пользователь: {user!r}; Дельта: {assistant!r}")
+                if turn.proactive:
+                    lines.append(
+                        f"- Самостоятельная реплика Дельты: {assistant!r}; без входящей реплики на этом ходе."
+                    )
+                else:
+                    lines.append(f"- Пользователь: {user!r}; Дельта: {assistant!r}")
             summary = "\n".join(lines)[:summary_chars].rstrip()
 
         kept: list[ConversationTurn] = []
