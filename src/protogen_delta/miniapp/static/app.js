@@ -19,6 +19,7 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     document.querySelector("#age-restriction-hint").hidden = !p.age_restricted;
     document.querySelector("#stopword").value = p.roleplay_stopword || "стоп";
     document.querySelector("#configuration").value = p.roleplay_configuration;
+    document.querySelector("#rp-allow-profanity").checked = Boolean(p.roleplay_allow_profanity);
     renderCharacter(p);
     document.querySelector("#preferences").value = p.roleplay_preferences;
     document.querySelector("#boundaries").value = p.roleplay_boundaries;
@@ -131,6 +132,7 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     document.querySelector("#save-character-description").disabled = busy || document.querySelector("#character").value.trim() === characterSnapshot;
     for (const id of ["character", "character-species", "character-notes"]) document.querySelector(`#${id}`).disabled = busy;
     document.querySelector("#save").disabled = busy;
+    document.querySelector("#rp-allow-profanity").disabled = busy;
   };
   const renderCharacter = p => {
     characterSnapshot = p.roleplay_character || "";
@@ -566,5 +568,5 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     document.querySelector("#appearance").textContent = "Не удалось загрузить облик.";
     appearanceFail(error);
   });
-  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; settingsBusy=true; updateAppearanceButtons(); status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { settingsBusy=false; updateAppearanceButtons(); } });
+  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; settingsBusy=true; updateAppearanceButtons(); status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_allow_profanity:document.querySelector("#rp-allow-profanity").checked,roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { settingsBusy=false; updateAppearanceButtons(); } });
   document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });

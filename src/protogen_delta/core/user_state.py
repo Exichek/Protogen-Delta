@@ -138,6 +138,7 @@ class PersistentUserState:
     roleplay_stopword: str = "стоп"
     history: tuple[ConversationTurn, ...] = ()
     history_updated_at: float = 0.0
+    roleplay_allow_profanity: bool = False
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -181,6 +182,7 @@ class UserStatePersistence(Protocol):
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -258,6 +260,8 @@ class UserState:
         compare=False,
     )
 
+    roleplay_allow_profanity: bool = False
+
     def register_reply(self) -> None:
         """Увеличить счётчик ответов этому пользователю."""
         self.reply_count += 1
@@ -302,6 +306,7 @@ class UserState:
         self.roleplay_character_restricted = False
         self.delta_reference_restricted = False
         self.roleplay_stopword = "стоп"
+        self.roleplay_allow_profanity = False
         self.content_mode = "unselected"
         self.age_restricted = False
 
@@ -471,6 +476,7 @@ class UserStateStore:
                                     age_restricted=state.age_restricted,
                                     delta_reference_restricted=state.delta_reference_restricted,
                                     roleplay_stopword=state.roleplay_stopword,
+                                    roleplay_allow_profanity=state.roleplay_allow_profanity,
                                     history=tuple(state.history),
                                     history_updated_at=state.history_updated_at,
                                     history_expires_before=self._wall_clock()
@@ -624,6 +630,7 @@ class UserStateStore:
                 persistent_state.delta_reference_restricted
             )
             state.roleplay_stopword = persistent_state.roleplay_stopword
+            state.roleplay_allow_profanity = persistent_state.roleplay_allow_profanity
             state.history = deque(persistent_state.history, maxlen=self._history_limit)
             state.history_updated_at = persistent_state.history_updated_at
         else:

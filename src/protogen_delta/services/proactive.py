@@ -24,6 +24,7 @@ from protogen_delta.core.user_state import (
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.prompt_composer import PromptComposer
+from protogen_delta.services.rp_speech_style import roleplay_speech_style
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class _ConversationSnapshot:
     roleplay_active: bool
     history: tuple[ConversationTurn, ...]
     version: tuple[object, ...]
+    allow_profanity: bool = False
 
     @classmethod
     def from_state(cls, state: UserState) -> "_ConversationSnapshot":
@@ -113,7 +115,9 @@ class _ConversationSnapshot:
                 state.age_restricted,
                 state.delta_reference_restricted,
                 state.roleplay_character_restricted,
+                state.roleplay_allow_profanity,
             ),
+            state.roleplay_allow_profanity,
         )
 
     def scene_excerpt(self) -> str:
@@ -217,7 +221,11 @@ class ProactiveMessenger:
             rules = _PROACTIVE_RULES
             invitation = _NEUTRAL_INVITATION
             if snapshot.roleplay_active:
-                rules = _ROLEPLAY_RULES
+                rules = (
+                    _ROLEPLAY_RULES
+                    + "\n"
+                    + roleplay_speech_style(snapshot.allow_profanity)
+                )
                 invitation = _ROLEPLAY_INVITATION
                 request = (
                     "Напиши короткое приглашение вернуться к активной RP-сцене. "
