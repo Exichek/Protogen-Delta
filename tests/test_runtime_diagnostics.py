@@ -281,6 +281,8 @@ def test_admin_status_renders_diagnostics_only_for_authorized_user(
             pass
         health.add_diagnostics("native", metrics.snapshot)
         health.add_diagnostics("llm", OperationMetrics().snapshot)
+        for name in ("audio", "whisper", "translation"):
+            health.add_diagnostics(name, OperationMetrics(capacity=2).snapshot)
         users = Mock(spec=UsersRepository)
         users.count.return_value = 10
         router = create_admin_router(
@@ -296,10 +298,40 @@ def test_admin_status_renders_diagnostics_only_for_authorized_user(
         text = answer.await_args.args[0]
         if user_id == 123:
             assert "Декодеры: выполняется 0/2, очередь 0" in text
+            for label in ("Модель диалога", "Аудиомодель", "Whisper", "Переводчик"):
+                assert f"• {label}: выполняется" in text
+            answer.assert_awaited_once()
             assert "ещё нет запросов" in text
             assert "p95" in text
             assert "нет свежего подтверждения" in text
         else:
             assert "нет доступа" in text and "Декодеры" not in text
+
+    asyncio.run(scenario())
+
+
+def test_admin_status_survives_new_diagnostic_without_display_name() -> None:
+    async def scenario() -> None:
+        health = Mock(spec=RuntimeHealth)
+        health.snapshot.return_value = {
+            "polling": True,
+            "diagnostics": {"future_worker": OperationMetrics(capacity=1).snapshot()},
+        }
+        users = Mock(spec=UsersRepository)
+        users.count.return_value = 10
+        router = create_admin_router(
+            cast(ImagesRepository, Mock()),
+            cast(UsersRepository, users),
+            BotState(),
+            frozenset({123}),
+            runtime_health=health,
+        )
+        message, _, answer, _ = _create_message_mock(text="/status", user_id=123)
+        await _call_handler(router, "status", message)
+        answer.assert_awaited_once()
+        assert answer.await_args is not None
+        text = answer.await_args.args[0]
+        assert "Дополнительная подсистема: выполняется 0/1, очередь 0" in text
+        assert "Telegram polling: работает" in text
 
     asyncio.run(scenario())

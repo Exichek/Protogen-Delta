@@ -296,6 +296,7 @@ def create_admin_router(
                 "audio": "Аудиомодель",
                 "native": "Декодеры",
                 "whisper": "Whisper",
+                "translation": "Переводчик",
             }
             outcomes = {
                 "unknown": "ещё нет запросов",
@@ -306,8 +307,9 @@ def create_admin_router(
             for name, data in health.get("diagnostics", {}).items():
                 capacity = data["capacity"]
                 active = str(data["active"]) + (f"/{capacity}" if capacity else "")
+                label = names.get(name, "Дополнительная подсистема")
                 reply += (
-                    f"\n• {names[name]}: выполняется {active}, очередь {data['waiting']}; "
+                    f"\n• {label}: выполняется {active}, очередь {data['waiting']}; "
                     f"завершено {data['completed']}, ошибок {data['failed']}; "
                     f"последний исход — {outcomes[data['last_result']]}"
                 )
