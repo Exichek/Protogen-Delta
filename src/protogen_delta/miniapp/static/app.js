@@ -483,6 +483,82 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
   for (const [selector, target] of [["#my-id","self"],["#bot-id","bot"],["#select-id","select"],["#lookup-id",null]]) document.querySelector(selector).addEventListener("click", e => toolCall(e.currentTarget,"#id-status","id",{target:target || document.querySelector("#id-target").value.trim()},showId));
   document.querySelector("#copy-id").addEventListener("click", async () => { try { await navigator.clipboard.writeText(String(copiedId)); document.querySelector("#id-status").textContent=`ID ${copiedId} скопирован.`; } catch { document.querySelector("#id-status").textContent=`ID: ${copiedId}. Выдели текст и скопируй.`; } });
   document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
+  const conversionFormats = {video:['mp4','avi','mov','mkv'],audio:['mp3','wav','flac']};
+  const conversionFormat = document.querySelector('#conversion-format'), conversionFileInput = document.querySelector('#conversion-file');
+  const conversionStatus = document.querySelector('#conversion-status'), conversionUpload = document.querySelector('#conversion-upload');
+  let conversionMode='video', conversionFile=null, conversionResult=null, conversionBusy=false;
+  const conversionPlayers=[document.querySelector('#conversion-video'),document.querySelector('#conversion-audio')];
+  const conversionResetResult=()=>{
+    if(conversionResult) api('DELETE',null,`/api/tools/convert/${conversionResult.token}`).catch(()=>{});
+    conversionResult=null;
+    document.querySelector('#conversion-result').hidden=true;
+    for(const player of conversionPlayers) {player.pause();player.removeAttribute('src');player.load();player.hidden=true;}
+  };
+  const conversionUpdate=()=>{
+    for(const selector of ['#conversion-choose','#conversion-format','#conversion-resolution','#conversion-bitrate']) document.querySelector(selector).disabled=conversionBusy;
+    for(const button of document.querySelectorAll('[data-conversion-mode]')) button.disabled=conversionBusy;
+    document.querySelector('#conversion-submit').disabled=conversionBusy || !conversionFile;
+    document.querySelector('#conversion-clear').disabled=conversionBusy || !(conversionFile || conversionResult);
+    document.querySelector('#conversion-resolution-field').hidden=conversionMode!=='video';
+    document.querySelector('#conversion-bitrate-field').hidden=conversionMode!=='audio' || conversionFormat.value!=='mp3';
+    conversionUpload.setAttribute('aria-busy',String(conversionBusy));
+    document.querySelector('#conversion-hint').textContent=conversionMode==='video' ? 'Файл до 100 МБ и 10 минут. Видео сохраняется со звуком, если он есть; до 30 кадров/с. Обработка — до четырёх минут.' : 'Аудио или видео до 100 МБ и 10 минут. Из видео извлекается звук. WAV и FLAC сохраняются без сжатия с потерями; исходное качество не восстанавливается. Результат — до 150 МБ.';
+  };
+  const setConversionMode=mode=>{
+    if(conversionBusy) return;
+    conversionMode=mode; conversionResetResult();
+    conversionFormat.replaceChildren(...conversionFormats[mode].map(format=>new Option(format.toUpperCase(),format)));
+    for(const button of document.querySelectorAll('[data-conversion-mode]')) button.setAttribute('aria-pressed',String(button.dataset.conversionMode===mode));
+    conversionStatus.textContent='';conversionUpdate();
+  };
+  const chooseConversionFile=file=>{
+    if(!file || conversionBusy) return;
+    if(file.size===0 || file.size>100*1024*1024) {conversionStatus.className='tool-status error';conversionStatus.textContent='Нужен непустой файл до 100 МБ.';return;}
+    conversionResetResult();conversionFile=file;
+    document.querySelector('#conversion-file-name').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(2)} МБ`;
+    conversionStatus.textContent='';conversionUpdate();
+  };
+  for(const button of document.querySelectorAll('[data-conversion-mode]')) button.addEventListener('click',()=>setConversionMode(button.dataset.conversionMode));
+  for(const select of [conversionFormat,document.querySelector('#conversion-resolution'),document.querySelector('#conversion-bitrate')]) select.addEventListener('change',()=>{conversionResetResult();conversionStatus.textContent='';conversionUpdate();});
+  document.querySelector('#conversion-choose').addEventListener('click',()=>{conversionFileInput.value='';conversionFileInput.click();});
+  conversionFileInput.addEventListener('change',()=>chooseConversionFile(conversionFileInput.files[0]));
+  conversionUpload.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer?.types || []).includes('Files')) {event.preventDefault();if(!conversionBusy) conversionUpload.classList.add('drag-over');}});
+  conversionUpload.addEventListener('dragleave',()=>conversionUpload.classList.remove('drag-over'));
+  conversionUpload.addEventListener('drop',event=>{conversionUpload.classList.remove('drag-over');if(event.dataTransfer?.files?.length) {event.preventDefault();chooseConversionFile(event.dataTransfer.files[0]);}});
+  document.querySelector('#conversion-clear').addEventListener('click',()=>{conversionResetResult();conversionFile=null;conversionFileInput.value='';document.querySelector('#conversion-file-name').textContent='';conversionStatus.textContent='';conversionUpdate();});
+  document.querySelector('#conversion-submit').addEventListener('click',async()=>{
+    if(conversionBusy || !conversionFile) return;
+    conversionResetResult();conversionBusy=true;conversionUpdate();conversionStatus.className='tool-status';conversionStatus.textContent='Загружаю файл…';
+    const progress=document.querySelector('#conversion-progress');progress.hidden=false;progress.value=0;
+    try {
+      const result=await new Promise((resolve,reject)=>{
+        const xhr=new XMLHttpRequest();xhr.open('POST','/api/tools/convert/file');xhr.timeout=250000;xhr.responseType='json';
+        xhr.setRequestHeader('X-Telegram-Init-Data',initData);xhr.setRequestHeader('Content-Type',conversionFile.type || 'application/octet-stream');
+        xhr.setRequestHeader('X-Conversion-Options',encodeURIComponent(JSON.stringify({mode:conversionMode,format:conversionFormat.value,resolution:document.querySelector('#conversion-resolution').value,bitrate:Number(document.querySelector('#conversion-bitrate').value),file_name:conversionFile.name})));
+        xhr.upload.onprogress=event=>{if(event.lengthComputable) progress.value=Math.round(event.loaded/event.total*100);};
+        xhr.upload.onload=()=>{progress.removeAttribute('value');conversionStatus.textContent='Преобразую файл… Это может занять до четырёх минут.';};
+        xhr.onload=()=>xhr.status>=200 && xhr.status<300 && xhr.response ? resolve(xhr.response) : reject(new Error(xhr.status===401 ? 'Срок доступа истёк. Закрой Mini App и открой заново.' : xhr.status===429 ? 'Конвертер занят или запросы слишком частые. Попробуй позже.' : 'Не удалось преобразовать файл. Проверь формат, размер и длительность.'));
+        xhr.onerror=()=>reject(new Error('Соединение прервалось. Попробуй ещё раз.'));xhr.ontimeout=()=>reject(new Error('Обработка заняла слишком много времени. Выбери меньший файл.'));
+        xhr.send(conversionFile);
+      });
+      conversionResult=result;
+      document.querySelector('#conversion-result-name').textContent=result.name;
+      document.querySelector('#conversion-result-info').textContent=`${result.format.toUpperCase()} · ${(result.bytes/1024/1024).toFixed(2)} МБ · ${Math.floor(result.duration/60)}:${String(Math.round(result.duration%60)).padStart(2,'0')}`;
+      const player=conversionPlayers[conversionMode==='video' ? 0 : 1];player.src=result.preview_url;player.hidden=false;
+      document.querySelector('#conversion-preview-hint').textContent=result.format==='mp4' || result.format==='mp3' || result.format==='wav' ? 'Можно посмотреть или послушать результат перед сохранением.' : 'Для плеера подготовлено отдельное превью. Сохранится файл в выбранном формате.';
+      document.querySelector('#conversion-result').hidden=false;conversionStatus.className='tool-status ok';conversionStatus.textContent='Готово. Посмотри результат и сохрани файл.';
+    } catch(error) {conversionStatus.className='tool-status error';conversionStatus.textContent=error.message;}
+    finally {conversionBusy=false;progress.hidden=true;conversionUpdate();}
+  });
+  for(const player of conversionPlayers) player.addEventListener('error',()=>{if(conversionResult) document.querySelector('#conversion-preview-hint').textContent='Превью не удалось открыть или оно устарело. Попробуй сохранить файл либо преобразовать его заново.';});
+  document.querySelector('#conversion-save').addEventListener('click',()=>{
+    if(!conversionResult) return;
+    const result=conversionResult;
+    const download=()=>{const link=document.createElement('a');link.href=result.download_url;link.download=result.name;link.rel='noreferrer';document.body.append(link);link.click();link.remove();};
+    if(tg?.isVersionAtLeast?.('8.0') && tg.downloadFile) {try {tg.downloadFile({url:new URL(result.download_url,location.href).href,file_name:result.name},accepted=>{if(!accepted) {conversionStatus.textContent='Сохранение отменено. Можно нажать «Сохранить файл» ещё раз.';}});} catch {download();}}
+    else download();
+  });
+  setConversionMode('video');
   const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
   updateAppearanceButtons();
   api().then(render).catch(error => {

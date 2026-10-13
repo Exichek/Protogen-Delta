@@ -297,6 +297,7 @@ def create_admin_router(
                 "native": "Декодеры",
                 "whisper": "Whisper",
                 "translation": "Переводчик",
+                "converter": "Конвертер медиа",
             }
             outcomes = {
                 "unknown": "ещё нет запросов",
