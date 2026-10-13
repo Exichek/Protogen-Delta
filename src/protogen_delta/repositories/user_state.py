@@ -305,6 +305,7 @@ class UserStateRepository:
                     "user": turn.user_message[:8000],
                     "assistant": turn.assistant_message[:16000],
                     "context_closed": turn.context_closed,
+                    "proactive": turn.proactive,
                 }
                 for turn in (history or ())
             ],
@@ -607,6 +608,7 @@ class UserStateRepository:
                 item["user"][:8000],
                 item["assistant"][:16000],
                 context_closed=item.get("context_closed") is True,
+                proactive=item.get("proactive") is True,
             )
             for item in items
             if isinstance(item, dict)

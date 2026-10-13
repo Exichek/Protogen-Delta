@@ -45,6 +45,10 @@ from protogen_delta.handlers.llm_budget import LlmUserMiddleware
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
+from protogen_delta.handlers.proactive_activity import (
+    ProactiveIncomingMiddleware,
+    ProactiveOutgoingMiddleware,
+)
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.safety import AgeSafetyMiddleware
@@ -197,6 +201,9 @@ async def main() -> None:
         )
         bot.session.middleware.register(ArchiveOutgoingMiddleware(dialogue_archive))
         memories_repository = MemoriesRepository(settings.data_dir)
+        bot.session.middleware.register(
+            ProactiveOutgoingMiddleware(memories_repository)
+        )
         reminders = ReminderService(bot, RemindersRepository(settings.data_dir))
         health.add_diagnostics("reminders", reminders.snapshot)
         creator_messages_repository = CreatorMessagesRepository(settings.data_dir)
@@ -217,6 +224,11 @@ async def main() -> None:
         )
         input_operations = InputOperations()
         dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        dispatcher.message.outer_middleware(
+            ProactiveIncomingMiddleware(
+                memories_repository, user_states, input_operations
+            )
+        )
         dispatcher.message.outer_middleware(
             ArchiveIncomingMiddleware(dialogue_archive, input_operations)
         )
@@ -262,6 +274,11 @@ async def main() -> None:
 
         core_prompt = load_prompt(
             "personality/core.txt",
+        )
+        core_prompt += "\n\n" + load_prompt("initiative_system").format(
+            minimum_hours=settings.proactive_idle_seconds / 3600,
+            maximum_hours=settings.proactive_idle_max_seconds / 3600,
+            followup_hours=settings.proactive_cooldown_seconds / 3600,
         )
         protogen_lore_prompt = load_prompt(
             "personality/protogen_lore.txt",
@@ -549,9 +566,7 @@ async def main() -> None:
         )
         await set_commands(bot, settings.mini_app_url)
 
-        # Команда /proactive временно скрыта: на время этого режима фоновые
-        # сообщения включаются всем, включая ранее отключившие их в тестах.
-        await memories_repository.enable_proactive_for_all()
+        # Сохранённое отключение инициативы не сбрасывается при перезапуске.
 
         if settings.mini_app_server_enabled:
             mini_app_tools = MiniAppTools(
@@ -592,6 +607,7 @@ async def main() -> None:
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,
+                idle_max_seconds=settings.proactive_idle_max_seconds,
                 cooldown_seconds=settings.proactive_cooldown_seconds,
             ),
         )

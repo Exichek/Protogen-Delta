@@ -2,11 +2,15 @@
 
 import asyncio
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
+from random import uniform
 from typing import Literal
 
+from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.memory_search import (
     SEARCH_VERSION,
     memory_index_text,
@@ -32,16 +36,24 @@ class ProactiveCandidate:
 
     user_id: int
     unanswered_count: int
+    activity_version: int = 0
 
 
 class MemoriesRepository:
     """Хранить эпизоды, активность и настройки проактивных сообщений."""
 
-    def __init__(self, data_dir: Path, *, max_memories_per_user: int = 50) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        max_memories_per_user: int = 50,
+        random_delay: Callable[[float, float], float] = uniform,
+    ) -> None:
         if max_memories_per_user <= 0:
             raise ValueError("max_memories_per_user должен быть больше нуля")
         self._path = data_dir / "memories.db"
         self._max_memories = max_memories_per_user
+        self._random_delay = random_delay
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -93,7 +105,26 @@ class MemoriesRepository:
 
     async def note_user_activity(self, user_id: int, at: float) -> None:
         """Зафиксировать сообщение пользователя и сбросить счётчик молчания."""
-        await asyncio.to_thread(self._note_user_activity_sync, user_id, at)
+        await finish_operation(
+            asyncio.to_thread(self._note_user_activity_sync, user_id, at)
+        )
+
+    async def note_dialogue_activity(self, user_id: int, at: float) -> None:
+        """Учесть доставленный обычный ответ, не считая его ответом пользователя."""
+        await finish_operation(
+            asyncio.to_thread(self._note_dialogue_activity_sync, user_id, at)
+        )
+
+    def _note_dialogue_activity_sync(self, user_id: int, at: float) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE engagement SET "
+                "last_dialogue_activity_at=MAX(last_dialogue_activity_at,?), "
+                "next_proactive_at=CASE WHEN engagement.unanswered_count=0 THEN NULL "
+                "ELSE engagement.next_proactive_at END, "
+                "activity_version=engagement.activity_version+1 WHERE user_id=?",
+                (at, user_id),
+            )
 
     async def set_proactive(self, user_id: int, enabled: bool, at: float) -> None:
         """Изменить согласие пользователя на проактивные сообщения."""
@@ -119,29 +150,77 @@ class MemoriesRepository:
         await asyncio.to_thread(self._enable_proactive_for_all_sync)
 
     async def due_candidates(
-        self, *, now: float, idle_seconds: float, cooldown_seconds: float, limit: int
+        self,
+        *,
+        now: float,
+        idle_seconds: float,
+        cooldown_seconds: float,
+        limit: int,
+        idle_max_seconds: float | None = None,
     ) -> list[ProactiveCandidate]:
-        """Найти пользователей, которым пора написать с учётом backoff."""
+        """Сохранить срок первого приглашения и найти готовые отправления."""
+        maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
+        if (
+            not all(
+                isfinite(value) and value > 0
+                for value in (idle_seconds, maximum, cooldown_seconds)
+            )
+            or maximum < idle_seconds
+        ):
+            raise ValueError("Некорректные сроки фонового сообщения")
         return await asyncio.to_thread(
             self._due_candidates_sync,
             now,
             idle_seconds,
             cooldown_seconds,
             limit,
+            None,
+            maximum,
         )
 
-    async def note_proactive_sent(self, user_id: int, at: float) -> None:
+    async def note_proactive_sent(
+        self,
+        user_id: int,
+        at: float,
+        *,
+        cooldown_seconds: float = 72000,
+        activity_version: int | None = None,
+    ) -> None:
         """Зафиксировать доставленное проактивное сообщение."""
-        await asyncio.to_thread(self._note_proactive_sent_sync, user_id, at)
+        await finish_operation(
+            asyncio.to_thread(
+                self._note_proactive_sent_sync,
+                user_id,
+                at,
+                cooldown_seconds,
+                activity_version,
+            )
+        )
 
     async def is_due(
-        self, user_id: int, *, now: float, idle_seconds: float, cooldown_seconds: float
+        self,
+        user_id: int,
+        *,
+        now: float,
+        idle_seconds: float,
+        cooldown_seconds: float,
+        idle_max_seconds: float | None = None,
+        activity_version: int | None = None,
     ) -> bool:
         """Проверить активность и настройку ещё раз после генерации сообщения."""
         candidates = await asyncio.to_thread(
-            self._due_candidates_sync, now, idle_seconds, cooldown_seconds, 1, user_id
+            self._due_candidates_sync,
+            now,
+            idle_seconds,
+            cooldown_seconds,
+            1,
+            user_id,
+            idle_seconds if idle_max_seconds is None else idle_max_seconds,
         )
-        return bool(candidates)
+        return bool(candidates) and (
+            activity_version is None
+            or candidates[0].activity_version == activity_version
+        )
 
     async def delete_user(self, user_id: int) -> None:
         """Удалить всю дополнительную память пользователя."""
@@ -231,14 +310,18 @@ class MemoriesRepository:
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
-                INSERT INTO engagement(user_id, last_user_message_at)
-                VALUES (?, ?)
+                INSERT INTO engagement(user_id, last_user_message_at,last_dialogue_activity_at,activity_version)
+                VALUES (?, ?, ?, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    last_user_message_at = excluded.last_user_message_at,
+                    last_user_message_at = MAX(engagement.last_user_message_at,excluded.last_user_message_at),
+                    last_dialogue_activity_at = MAX(
+                        engagement.last_dialogue_activity_at,excluded.last_dialogue_activity_at),
                     unanswered_count = 0,
-                    delivery_suspended = 0
+                    delivery_suspended = 0,
+                    next_proactive_at = NULL,
+                    activity_version = engagement.activity_version+1
                 """,
-                (user_id, at),
+                (user_id, at, at),
             )
 
     def _set_proactive_sync(self, user_id: int, enabled: bool, at: float) -> None:
@@ -274,36 +357,85 @@ class MemoriesRepository:
         cooldown_seconds: float,
         limit: int,
         user_id: int | None = None,
+        idle_max_seconds: float | None = None,
     ) -> list[ProactiveCandidate]:
-        with closing(self._connect()) as connection:
+        maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            unscheduled = connection.execute(
+                "SELECT user_id,last_user_message_at,last_dialogue_activity_at,last_proactive_at,unanswered_count "
+                "FROM engagement WHERE proactive_enabled=1 AND delivery_suspended=0 "
+                "AND last_user_message_at>0 AND unanswered_count<2 AND next_proactive_at IS NULL "
+                "AND (? IS NULL OR user_id=?)",
+                (user_id, user_id),
+            ).fetchall()
+            for (
+                owner,
+                last_user,
+                last_dialogue,
+                last_proactive,
+                unanswered,
+            ) in unscheduled:
+                if unanswered == 0:
+                    delay = (
+                        idle_seconds
+                        if maximum == idle_seconds
+                        else self._random_delay(idle_seconds, maximum)
+                    )
+                    if not isfinite(delay) or not idle_seconds <= delay <= maximum:
+                        raise ValueError("Случайный срок вне допустимого промежутка")
+                    deadline = max(last_user, last_dialogue) + delay
+                else:
+                    deadline = (
+                        last_proactive or max(last_user, last_dialogue)
+                    ) + cooldown_seconds
+                connection.execute(
+                    "UPDATE engagement SET next_proactive_at=? WHERE user_id=?",
+                    (deadline, owner),
+                )
             rows = connection.execute(
                 """
-                SELECT user_id, unanswered_count FROM engagement
+                SELECT user_id, unanswered_count, activity_version FROM engagement
                 WHERE proactive_enabled = 1
                   AND delivery_suspended = 0
                   AND (? IS NULL OR user_id = ?)
                   AND last_user_message_at > 0
-                  AND ? - last_user_message_at >= ?
-                  AND (last_proactive_at IS NULL OR
-                       ? - last_proactive_at >= ? * (1 << MIN(unanswered_count, 6)))
-                ORDER BY COALESCE(last_proactive_at, 0), last_user_message_at
+                  AND unanswered_count < 2
+                  AND next_proactive_at <= ?
+                ORDER BY next_proactive_at, last_user_message_at
                 LIMIT ?
                 """,
-                (user_id, user_id, now, idle_seconds, now, cooldown_seconds, limit),
+                (user_id, user_id, now, limit),
             ).fetchall()
         return [
-            ProactiveCandidate(user_id=row[0], unanswered_count=row[1]) for row in rows
+            ProactiveCandidate(
+                user_id=row[0], unanswered_count=row[1], activity_version=row[2]
+            )
+            for row in rows
         ]
 
-    def _note_proactive_sent_sync(self, user_id: int, at: float) -> None:
+    def _note_proactive_sent_sync(
+        self,
+        user_id: int,
+        at: float,
+        cooldown_seconds: float,
+        activity_version: int | None,
+    ) -> None:
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 UPDATE engagement SET last_proactive_at = ?,
+                    next_proactive_at = CASE WHEN unanswered_count=0 THEN ? ELSE NULL END,
                     unanswered_count = unanswered_count + 1
-                WHERE user_id = ?
+                WHERE user_id = ? AND (? IS NULL OR activity_version=?)
                 """,
-                (at, user_id),
+                (
+                    at,
+                    at + cooldown_seconds,
+                    user_id,
+                    activity_version,
+                    activity_version,
+                ),
             )
 
     def _delete_user_sync(self, user_id: int) -> None:
@@ -331,6 +463,15 @@ class MemoriesRepository:
                 connection.execute(
                     "ALTER TABLE engagement ADD COLUMN delivery_suspended INTEGER NOT NULL DEFAULT 0"
                 )
+            for name, declaration in (
+                ("last_dialogue_activity_at", "REAL NOT NULL DEFAULT 0"),
+                ("next_proactive_at", "REAL"),
+                ("activity_version", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE engagement ADD COLUMN {name} {declaration}"
+                    )
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

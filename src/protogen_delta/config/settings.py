@@ -56,9 +56,10 @@ class Settings:
     conversation_history_ttl_seconds: float = 604800.0
     dialogue_archive_user_ids: frozenset[int] = frozenset()
     user_state_retention_seconds: float = 86400.0
-    proactive_check_seconds: float = 300.0
-    proactive_idle_seconds: float = 14400.0
-    proactive_cooldown_seconds: float = 86400.0
+    proactive_check_seconds: float = 30.0
+    proactive_idle_seconds: float = 5400.0
+    proactive_idle_max_seconds: float = 10800.0
+    proactive_cooldown_seconds: float = 72000.0
     whisper_model_size: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
@@ -282,13 +283,23 @@ def load_settings() -> Settings:
     )
 
     proactive_check_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_CHECK_SECONDS", "300.0"), "PROACTIVE_CHECK_SECONDS"
+        os.getenv("PROACTIVE_CHECK_SECONDS", "30.0"), "PROACTIVE_CHECK_SECONDS"
     )
     proactive_idle_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_IDLE_SECONDS", "14400.0"), "PROACTIVE_IDLE_SECONDS"
+        os.getenv("PROACTIVE_IDLE_SECONDS", "5400.0"), "PROACTIVE_IDLE_SECONDS"
     )
+    proactive_idle_max_seconds = _parse_positive_float(
+        os.getenv(
+            "PROACTIVE_IDLE_MAX_SECONDS", str(max(10800.0, proactive_idle_seconds))
+        ),
+        "PROACTIVE_IDLE_MAX_SECONDS",
+    )
+    if proactive_idle_max_seconds < proactive_idle_seconds:
+        raise ValueError(
+            "PROACTIVE_IDLE_MAX_SECONDS не может быть меньше PROACTIVE_IDLE_SECONDS"
+        )
     proactive_cooldown_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "86400.0"),
+        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "72000.0"),
         "PROACTIVE_COOLDOWN_SECONDS",
     )
     e621_request_interval_seconds = _parse_non_negative_float(
@@ -419,6 +430,7 @@ def load_settings() -> Settings:
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,
         proactive_idle_seconds=proactive_idle_seconds,
+        proactive_idle_max_seconds=proactive_idle_max_seconds,
         proactive_cooldown_seconds=proactive_cooldown_seconds,
         whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "small").strip() or "small",
         whisper_device=os.getenv("WHISPER_DEVICE", "cpu").strip() or "cpu",

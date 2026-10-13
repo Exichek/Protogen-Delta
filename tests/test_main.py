@@ -144,6 +144,7 @@ def test_main_builds_application_and_starts_polling(
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
         "personality/core.txt": "CORE PROMPT",
+        "initiative_system": "INITIATIVE PROMPT",
         "personality/protogen_lore.txt": "LORE PROMPT",
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
@@ -420,6 +421,7 @@ def test_main_builds_application_and_starts_polling(
         call("start_greeting.txt"),
         call("repeat_start_greeting.txt"),
         call("personality/core.txt"),
+        call("initiative_system"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
         call("personality/rp.txt"),
@@ -500,16 +502,18 @@ def test_main_builds_application_and_starts_polling(
     inputs = reset_router_call.kwargs["input_operations"]
     assert isinstance(inputs, main_module.InputOperations)
     outer = dispatcher_mock.message.outer_middleware.call_args_list
-    assert len(outer) == 5
+    assert len(outer) == 6
     assert isinstance(outer[0].args[0], main_module.LlmUserMiddleware)
     dispatcher_mock.callback_query.outer_middleware.assert_called_once()
     outer = outer[1:]
     assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
     assert outer[0].args[0]._operations is inputs
-    assert isinstance(outer[1].args[0], main_module.ArchiveIncomingMiddleware)
+    assert isinstance(outer[1].args[0], main_module.ProactiveIncomingMiddleware)
     assert outer[1].args[0]._operations is inputs
-    assert isinstance(outer[2].args[0], main_module.UserStatisticsMiddleware)
-    assert outer[2].args[0]._input_operations is inputs
+    assert isinstance(outer[2].args[0], main_module.ArchiveIncomingMiddleware)
+    assert outer[2].args[0]._operations is inputs
+    assert isinstance(outer[3].args[0], main_module.UserStatisticsMiddleware)
+    assert outer[3].args[0]._input_operations is inputs
     for router in (text_router, media_router, document_router, voice_router):
         router.message.middleware.assert_called_once()
         inner = router.message.middleware.call_args.args[0]

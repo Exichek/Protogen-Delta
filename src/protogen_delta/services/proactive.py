@@ -7,7 +7,7 @@ import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from time import time
 
 from aiogram import Bot
@@ -21,6 +21,7 @@ from protogen_delta.core.user_state import (
     UserStatePersistenceError,
     UserStateStore,
 )
+from protogen_delta.handlers.proactive_activity import proactive_delivery
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.prompt_composer import PromptComposer
@@ -78,13 +79,18 @@ _PERSONAL_TOPIC_PATTERN = re.compile(
 )
 
 
+def _moscow_datetime() -> datetime:
+    return datetime.now(timezone(timedelta(hours=3)))
+
+
 @dataclass(frozen=True, slots=True)
 class ProactiveConfig:
     """Ограничения фоновой отправки."""
 
-    check_interval_seconds: float = 300.0
-    idle_seconds: float = 14400.0
-    cooldown_seconds: float = 86400.0
+    check_interval_seconds: float = 30.0
+    idle_seconds: float = 5400.0
+    idle_max_seconds: float | None = None
+    cooldown_seconds: float = 72000.0
     quiet_start_hour: int = 23
     quiet_end_hour: int = 9
     batch_size: int = 10
@@ -156,7 +162,7 @@ class ProactiveMessenger:
         config: ProactiveConfig,
         user_states: UserStateStore | None = None,
         clock: Callable[[], float] = time,
-        local_datetime: Callable[[], datetime] = datetime.now,
+        local_datetime: Callable[[], datetime] = _moscow_datetime,
     ) -> None:
         self._bot = bot
         self._deepseek = deepseek
@@ -167,6 +173,7 @@ class ProactiveMessenger:
         self._clock = clock
         self._local_datetime = local_datetime
         self._stop = asyncio.Event()
+        self._run_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def _conversation(self, user_id: int) -> AsyncIterator[_ConversationSnapshot]:
@@ -177,6 +184,10 @@ class ProactiveMessenger:
                 yield _ConversationSnapshot.from_state(state)
 
     async def run_once(self) -> int:
+        async with self._run_lock:
+            return await self._run_once()
+
+    async def _run_once(self) -> int:
         """Выполнить один проход планировщика и вернуть число отправлений."""
         if self._stop.is_set() or self._is_quiet_hour(self._local_datetime().hour):
             return 0
@@ -185,6 +196,7 @@ class ProactiveMessenger:
             now=now,
             idle_seconds=self._config.idle_seconds,
             cooldown_seconds=self._config.cooldown_seconds,
+            idle_max_seconds=self._config.idle_max_seconds,
             limit=self._config.batch_size,
         )
         sent = 0
@@ -193,7 +205,15 @@ class ProactiveMessenger:
                 break
             try:
                 async with self._conversation(candidate.user_id) as snapshot:
-                    pass
+                    if not await self._repository.is_due(
+                        candidate.user_id,
+                        now=self._clock(),
+                        idle_seconds=self._config.idle_seconds,
+                        idle_max_seconds=self._config.idle_max_seconds,
+                        cooldown_seconds=self._config.cooldown_seconds,
+                        activity_version=candidate.activity_version,
+                    ):
+                        continue
             except UserStatePersistenceError:
                 logger.warning("Proactive generation outcome=state_unavailable")
                 continue
@@ -236,6 +256,21 @@ class ProactiveMessenger:
                     f"{snapshot.scene_excerpt()}"
                 )
             try:
+                if candidate.unanswered_count:
+                    previous = next(
+                        (
+                            turn.assistant_message
+                            for turn in reversed(snapshot.history)
+                            if turn.proactive
+                        ),
+                        "",
+                    )
+                    request += "\nЭто последнее повторное приглашение после первого сообщения без ответа. "
+                    request += "Без упрёков и давления; не повторяй первое дословно. "
+                    if previous:
+                        request += (
+                            f"Прежнее приглашение (цитата данных): {previous[:240]!r}"
+                        )
                 with llm_user(candidate.user_id):
                     text = (
                         await self._deepseek.chat(
@@ -264,6 +299,8 @@ class ProactiveMessenger:
                         now=self._clock(),
                         idle_seconds=self._config.idle_seconds,
                         cooldown_seconds=self._config.cooldown_seconds,
+                        idle_max_seconds=self._config.idle_max_seconds,
+                        activity_version=candidate.activity_version,
                     )
                     if (
                         self._stop.is_set()
@@ -272,7 +309,21 @@ class ProactiveMessenger:
                         or self._is_quiet_hour(self._local_datetime().hour)
                     ):
                         continue
-                    await self._bot.send_message(candidate.user_id, text)
+                    token = proactive_delivery.set(True)
+                    try:
+                        await self._bot.send_message(candidate.user_id, text)
+                    finally:
+                        proactive_delivery.reset(token)
+                    if self._user_states is not None:
+                        state = self._user_states.get(candidate.user_id)
+                        state.history.append(ConversationTurn("", text, proactive=True))
+                        self._user_states.mark_history_updated(state)
+                    await self._repository.note_proactive_sent(
+                        candidate.user_id,
+                        self._clock(),
+                        cooldown_seconds=self._config.cooldown_seconds,
+                        activity_version=candidate.activity_version,
+                    )
             except TelegramForbiddenError:
                 logger.info("Proactive delivery outcome=unreachable reason=forbidden")
                 await self._repository.suspend_proactive_delivery(candidate.user_id)
@@ -300,7 +351,6 @@ class ProactiveMessenger:
                     candidate.user_id,
                 )
                 continue
-            await self._repository.note_proactive_sent(candidate.user_id, now)
             sent += 1
             logger.info("Proactive delivery outcome=sent chars=%d", len(text))
         return sent
