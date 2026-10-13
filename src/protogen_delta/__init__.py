@@ -1,4 +1,4 @@
-"""Protogen Delta package."""
+"""Пакет ИИ-ассистента «Протоген Дельта»."""
 
 from importlib.metadata import PackageNotFoundError, version
 
