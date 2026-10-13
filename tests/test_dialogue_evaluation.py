@@ -1,6 +1,7 @@
 """Ошибки поведения должны делать ручной прогон неуспешным."""
 
 import asyncio
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -8,9 +9,16 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-import scripts.evaluate_dialogue as evaluation
 from protogen_delta.services.deepseek import DeepSeekService
-from scripts.evaluate_dialogue import check_reply
+
+_spec = importlib.util.spec_from_file_location(
+    "dialogue_evaluation_script",
+    Path(__file__).resolve().parents[1] / "scripts" / "evaluate_dialogue.py",
+)
+assert _spec is not None and _spec.loader is not None
+evaluation = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(evaluation)
+check_reply = evaluation.check_reply
 
 
 def test_evaluation_checks_exact_memory_without_accepting_empty_replies() -> None:
