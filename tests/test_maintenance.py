@@ -22,6 +22,8 @@ from protogen_delta.repositories.users import UsersRepository
 
 
 def seed(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "users.json").write_text('{"USERS": [123]}', encoding="utf-8")
     UsersRepository(path).add(123)
     ImagesRepository(path).add("test-image")
     states = UserStateStore(persistence=UserStateRepository(path))
