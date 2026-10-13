@@ -145,6 +145,7 @@ def test_main_builds_application_and_starts_polling(
         "fetish_role_classification.txt": "ROLE PROMPT",
         "personality/core.txt": "CORE PROMPT",
         "initiative_system": "INITIATIVE PROMPT",
+        "emotional_system": "EMOTIONAL SYSTEM PROMPT",
         "personality/protogen_lore.txt": "LORE PROMPT",
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
@@ -422,6 +423,7 @@ def test_main_builds_application_and_starts_polling(
         call("repeat_start_greeting.txt"),
         call("personality/core.txt"),
         call("initiative_system"),
+        call("emotional_system"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
         call("personality/rp.txt"),
@@ -551,7 +553,7 @@ def test_main_builds_application_and_starts_polling(
         user_states, ANY, restrict_minor=ANY
     )
 
-    assert dispatcher_mock.include_router.call_count == 21
+    assert dispatcher_mock.include_router.call_count == 22
     assert isinstance(
         reset_router_call.kwargs["reminders"], main_module.ReminderService
     )

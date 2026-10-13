@@ -46,6 +46,8 @@ class Settings:
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
     creator_id: int | None = None
+    creator_ids: frozenset[int] = frozenset()
+    code_review_user_ids: frozenset[int] = frozenset()
     brave_search_api_key: str | None = None
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
     e621_request_interval_seconds: float = 1.0
@@ -68,6 +70,12 @@ class Settings:
     def llm_api_key(self) -> str:
         """Вернуть ключ выбранного OpenAI-совместимого LLM-провайдера."""
         return self.deepseek_api_key
+
+    @property
+    def recognized_creator_ids(self) -> frozenset[int]:
+        return self.creator_ids | (
+            frozenset({self.creator_id}) if self.creator_id is not None else frozenset()
+        )
 
     @property
     def llm_base_url(self) -> str:
@@ -111,15 +119,17 @@ def _parse_positive_int(
     return result
 
 
-def _parse_archive_ids(value: str) -> frozenset[int]:
+def _parse_archive_ids(
+    value: str, name: str = "DIALOGUE_ARCHIVE_USER_IDS"
+) -> frozenset[int]:
     """Архивировать только явно выбранные личные аккаунты."""
     ids = frozenset(
-        _parse_positive_int(item.strip(), "DIALOGUE_ARCHIVE_USER_IDS")
+        _parse_positive_int(item.strip(), name)
         for item in value.split(",")
         if item.strip()
     )
     if any(user_id >= 2**63 for user_id in ids):
-        raise ValueError("DIALOGUE_ARCHIVE_USER_IDS содержит слишком большой ID")
+        raise ValueError(name + " содержит слишком большой ID")
     return ids
 
 
@@ -408,6 +418,10 @@ def load_settings() -> Settings:
             )
         ),
         creator_id=creator_id,
+        creator_ids=_parse_archive_ids(os.getenv("CREATOR_IDS", ""), "CREATOR_IDS"),
+        code_review_user_ids=_parse_archive_ids(
+            os.getenv("CODE_REVIEW_USER_IDS", ""), "CODE_REVIEW_USER_IDS"
+        ),
         brave_search_api_key=brave_search_api_key or None,
         e621_user_agent=(
             os.getenv(

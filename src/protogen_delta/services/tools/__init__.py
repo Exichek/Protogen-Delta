@@ -3,6 +3,7 @@
 from functools import partial
 
 from protogen_delta.services.dialogue_archive import DialogueArchiveService
+from protogen_delta.services.source_access import SourceAccess
 from protogen_delta.services.tools.base import Tool, ToolExecutor, ToolRegistry
 from protogen_delta.services.tools.calculator import calculate_expression
 from protogen_delta.services.tools.live_data import (
@@ -30,6 +31,7 @@ def default_registry(
     proxy_url: str | None = None,
     brave_search_api_key: str | None = None,
     dialogue_archive: DialogueArchiveService | None = None,
+    source_access: SourceAccess | None = None,
 ) -> ToolRegistry:
     """Создать стандартный набор доступных DeepSeek инструментов."""
     tools = [
@@ -82,6 +84,28 @@ def default_registry(
             partial(fetch_web_page, proxy_url=proxy_url),
         ),
     ]
+    if source_access is not None and source_access.owners:
+        tools.extend(
+            [
+                Tool(
+                    "search_source",
+                    "Найти строку или имя файла в доступных Python-исходниках Дельты; только для администратора.",
+                    {"query": "Буквальная подстрока или часть пути, 3–100 символов"},
+                    ("query",),
+                    source_access.search_tool,
+                ),
+                Tool(
+                    "read_source",
+                    "Прочитать до 120 строк доступного Python-файла Дельты. Только чтение, без выполнения.",
+                    {
+                        "path": "Путь из search_source, например services/proactive.py",
+                        "start": "Первая строка, по умолчанию 1",
+                    },
+                    ("path",),
+                    source_access.read_tool,
+                ),
+            ]
+        )
     if dialogue_archive is not None:
         tools.append(
             Tool(

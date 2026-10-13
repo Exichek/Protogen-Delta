@@ -86,6 +86,7 @@ from protogen_delta.services.prompt_composer import (
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
 from protogen_delta.services.scene_continuity import scene_continuity_context
+from protogen_delta.services.source_access import SourceAccess, source_owner
 from protogen_delta.services.species_catalog import species_catalog
 from protogen_delta.services.state_context import build_state_context
 from protogen_delta.services.visual_model import VisualModel
@@ -222,6 +223,8 @@ class ResponseEngine:
         config: ResponseEngineConfig,
         memory: MemoryService | None = None,
         creator_id: int | None = None,
+        creator_ids: frozenset[int] = frozenset(),
+        source_access: SourceAccess | None = None,
         reply_transform: Callable[[int, str], str] | None = None,
         interaction_classifier: InteractionClassifier | None = None,
         creator_messages: CreatorMessageService | None = None,
@@ -263,6 +266,8 @@ class ResponseEngine:
         )
         self._memory = memory
         self._creator_id = creator_id
+        self._creator_ids = creator_ids
+        self._source_access = source_access
         self._reply_transform = reply_transform
         self._interaction_classifier = interaction_classifier
         self._creator_messages = creator_messages
@@ -657,6 +662,9 @@ class ResponseEngine:
             user_state,
             mood=mood,
             insult_type=insult_type,
+            text=user_message,
+            at=self._user_states.wall_clock(),
+            creator=user_id == self._creator_id or user_id in self._creator_ids,
         )
 
         fact_context: list[str] = []
@@ -715,12 +723,32 @@ class ResponseEngine:
             include_intimate=adult_allowed
             and not technical_topic
             and (is_rp or mood == "horny"),
+            show_system=bool(
+                re.search(
+                    r"\b(?:настроени\w*|радост\w*|счастлив\w*|эмоци\w*|чувству\w*|привязан\w*|тревог\w*)\b",
+                    user_message,
+                    re.I,
+                )
+            ),
         )
 
-        if self._creator_id is not None and user_id == self._creator_id:
+        if user_id == self._creator_id or user_id in self._creator_ids:
             state_context.append(
-                "Пользователь — создатель Дельты. Ты узнаёшь его как создателя, "
+                "Пользователь — создатель Дельты: один из подтверждённых аккаунтов в настройках приложения. "
+                "Ты узнаёшь его как создателя, "
                 "но сохраняешь собственный характер и не выдумываешь полномочия."
+            )
+
+        if (
+            request.use_personal_facts
+            and self._source_access is not None
+            and self._source_access.enabled_for(user_id)
+        ):
+            state_context.append(
+                "В этом личном чате тебе доступны search_source и read_source для поиска и чтения "
+                "пакетных Python-исходников Дельты. Для вывода о коде сначала прочитай нужный фрагмент. "
+                "Доступа к .env, ключам, базам данных, shell и изменению файлов нет. "
+                "Обзор — рекомендации, тесты не запускались."
             )
 
         if fact_update.attempted:
@@ -1062,7 +1090,15 @@ class ResponseEngine:
                 and self._memory.dialogue_archive.enabled_for(archive_owner)
             ):
                 tool_names |= {"search_dialogue"}
-            with dialogue_owner(archive_owner):
+            source_user = (
+                archive_owner
+                if self._source_access is not None
+                and self._source_access.enabled_for(archive_owner)
+                else None
+            )
+            if source_user is not None:
+                tool_names |= {"read_source", "search_source"}
+            with dialogue_owner(archive_owner), source_owner(source_user):
                 if images:
                     reply = await self._deepseek.chat(
                         system_prompt=prompt,
