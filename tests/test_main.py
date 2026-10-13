@@ -545,7 +545,10 @@ def test_main_builds_application_and_starts_polling(
         user_states, ANY, restrict_minor=ANY
     )
 
-    assert dispatcher_mock.include_router.call_count == 20
+    assert dispatcher_mock.include_router.call_count == 21
+    assert isinstance(
+        reset_router_call.kwargs["reminders"], main_module.ReminderService
+    )
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,

@@ -21,6 +21,7 @@ from protogen_delta.handlers.reset import (
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.memory import MemoryService
+from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine
 
 TEST_USER_ID = 123456
@@ -135,11 +136,13 @@ def test_confirmed_reset_deletes_episodic_memory(
     users = Mock(spec=UsersRepository)
     memory = AsyncMock(spec=MemoryService)
     statistics = AsyncMock(spec=UserStatisticsRepository)
+    reminders = AsyncMock(spec=ReminderService)
     router = create_reset_router(
         cast(ResponseEngine, engine),
         cast(UsersRepository, users),
         cast(MemoryService, memory),
         user_statistics=cast(UserStatisticsRepository, statistics),
+        reminders=cast(ReminderService, reminders),
     )
     callback, _, _ = _create_callback_mock(
         f"reset:confirm:{TEST_USER_ID}:{TEST_TIMESTAMP}"
@@ -149,6 +152,7 @@ def test_confirmed_reset_deletes_episodic_memory(
 
     memory.delete_user.assert_awaited_once_with(TEST_USER_ID)
     statistics.delete_user.assert_awaited_once_with(TEST_USER_ID)
+    reminders.delete_user.assert_awaited_once_with(TEST_USER_ID)
 
 
 def test_reset_command_only_requests_confirmation(

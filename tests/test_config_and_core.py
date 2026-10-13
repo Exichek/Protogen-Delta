@@ -272,6 +272,9 @@ def test_set_commands_configures_telegram_menu() -> None:
         "download",
         "source",
         "memory",
+        "calc",
+        "remind",
+        "reminders",
         "reset",
         "help",
     ]
@@ -287,6 +290,9 @@ def test_set_commands_configures_telegram_menu() -> None:
         "📥 Скачать публичное видео или GIF",
         "🔎 Найти источник арта (ответом)",
         "🧠 Мой постоянный профиль",
+        "🧮 Калькулятор: /calc (25+17)*3",
+        "⏰ Создать личное напоминание",
+        "📋 Мои напоминания и отмена",
         "🧹 Полностью очистить память",
         "ℹ️ Помощь",
     ]
