@@ -252,6 +252,7 @@ def test_worker_guard_and_entrypoint_contract(
     monkeypatch.setattr(worker, "limit_extraction_process", Mock())
     monkeypatch.setattr(worker.signal, "signal", Mock())
     monkeypatch.setattr(worker, "download_one", download)
+    monkeypatch.setattr(worker, "prepare_upload", Mock(return_value=False))
     monkeypatch.setattr(
         worker.sys, "argv", ["worker", str(tmp_path), "https://youtu.be/abc"]
     )

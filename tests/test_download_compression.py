@@ -113,15 +113,29 @@ def test_small_download_is_not_reencoded_and_failed_compression_retains_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "video.mp4"
-    source.write_bytes(b"video")
+    with av.open(str(source), "w") as container:
+        video = container.add_stream("libx264", rate=24)
+        video.width, video.height, video.pix_fmt = 64, 48, "yuv420p"
+        for index in range(24):
+            frame = av.VideoFrame.from_ndarray(
+                np.full((48, 64, 3), index * 3, dtype=np.uint8), format="rgb24"
+            )
+            frame.pts, frame.time_base = index, Fraction(1, 24)
+            for packet in video.encode(frame):
+                container.mux(packet)
+        for packet in video.encode(None):
+            container.mux(packet)
+    original = source.read_bytes()
     compress = Mock(side_effect=ValueError("fail"))
     monkeypatch.setattr(worker, "compress_download", compress)
     assert worker.prepare_upload(tmp_path) is False
     compress.assert_not_called()
+    source.write_bytes(original)
+    (tmp_path / "telegram.mp4").unlink()
     monkeypatch.setattr(worker, "MAX_UPLOAD_BYTES", 2)
     with pytest.raises(ValueError, match="fail"):
         worker.prepare_upload(tmp_path)
-    assert source.read_bytes() == b"video"
+    assert source.read_bytes() == original
 
 
 def test_download_and_upload_size_guards_are_independent(

@@ -16,6 +16,7 @@ from protogen_delta.services.download_compression import (
     MAX_UPLOAD_BYTES,
     compress_download,
     limit_compression_process,
+    prepare_download,
 )
 from protogen_delta.services.download_errors import DownloadFailure, classify_failure
 from protogen_delta.services.media_download import (
@@ -259,7 +260,7 @@ def download_one(
 
 
 def prepare_upload(directory: Path) -> bool:
-    """После загрузки сжать только большой файл и оставить один результат."""
+    """Подготовить воспроизводимый MP4 независимо от расширения и размера входа."""
     candidates = [
         item
         for item in directory.iterdir()
@@ -274,12 +275,16 @@ def prepare_upload(directory: Path) -> bool:
         raise DownloadFailure("formats")
     if source.stat().st_size > MAX_DOWNLOAD_BYTES:
         raise DownloadFailure("too_large")
-    if source.stat().st_size <= MAX_UPLOAD_BYTES:
-        return False
-    target = directory / "telegram.mp4"
-    compress_download(source, target)
+    target = directory / (
+        "prepared.mp4" if source.name == "telegram.mp4" else "telegram.mp4"
+    )
+    if source.stat().st_size > MAX_UPLOAD_BYTES:
+        compress_download(source, target)
+        compressed = True
+    else:
+        compressed = prepare_download(source, target)
     source.unlink()
-    return True
+    return compressed
 
 
 def main() -> None:
