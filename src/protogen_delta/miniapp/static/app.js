@@ -95,8 +95,8 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     const species = p.delta_species;
     savedSpecies = species || null;
-    // Keep the stored text unchanged for editing and optimistic concurrency.
-    // Only remove the application-generated header from its presentation.
+    // Сохранённый текст нужен целиком для редактирования и проверки версии.
+    // При отображении убираем только заголовок, добавленный приложением.
     let visibleDescription = savedDescription;
     if (species && typeof species.name === "string") {
       const header = species.source === "user" ? `Вид со слов пользователя: ${species.name}. ` : species.status === "probable" ? `Вероятно, ${species.name}. ` : `${species.name}. `;
@@ -107,7 +107,7 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     if (p.delta_reference_restricted) appearanceStatus.textContent = "Этот референс используется только для нейтрального общения.";
     const thumbnail = p.delta_appearance && p.delta_appearance_thumbnail;
     const savedImage = document.querySelector("#saved-appearance-image");
-    // The server produces only bounded JPEG data URLs; do not load external URLs.
+    // Сервер возвращает только ограниченные JPEG data URL, внешние адреса не загружаем.
     const hasThumbnail = typeof thumbnail === "string" && thumbnail.length <= 90000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(thumbnail);
     if (hasThumbnail) savedImage.src = thumbnail; else savedImage.removeAttribute("src");
     document.querySelector("#saved-appearance").hidden = !hasThumbnail;

@@ -1,5 +1,5 @@
-// Inline the shipped JavaScript only for offline browser fixtures using setContent.
-// CSP itself is verified separately over HTTP with the production headers.
+// Встраиваем JS из пакета только в автономные браузерные тесты с setContent.
+// CSP проверяется отдельно через HTTP с настоящими заголовками приложения.
 const fs = require('node:fs');
 const path = require('node:path');
 exports.readMiniAppHtml = () => {
