@@ -25,9 +25,10 @@ from protogen_delta.services.tools import (
 
 def test_registry_and_time() -> None:
     registry = default_registry()
-    assert len(registry.schemas()) == 4
+    assert len(registry.schemas()) == 5
     search_registry = default_registry(brave_search_api_key="secret")
-    assert len(search_registry.schemas()) == 5
+    assert len(search_registry.schemas()) == 6
+    assert "calculate" in registry.tools
     assert "web_search" in search_registry.tools
     assert all(
         x["function"]["parameters"]["additionalProperties"] is False

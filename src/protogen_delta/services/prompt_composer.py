@@ -48,6 +48,12 @@ _TIME_PATTERN = re.compile(
     r"время\s+(?:в|по)\s+[\w-]+)\b",
     re.I,
 )
+_CALCULATE_PATTERN = re.compile(
+    r"\b(?:посчитай|вычисли|рассчитай|калькулятор\w*|calculate)\b|"
+    r"\d\s*(?:[+*/%×÷^−-]|\*\*)\s*[\d(]|"
+    r"\b(?:сколько|во\s+сколько)\b.{0,100}\b(?:процент\w*|раз\w*|сумм\w*|разниц\w*)\b",
+    re.I,
+)
 _TECHNICAL_PATTERN = re.compile(
     r"```|\b(?:docker|python|linux|api|sql|код\w*|лог\w*|кеш\w*|кэш\w*|"
     r"токен\w*|сервер\w*|ошибк\w*|программ\w*|репозитор\w*|"
@@ -170,6 +176,8 @@ class PromptComposer:
             selected.add("get_exchange_rate")
         if _TIME_PATTERN.search(user_message):
             selected.add("get_current_time")
+        if _CALCULATE_PATTERN.search(user_message):
+            selected.add("calculate")
         if (
             not selected
             and history

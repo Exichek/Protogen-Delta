@@ -34,6 +34,9 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
         ),
         BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
         BotCommand(command="memory", description="🧠 Мой постоянный профиль"),
+        BotCommand(command="calc", description="🧮 Калькулятор: /calc (25+17)*3"),
+        BotCommand(command="remind", description="⏰ Создать личное напоминание"),
+        BotCommand(command="reminders", description="📋 Мои напоминания и отмена"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),
         BotCommand(command="help", description="ℹ️ Помощь"),
     ]

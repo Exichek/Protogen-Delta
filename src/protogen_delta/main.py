@@ -25,6 +25,7 @@ from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands, set_user_commands
 from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.core.user_statistics import UserStatisticsMiddleware
+from protogen_delta.handlers.actions import create_actions_router
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
@@ -56,6 +57,7 @@ from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.reminders import RemindersRepository
 from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_facts import UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
@@ -77,6 +79,7 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
+from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
@@ -151,6 +154,7 @@ async def main() -> None:
     mini_app_server: MiniAppServer | None = None
     audio_understanding: AudioUnderstandingService | None = None
     transcriber: SpeechTranscriber | None = None
+    reminders: ReminderService | None = None
 
     try:
         usage_repository = LlmUsageRepository(
@@ -179,6 +183,8 @@ async def main() -> None:
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
         memories_repository = MemoriesRepository(settings.data_dir)
+        reminders = ReminderService(bot, RemindersRepository(settings.data_dir))
+        health.add_diagnostics("reminders", reminders.snapshot)
         creator_messages_repository = CreatorMessagesRepository(settings.data_dir)
         stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
@@ -423,6 +429,7 @@ async def main() -> None:
             on_mode_change=on_mode_change,
             user_statistics=statistics_repository,
             input_operations=input_operations,
+            reminders=reminders,
         )
 
         rp_router = create_rp_router(
@@ -483,6 +490,9 @@ async def main() -> None:
         dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
         dispatcher.include_router(utilities_router)
+        actions_router = create_actions_router(reminders)
+        actions_router.message.middleware(MemoryInputsMiddleware(input_operations))
+        dispatcher.include_router(actions_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(sticker_admin_router)
@@ -557,10 +567,13 @@ async def main() -> None:
             ),
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
+        await reminders.start()
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if reminders is not None:
+            await reminders.close()
         if transcriber is not None:
             await transcriber.close()
         if menu_task is not None:

@@ -17,6 +17,7 @@ from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.memory import MemoryService
+from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine
 
 _RESET_CONFIRMATION_TTL_SECONDS = 300.0
@@ -32,6 +33,7 @@ RESET_CONFIRMATION_TEXT = (
     "• RP-состояния и облики во всех чатах;\n"
     "• накопленные эмоции;\n"
     "• отношения и степень знакомства;\n"
+    "• личные напоминания;\n"
     "• всё сохранённое пользовательское состояние.\n\n"
     "Это действие нельзя будет отменить."
 )
@@ -142,6 +144,7 @@ def create_reset_router(
     on_mode_change: ModeChange | None = None,
     user_statistics: UserStatisticsRepository | None = None,
     input_operations: InputOperations | None = None,
+    reminders: ReminderService | None = None,
 ) -> Router:
     """Создать роутер безопасного полного сброса."""
     router = Router(name=__name__)
@@ -205,6 +208,8 @@ def create_reset_router(
         reset_requester = asyncio.current_task()
 
         async def delete_related_memory() -> None:
+            if reminders is not None:
+                await reminders.delete_user(expected_user_id)
             if memory is not None:
                 await memory.delete_user(expected_user_id)
             if user_statistics is not None:

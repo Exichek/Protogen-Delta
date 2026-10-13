@@ -3,6 +3,7 @@
 from functools import partial
 
 from protogen_delta.services.tools.base import Tool, ToolExecutor, ToolRegistry
+from protogen_delta.services.tools.calculator import calculate_expression
 from protogen_delta.services.tools.live_data import (
     get_current_time,
     get_exchange_rate,
@@ -57,6 +58,17 @@ def default_registry(
             },
             ("city",),
             partial(get_weather, proxy_url=proxy_url),
+        ),
+        Tool(
+            "calculate",
+            "Вычислить арифметику для десятичных чисел с точностью до 28 значащих цифр. "
+            "Доступны + - * / // % **, скобки; степень — целая от -20 до 20. "
+            "Только числа и операции, без кода и функций.",
+            {
+                "expression": "Арифметическое выражение, например (25+17)*3; до 200 символов"
+            },
+            ("expression",),
+            calculate_expression,
         ),
         Tool(
             "fetch_web_page",

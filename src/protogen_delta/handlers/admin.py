@@ -298,6 +298,7 @@ def create_admin_router(
                 "whisper": "Whisper",
                 "translation": "Переводчик",
                 "converter": "Конвертер медиа",
+                "reminders": "Напоминания",
             }
             outcomes = {
                 "unknown": "ещё нет запросов",
