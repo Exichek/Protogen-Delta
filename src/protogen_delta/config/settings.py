@@ -50,6 +50,7 @@ class Settings:
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
     e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
+    llm_daily_request_limit: int = 300
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
     conversation_history_ttl_seconds: float = 604800.0
@@ -393,6 +394,9 @@ def load_settings() -> Settings:
         ),
         e621_request_interval_seconds=e621_request_interval_seconds,
         rate_limit_seconds=rate_limit_seconds,
+        llm_daily_request_limit=_parse_positive_int(
+            os.getenv("LLM_DAILY_REQUEST_LIMIT", "300"), "LLM_DAILY_REQUEST_LIMIT"
+        ),
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
         conversation_history_ttl_seconds=conversation_history_ttl_seconds,

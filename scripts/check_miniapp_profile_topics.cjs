@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
 
-const html = fs.readFileSync(path.join(__dirname, '../src/protogen_delta/miniapp/static/index.html'), 'utf8');
+const html = require('./miniapp_fixture.cjs').readMiniAppHtml();
 const blank = {personality: '', behavior: '', preferences: '', fetishes: '', boundaries: ''};
 const profile = {
   user: {first_name: 'Тест', id: 42}, content_mode: 'soft', roleplay_active: false,

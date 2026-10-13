@@ -25,6 +25,11 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
+from protogen_delta.services.llm_accounting import (
+    accounted_completion,
+    record_response_usage,
+)
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import ToolExecutor, get_current_time
 
@@ -291,6 +296,9 @@ class DeepSeekService:
     def snapshot(self) -> OperationSnapshot:
         return self._metrics.snapshot()
 
+    def set_usage_repository(self, repository: LlmUsageRepository) -> None:
+        self._usage_repository = repository
+
     def for_appearance(self) -> "DeepSeekService":
         """Отдельный режим двух проходов облика без изменения обычного клиента."""
         model = copy(self)
@@ -308,10 +316,12 @@ class DeepSeekService:
         self, *, client: AsyncOpenAI | None = None, **kwargs: Any
     ) -> ChatCompletion:
         with self._metrics.measure():
-            return cast(
-                ChatCompletion,
-                await (client or self._client).chat.completions.create(**kwargs),
+            repository = getattr(self, "_usage_repository", None)
+            response, receipt = await accounted_completion(
+                client or self._client, repository, **kwargs
             )
+            await record_response_usage(repository, receipt, response)
+            return cast(ChatCompletion, response)
 
     async def analyze_visual_features(
         self,

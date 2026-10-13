@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
-const html=fs.readFileSync(path.join(__dirname,'../src/protogen_delta/miniapp/static/index.html'),'utf8');
+const html = require('./miniapp_fixture.cjs').readMiniAppHtml();
 const profile={user:{first_name:'Тест',id:42},content_mode:'soft',roleplay_active:true,roleplay_configuration:'male',roleplay_character:'PRIVATE CHARACTER',roleplay_preferences:'PRIVATE PREFS',roleplay_boundaries:'',roleplay_fetishes:[],appearance_upload_enabled:true,delta_appearance:'PRIVATE APPEARANCE',delta_species:null,delta_appearance_profile:{personality:'',behavior:'',preferences:'',fetishes:'',boundaries:''},delta_appearance_topics:[]};
 
 async function main() {
@@ -63,7 +63,8 @@ async function main() {
     assert.equal(await page.locator('#translation-output').inputValue(),''); checks++;
 
     await page.locator('[data-translation-mode="image"]').click();
-    await page.locator('#translation-file').setInputFiles({name:'photo.png',mimeType:'image/png',buffer:Buffer.from('synthetic')});
+    await page.locator('#translation-file').setInputFiles({name:'photo.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=','base64')});
+    await page.waitForFunction(()=>document.querySelector('#translation-preview').naturalWidth>0);
     assert(await page.locator('#translation-preview').isVisible());
     await page.locator('#translation-submit').click();
     await page.waitForFunction(()=>document.querySelector('#translation-output').value==='Привет, мир!');

@@ -35,6 +35,7 @@ from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.image_source import create_image_source_router
+from protogen_delta.handlers.llm_budget import LlmUserMiddleware
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
@@ -53,6 +54,7 @@ from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_facts import UserFactsRepository
@@ -151,6 +153,9 @@ async def main() -> None:
     transcriber: SpeechTranscriber | None = None
 
     try:
+        usage_repository = LlmUsageRepository(
+            settings.data_dir, settings.llm_daily_request_limit
+        )
         if settings.audio_understanding_enabled:
             audio_understanding = AudioUnderstandingService(
                 AsyncOpenAI(
@@ -164,7 +169,10 @@ async def main() -> None:
                 native_work=native_work,
             )
             health.add_diagnostics("audio", audio_understanding.snapshot)
+            audio_understanding.set_usage_repository(usage_repository)
         dispatcher = Dispatcher()
+        dispatcher.message.outer_middleware(LlmUserMiddleware())
+        dispatcher.callback_query.outer_middleware(LlmUserMiddleware())
         register_error_handler(dispatcher)
 
         images_repository = ImagesRepository(settings.data_dir)
@@ -266,6 +274,7 @@ async def main() -> None:
             prompt=fetish_role_prompt,
         )
 
+        deepseek.set_usage_repository(usage_repository)
         capabilities = build_capabilities(settings)
         response_engine_config = ResponseEngineConfig(
             fetish_triggers=fetish_triggers,
@@ -520,6 +529,7 @@ async def main() -> None:
                 on_mode_change=on_mode_change,
                 tools=mini_app_tools,
                 native_work=native_work,
+                llm_usage=usage_repository,
                 runtime_health=health,
                 fetish_triggers=fetish_triggers,
                 fetish_names=fetish_names,
