@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, Literal, cast
@@ -16,6 +17,7 @@ from protogen_delta.core.conversation_safety import (
     reference_is_child,
     validate_stopword,
 )
+from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
 from protogen_delta.core.telegram_commands import ModeChange
@@ -26,6 +28,7 @@ from protogen_delta.miniapp.auth import (
     validate_init_data,
 )
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.appearance_analysis import (
     validate_reference_notes,
     validate_species_hint,
@@ -113,6 +116,7 @@ class MiniAppServer:
         on_mode_change: ModeChange | None = None,
         tools: MiniAppTools | None = None,
         native_work: WorkRunner | None = None,
+        llm_usage: LlmUsageRepository | None = None,
         runtime_health: RuntimeHealth | None = None,
         fetish_triggers: FetishTriggers | None = None,
         fetish_names: dict[str, str] | None = None,
@@ -133,6 +137,7 @@ class MiniAppServer:
         self._tools = tools
         self._native_work = native_work or NativeWorkPool(2)
         self._runtime_health = runtime_health
+        self._llm_usage = llm_usage
         self._fetish_triggers = fetish_triggers or {}
         self._fetish_names = fetish_names or {}
         self._appearance_pending: set[int] = set()
@@ -144,11 +149,15 @@ class MiniAppServer:
 
     def application(self) -> web.Application:
         """Создать aiohttp-приложение для запуска и тестирования."""
-        application = web.Application(client_max_size=64 * 1024)
+        application = web.Application(
+            client_max_size=64 * 1024, middlewares=[self._llm_scope]
+        )
         application.add_routes(
             [
                 web.get("/", self._index),
+                web.get("/static/app.js", self._javascript),
                 web.get("/api/profile", self._get_profile),
+                web.get("/api/usage", self._get_usage),
                 web.patch("/api/profile", self._update_profile),
                 web.delete("/api/profile/roleplay", self._delete_roleplay_profile),
                 web.post("/api/profile/appearance", self._upload_appearance),
@@ -172,6 +181,31 @@ class MiniAppServer:
             ]
         )
         return application
+
+    @web.middleware
+    async def _llm_scope(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        user_id = (
+            self._authenticate(request).id if request.path.startswith("/api/") else None
+        )
+        with llm_user(user_id):
+            try:
+                return await handler(request)
+            except LlmBudgetError as error:
+                raise web.HTTPTooManyRequests(
+                    text=str(error), headers={"Cache-Control": "no-store"}
+                ) from error
+
+    async def _get_usage(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if self._llm_usage is None:
+            raise web.HTTPServiceUnavailable(text="Учёт запросов сейчас недоступен")
+        return web.json_response(
+            await self._llm_usage.get(user.id), headers={"Cache-Control": "no-store"}
+        )
 
     async def start(self) -> None:
         """Запустить HTTP-сервер."""
@@ -206,11 +240,22 @@ class MiniAppServer:
             headers={
                 "Cache-Control": "no-store",
                 "Content-Security-Policy": (
-                    "default-src 'self'; script-src 'self' https://telegram.org "
-                    "'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-                    "connect-src 'self'; img-src 'self' data: blob: https:"
+                    "default-src 'self'; script-src 'self' https://telegram.org; "
+                    "style-src 'self' 'unsafe-inline'; "
+                    "connect-src 'self'; img-src 'self' data: blob: https:; "
+                    "object-src 'none'; base-uri 'none'"
                 ),
             },
+        )
+
+    async def _javascript(self, request: web.Request) -> web.Response:
+        del request
+        return web.Response(
+            text=files("protogen_delta.miniapp.static")
+            .joinpath("app.js")
+            .read_text(encoding="utf-8"),
+            content_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
         )
 
     async def _health(self, request: web.Request) -> web.Response:

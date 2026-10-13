@@ -129,7 +129,23 @@ def test_miniapp_profile_api_reads_and_updates_own_state() -> None:
             assert health.status == 200
             index = await client.get("/")
             assert index.status == 200
-            assert "Протоген Дельта" in await index.text()
+            html = await index.text()
+            assert "Протоген Дельта" in html
+            assert '<script src="/static/app.js" defer></script>' in html
+            assert "<script>" not in html
+            script_policy = next(
+                item.strip()
+                for item in index.headers["Content-Security-Policy"].split(";")
+                if item.strip().startswith("script-src ")
+            )
+            assert "'unsafe-inline'" not in script_policy
+            assert "https://telegram.org" in script_policy
+            javascript = await client.get("/static/app.js")
+            assert javascript.status == 200
+            assert javascript.content_type == "application/javascript"
+            assert javascript.headers["X-Content-Type-Options"] == "nosniff"
+            assert "addEventListener" in await javascript.text()
+            assert (await client.get("/static/server.py")).status == 404
 
             unauthorized = await client.get("/api/profile")
             assert unauthorized.status == 401

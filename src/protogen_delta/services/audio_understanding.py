@@ -10,8 +10,13 @@ import av
 from openai import AsyncOpenAI, OpenAIError
 
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.audio_analysis import AudioAnalysisError
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.llm_accounting import (
+    accounted_completion,
+    record_response_usage,
+)
 from protogen_delta.services.native_work import NativeWorkPool
 
 logger = logging.getLogger(__name__)
@@ -84,6 +89,9 @@ class AudioUnderstandingService:
     def snapshot(self) -> OperationSnapshot:
         return self._metrics.snapshot()
 
+    def set_usage_repository(self, repository: LlmUsageRepository) -> None:
+        self._usage_repository = repository
+
     async def analyze(self, data: bytes) -> str:
         with self._metrics.measure(queued=True) as measurement:
             async with self._slots:
@@ -98,7 +106,10 @@ class AudioUnderstandingService:
         encoded = base64.b64encode(excerpt).decode("ascii")
         try:
             async with asyncio.timeout(45):
-                stream = await self._client.chat.completions.create(
+                repository = getattr(self, "_usage_repository", None)
+                stream, receipt = await accounted_completion(
+                    self._client,
+                    repository,
                     model=self._model,
                     messages=[
                         {
@@ -142,9 +153,12 @@ class AudioUnderstandingService:
                     ),
                 )
                 text = ""
+                last_usage_chunk = None
+                completed_stream = True
                 async with stream:
                     async for chunk in stream:
                         if chunk.usage:
+                            last_usage_chunk = chunk
                             logger.info(
                                 "Audio understanding total_tokens=%d",
                                 chunk.usage.total_tokens,
@@ -152,7 +166,10 @@ class AudioUnderstandingService:
                         if chunk.choices:
                             text += chunk.choices[0].delta.content or ""
                         if len(text) >= MAX_REPORT_CHARS:
+                            completed_stream = False
                             break
+                if completed_stream and last_usage_chunk is not None:
+                    await record_response_usage(repository, receipt, last_usage_chunk)
                 if not text.strip():
                     raise AudioAnalysisError("Аудиомодель не вернула описание")
                 return text[:MAX_REPORT_CHARS].strip()

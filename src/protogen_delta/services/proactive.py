@@ -13,6 +13,7 @@ from time import time
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
+from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
 from protogen_delta.core.roleplay import has_roleplay_action
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -227,13 +228,14 @@ class ProactiveMessenger:
                     f"{snapshot.scene_excerpt()}"
                 )
             try:
-                text = (
-                    await self._deepseek.chat(
-                        system_prompt=self._system_prompt + "\n\n" + rules,
-                        user_message=request,
-                        tool_names=(),
-                    )
-                ).strip()
+                with llm_user(candidate.user_id):
+                    text = (
+                        await self._deepseek.chat(
+                            system_prompt=self._system_prompt + "\n\n" + rules,
+                            user_message=request,
+                            tool_names=(),
+                        )
+                    ).strip()
                 if not text:
                     if not snapshot.roleplay_active:
                         continue
@@ -275,6 +277,9 @@ class ProactiveMessenger:
                     )
                 else:
                     logger.warning("Proactive delivery outcome=bad_request")
+                continue
+            except LlmBudgetError:
+                logger.info("Proactive generation outcome=daily_limit")
                 continue
             except DeepSeekError:
                 logger.warning(

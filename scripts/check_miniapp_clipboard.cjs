@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright');
 
-const html = fs.readFileSync(path.join(__dirname, '../src/protogen_delta/miniapp/static/index.html'), 'utf8');
+const html = require('./miniapp_fixture.cjs').readMiniAppHtml();
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=';
 const profile = {
   user: {first_name: 'Тест', id: 1}, content_mode: 'soft', roleplay_configuration: 'male',
