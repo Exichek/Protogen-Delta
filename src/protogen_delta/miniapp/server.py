@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, Literal, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
@@ -40,6 +40,13 @@ from protogen_delta.services.appearance_image import (
 )
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
+from protogen_delta.services.media_conversion import (
+    MIME_TYPES,
+    ConversionBusyError,
+    ConversionError,
+    MediaConversionService,
+)
+from protogen_delta.services.media_conversion_worker import MAX_INPUT, validate_options
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
@@ -120,6 +127,7 @@ class MiniAppServer:
         runtime_health: RuntimeHealth | None = None,
         fetish_triggers: FetishTriggers | None = None,
         fetish_names: dict[str, str] | None = None,
+        media_converter: MediaConversionService | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -146,6 +154,11 @@ class MiniAppServer:
         self._translation_export_slots = asyncio.Semaphore(2)
         self._translation_export_limiter = UserRateLimiter(cooldown_seconds=2)
         self._runner: web.AppRunner | None = None
+        self._media_converter = media_converter or MediaConversionService()
+        if self._runtime_health is not None:
+            self._runtime_health.add_diagnostics(
+                "converter", self._media_converter.snapshot
+            )
 
     def application(self) -> web.Application:
         """Создать aiohttp-приложение для запуска и тестирования."""
@@ -178,9 +191,128 @@ class MiniAppServer:
                 web.post("/api/tools/{tool}", self._run_tool),
                 web.post("/api/tools/translate/file", self._translate_file),
                 web.post("/api/tools/translate/export", self._export_translation),
+                web.post("/api/tools/convert/file", self._convert_media),
+                web.delete("/api/tools/convert/{token}", self._delete_conversion),
+                web.get("/converted-media/{token}/{kind}", self._conversion_file),
             ]
         )
+        application.on_startup.append(self._start_converter)
+        application.on_cleanup.append(self._close_converter)
         return application
+
+    async def _start_converter(self, application: web.Application) -> None:
+        await self._media_converter.start()
+
+    async def _close_converter(self, application: web.Application) -> None:
+        await self._media_converter.close()
+
+    async def _convert_media(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        try:
+            raw = request.headers.get("X-Conversion-Options", "")
+            if len(raw) > 3000:
+                raise ValueError("Слишком длинные параметры.")
+            options = json.loads(unquote(raw, errors="strict"))
+            if not isinstance(options, dict) or set(options) - {
+                "mode",
+                "format",
+                "resolution",
+                "bitrate",
+                "file_name",
+            }:
+                raise ValueError("Некорректные параметры.")
+            mode, extension = options.get("mode"), options.get("format")
+            resolution, bitrate = options.get("resolution", "720"), options.get(
+                "bitrate", 192
+            )
+            name = options.get("file_name", "файл")
+            if (
+                not all(
+                    isinstance(value, str)
+                    for value in (mode, extension, resolution, name)
+                )
+                or len(name) > 160
+            ):
+                raise ValueError("Проверь параметры файла.")
+            mode, extension = cast(str, mode), cast(str, extension)
+            validate_options(mode, extension, resolution, bitrate)
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(
+                text="Выбери файл и поддерживаемый формат."
+            ) from error
+        if request.content_length is not None and request.content_length > MAX_INPUT:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_INPUT,
+                actual_size=request.content_length,
+                text="Файл должен быть до 100 МБ.",
+            )
+
+        async def read_file() -> bytes:
+            return await request.clone(client_max_size=MAX_INPUT + 1).read()
+
+        try:
+            job = await self._media_converter.convert(
+                user.id,
+                read_file,
+                name=name,
+                mode=mode,
+                extension=extension,
+                resolution=resolution,
+                bitrate=bitrate,
+            )
+        except ConversionBusyError as error:
+            raise web.HTTPTooManyRequests(text=str(error)) from error
+        except (ConversionError, ValueError) as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        prefix = "/converted-media/" + job.token
+        return web.json_response(
+            {
+                "token": job.token,
+                "name": job.name,
+                "format": job.extension,
+                "mode": mode,
+                "bytes": job.size,
+                "duration": job.duration,
+                "expires_in": 900,
+                "download_url": prefix + "/download",
+                "preview_url": prefix + "/preview",
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _delete_conversion(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if not await self._media_converter.remove(request.match_info["token"], user.id):
+            raise web.HTTPNotFound(text="Результат уже удалён.")
+        return web.json_response(
+            {"deleted": True}, headers={"Cache-Control": "no-store"}
+        )
+
+    async def _conversion_file(self, request: web.Request) -> web.FileResponse:
+        job = self._media_converter.get(request.match_info["token"])
+        kind = request.match_info["kind"]
+        if job is None or kind not in {"download", "preview"}:
+            raise web.HTTPNotFound(
+                text="Результат устарел. Преобразуй файл ещё раз.",
+                headers={"Cache-Control": "no-store"},
+            )
+        path = job.path if kind == "download" else job.preview
+        disposition = (
+            "attachment; filename*=UTF-8''" + quote(job.name)
+            if kind == "download"
+            else "inline"
+        )
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": MIME_TYPES[path.suffix[1:]],
+                "Content-Disposition": disposition,
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
+        )
 
     @web.middleware
     async def _llm_scope(
@@ -211,7 +343,7 @@ class MiniAppServer:
         """Запустить HTTP-сервер."""
         if self._runner is not None:
             return
-        runner = web.AppRunner(self.application())
+        runner = web.AppRunner(self.application(), access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, self._host, self._port)
         try:

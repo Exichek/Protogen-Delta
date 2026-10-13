@@ -77,6 +77,21 @@
     .translation-upload img { display:block; width:100%; max-height:210px; object-fit:contain; margin:10px auto; border-radius:8px; }
     #translation-file-name { overflow-wrap:anywhere; font-size:13px; }
     #translation-status { min-height:22px; }
+    .converter h2 { margin:0 0 16px; font-size:21px; }
+    .converter-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+    .converter-upload { border:2px dashed var(--tg-theme-button-color,#6c5ce7); border-radius:16px; padding:22px 16px; text-align:center; background:#6c5ce70a; }
+    .converter-upload.drag-over { background:#6c5ce722; }
+    .converter-upload svg { width:36px; height:36px; color:var(--tg-theme-button-color,#6c5ce7); }
+    .converter-upload button { margin-top:14px; }
+    .converter-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .converter-options select { min-width:0; }
+    #conversion-file-name, #conversion-result-name { overflow-wrap:anywhere; }
+    #conversion-file-name { max-height:70px; overflow:auto; font-size:14px; }
+    .converter-player { display:block; width:100%; max-height:320px; border-radius:12px; background:#000; }
+    #conversion-audio { width:100%; display:block; margin:16px 0; }
+    #conversion-progress { width:100%; height:8px; margin-top:16px; accent-color:var(--tg-theme-button-color,#6c5ce7); }
+    #conversion-result { border-top:1px solid #8797af44; padding-top:16px; }
+    @media (max-width:380px) { .converter-options { grid-template-columns:1fr; } }
     @media (max-width:650px) { .translation-panes { grid-template-columns:1fr; } .translation-pane textarea { height:clamp(165px,26vh,250px); max-height:250px; } }
     @media (max-width:380px) { .tabs button { padding:11px 6px; font-size:13px; } .translation-modes button { padding:9px 10px; } .translation-languages { gap:6px; grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); } .translation-languages select { padding:10px 5px; font-size:14px; } }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
@@ -218,6 +233,39 @@
   </section>
   </div>
   <div id="tools-panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+    <section class="card converter" aria-labelledby="conversion-title">
+      <h2 id="conversion-title">Конвертер видео и аудио</h2>
+      <div class="translation-modes" role="group" aria-label="Тип результата">
+        <button type="button" data-conversion-mode="video" aria-pressed="true">Видео</button>
+        <button type="button" data-conversion-mode="audio" aria-pressed="false">Аудио</button>
+      </div>
+      <div class="converter-layout">
+        <div id="conversion-upload" class="converter-upload" tabindex="0" aria-label="Загрузить файл для преобразования">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/></svg>
+          <p class="muted">Перетащи файл сюда или выбери его на устройстве.</p>
+          <input id="conversion-file" type="file" accept="video/*,audio/*,.mp4,.avi,.mov,.mkv,.webm,.mp3,.wav,.flac,.m4a,.ogg,.aac" hidden>
+          <button id="conversion-choose" type="button">Загрузить файл</button>
+          <p id="conversion-file-name" class="muted"></p>
+        </div>
+        <div class="converter-options">
+          <div><label for="conversion-format">Формат результата</label><select id="conversion-format"></select></div>
+          <div id="conversion-resolution-field"><label for="conversion-resolution">Разрешение видео</label><select id="conversion-resolution"><option value="720">До 720p</option><option value="480">До 480p</option><option value="1080">До 1080p</option><option value="original">Исходное, до 1080p</option></select></div>
+          <div id="conversion-bitrate-field" hidden><label for="conversion-bitrate">Качество MP3</label><select id="conversion-bitrate"><option value="128">128 кбит/с</option><option value="192" selected>192 кбит/с</option><option value="320">320 кбит/с</option></select></div>
+        </div>
+        <p class="muted" id="conversion-hint">Файл до 100 МБ и 10 минут. Видео сохраняется со звуком, если он есть; до 30 кадров/с. Обработка — до четырёх минут.</p>
+        <div class="translation-actions"><button id="conversion-submit" type="button" disabled>Преобразовать</button><button id="conversion-clear" type="button" class="clipboard-button" disabled>Очистить</button></div>
+        <progress id="conversion-progress" max="100" hidden aria-label="Обработка файла"></progress>
+        <div id="conversion-status" class="tool-status" role="status" aria-live="polite"></div>
+        <div id="conversion-result" hidden>
+          <b id="conversion-result-name"></b><p id="conversion-result-info" class="muted"></p>
+          <video id="conversion-video" class="converter-player" controls playsinline preload="metadata" hidden></video>
+          <audio id="conversion-audio" controls preload="metadata" hidden></audio>
+          <p id="conversion-preview-hint" class="muted"></p>
+          <button id="conversion-save" type="button">Сохранить файл</button>
+          <p class="muted">Результат доступен 15 минут. Сохрани его до закрытия панели.</p>
+        </div>
+      </div>
+    </section>
     <section class="card">
       <b>Telegram ID</b>
       <div class="grid"><button id="my-id" type="button">Мой ID</button><button id="bot-id" type="button">ID Дельты</button></div>
