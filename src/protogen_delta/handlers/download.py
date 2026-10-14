@@ -6,11 +6,15 @@ from aiogram.filters import Command
 from aiogram.types import FSInputFile, Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.handlers.failure_reply import send_failure_reply
 from protogen_delta.handlers.text import RATE_LIMIT_REPLY
 from protogen_delta.services.media_download import MediaDownloader, MediaDownloadError
+from protogen_delta.services.stickers import ContextualStickerService
 
 
-def create_download_router(downloader: MediaDownloader) -> Router:
+def create_download_router(
+    downloader: MediaDownloader, sticker_service: ContextualStickerService | None = None
+) -> Router:
     router = Router(name=__name__)
     limiter = UserRateLimiter(cooldown_seconds=30)
     active: set[int] = set()
@@ -54,10 +58,12 @@ def create_download_router(downloader: MediaDownloader) -> Router:
                 else:
                     await message.answer_document(file, caption=caption)
         except MediaDownloadError as error:
-            await message.answer(str(error))
+            await send_failure_reply(message, str(error), sticker_service)
         except TelegramAPIError:
-            await message.answer(
-                "Видео скачано, но Telegram не принял файл. Попробуй позже."
+            await send_failure_reply(
+                message,
+                "Видео скачано, но Telegram не принял файл. Попробуй позже.",
+                sticker_service,
             )
         finally:
             active.discard(user_id)

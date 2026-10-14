@@ -2,8 +2,13 @@
 
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+from protogen_delta.core.sticker_context import (
+    CONTEXT_LABELS,
+    StickerContext,
+    legacy_contexts,
+)
 from protogen_delta.repositories.json_file import JsonFileRepository
 
 StickerRating = Literal["safe", "adult"]
@@ -20,6 +25,11 @@ class StickerEntry:
     emoji: str | None = None
     set_name: str | None = None
     name: str | None = None
+    contexts: tuple[StickerContext, ...] = ()
+
+    @property
+    def context_categories(self) -> tuple[StickerContext, ...]:
+        return self.contexts or legacy_contexts(self.tags, self.rating)
 
 
 def parse_sticker_entries(data: dict[str, Any]) -> list[StickerEntry]:
@@ -39,6 +49,7 @@ def parse_sticker_entries(data: dict[str, Any]) -> list[StickerEntry]:
         emoji = raw.get("emoji")
         set_name = raw.get("set_name")
         name = raw.get("name")
+        contexts = raw.get("contexts", [])
         if (
             not isinstance(file_id, str)
             or not file_id
@@ -54,6 +65,17 @@ def parse_sticker_entries(data: dict[str, Any]) -> list[StickerEntry]:
             and not isinstance(set_name, str)
             or name is not None
             and not isinstance(name, str)
+            or not isinstance(contexts, list)
+            or len(contexts) > len(CONTEXT_LABELS)
+            or any(
+                not isinstance(value, str) or value not in CONTEXT_LABELS
+                for value in contexts
+            )
+            or rating == "adult"
+            and bool(contexts)
+            and contexts != ["adult"]
+            or rating == "safe"
+            and "adult" in contexts
         ):
             raise TypeError("Некорректная запись STICKERS")
         entries.append(
@@ -65,6 +87,7 @@ def parse_sticker_entries(data: dict[str, Any]) -> list[StickerEntry]:
                 emoji=emoji,
                 set_name=set_name,
                 name=name,
+                contexts=tuple(dict.fromkeys(cast(list[StickerContext], contexts))),
             )
         )
     return entries
@@ -137,6 +160,7 @@ class StickersRepository:
                         emoji=entry.emoji,
                         set_name=entry.set_name,
                         name=old.name or entry.name,
+                        contexts=old.contexts or entry.contexts,
                     )
             if entries == original:
                 return False
@@ -145,6 +169,40 @@ class StickersRepository:
 
         self._storage.update(update)
         return created
+
+    def import_contexts(self, definitions: list[StickerEntry]) -> None:
+        """Дополнить старую разметку без сети, не заменяя ручные категории и теги."""
+        definitions_by_id = {entry.file_unique_id: entry for entry in definitions}
+
+        def update(data: dict[str, Any]) -> bool:
+            entries = parse_sticker_entries(data)
+            changed = [
+                (
+                    replace(
+                        entry,
+                        contexts=(
+                            definition.contexts
+                            if (
+                                definition := definitions_by_id.get(
+                                    entry.file_unique_id
+                                )
+                            )
+                            is not None
+                            and definition.rating == entry.rating
+                            else legacy_contexts(entry.tags, entry.rating)
+                        ),
+                    )
+                    if not entry.contexts
+                    else entry
+                )
+                for entry in entries
+            ]
+            if entries == changed:
+                return False
+            data["STICKERS"] = [asdict(entry) for entry in changed]
+            return True
+
+        self._storage.update(update)
 
     def remove(self, file_unique_id: str) -> bool:
         """Удалить стикер по постоянному Telegram ID."""

@@ -10,12 +10,17 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
     TelegramUnauthorizedError,
 )
-from aiogram.types import ErrorEvent
+from aiogram.types import ErrorEvent, Update
+
+from protogen_delta.handlers.failure_reply import send_failure_reply
+from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_error(event: ErrorEvent) -> None:
+async def handle_error(
+    event: ErrorEvent, sticker_service: ContextualStickerService | None = None
+) -> None:
     """Обработать ошибку, возникшую при обработке Telegram update."""
     exception = event.exception
 
@@ -75,6 +80,22 @@ async def handle_error(event: ErrorEvent) -> None:
             exception.__traceback__,
         ),
     )
+    if sticker_service is None:
+        return
+    message = event.update.message if isinstance(event.update, Update) else None
+    if (
+        message is not None
+        and message.from_user is not None
+        and not message.from_user.is_bot
+    ):
+        try:
+            await send_failure_reply(
+                message,
+                "Не получилось обработать сообщение. Попробуй повторить вопрос.",
+                sticker_service,
+            )
+        except Exception:
+            logger.warning("Не удалось доставить уведомление о сбое")
 
 
 def register_error_handler(dispatcher: Dispatcher) -> None:

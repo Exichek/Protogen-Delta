@@ -10,6 +10,7 @@ from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
+from protogen_delta.handlers.failure_reply import send_failure_reply
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.audio_pipeline import AudioPipeline
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
@@ -87,7 +88,9 @@ def create_voice_router(
             await bot.download(media.file_id, destination=destination)
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать аудио из Telegram", exc_info=True)
-            await message.answer(AUDIO_DOWNLOAD_ERROR_REPLY)
+            await send_failure_reply(
+                message, AUDIO_DOWNLOAD_ERROR_REPLY, sticker_service
+            )
             return
 
         async with show_typing(message, bot, initial_delay_seconds=1.2):
@@ -117,7 +120,9 @@ def create_voice_router(
                 )
                 or not is_uploaded_audio
             ):
-                await message.answer(AUDIO_RECOGNITION_ERROR_REPLY)
+                await send_failure_reply(
+                    message, AUDIO_RECOGNITION_ERROR_REPLY, sticker_service
+                )
                 return
 
             caption = (message.caption or "").strip()

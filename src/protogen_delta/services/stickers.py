@@ -12,13 +12,19 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
 from protogen_delta.core.conversation_safety import reference_is_child
+from protogen_delta.core.reply_outcome import reply_error
 from protogen_delta.core.user_state import UserState, UserStateStore
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
 from protogen_delta.services.sticker_capabilities import correct_sticker_capability
+from protogen_delta.services.sticker_reaction_context import reaction_context
 
 logger = logging.getLogger(__name__)
 
 _CONTEXT_PATTERNS = {
+    "confused": (
+        r"\b(?:спорно|не\s+согласен|не\s+согласна|это\s+неверно|"
+        r"что[- ]то\s+не\s+так|ты\s+ошибся|ты\s+ошиблась)\b"
+    ),
     "greeting": r"^\s*(?:привет\w*|здравствуй\w*|доброе утро|hi|hello|йоу)\b",
     "boop": r"\b(?:буп\w*|boop\w*)\b",
     "bite": r"\b(?:укус\w*|кусь|кус(?:аю|аешь|ает|аем|аете|ают|ал[аи]?|ай|ать|аться)|прикус\w*|bite|biting)\b",
@@ -245,10 +251,14 @@ class ContextualStickerService:
             tags.add("greeting")
         if state.emotions.memory.joy >= 0.60:
             tags.add("happy")
+        category = reaction_context(
+            tags, "", joyful=state.mood == "happy" or state.emotions.memory.joy >= 0.60
+        )
         entries = [
             entry
             for entry in self._repository.get_all()
             if entry.rating == "safe"
+            and category in entry.context_categories
             and ("greeting" not in entry.tags or "greeting" in tags)
         ]
         if not entries:
@@ -276,6 +286,30 @@ class ContextualStickerService:
         label = selected.name or selected.emoji or ", ".join(selected.tags[:3])
         return f"[Дельта самостоятельно отправил стикер: {label[:120]}]"
 
+    async def send_error(self, *, chat_id: int, user_id: int) -> bool:
+        """404 следует за настоящим сбоем; не выбирать его случайной реакцией."""
+        if self._chance == 0:
+            return False
+        entries = [
+            entry
+            for entry in self._repository.get_all()
+            if entry.file_unique_id == "AgADmrIAAjqdEUo" and entry.rating == "safe"
+        ]
+        if not entries:
+            return False
+        selected = entries[0]
+        try:
+            await self._bot.send_sticker(chat_id=chat_id, sticker=selected.file_id)
+        except TelegramAPIError:
+            logger.warning("Не удалось доставить стикер ошибки")
+            return False
+        reaction = self._reactions.setdefault(user_id, _ReactionState())
+        reaction.last_sent_at = self._clock()
+        reaction.last_file_unique_id = selected.file_unique_id
+        reaction.recent.append((selected.file_unique_id, reaction.last_sent_at))
+        reaction.replies_since_sticker = 0
+        return True
+
     def correct_reply(self, user_id: int, reply: str) -> str:
         """Не отправлять ложное отрицание и не закреплять его в истории."""
         if not self.is_available(user_id):
@@ -299,6 +333,8 @@ class ContextualStickerService:
         if declines_stickers(context_text):
             logger.debug("Sticker reaction outcome=declined")
             return False
+        if reply_error.get():
+            return await self.send_error(chat_id=chat_id, user_id=user_id)
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
         requested = self.is_request(user_id, context_text, chat_id=scope_chat_id)
@@ -328,11 +364,27 @@ class ContextualStickerService:
         tags.add(state.mood)
         if state.roleplay_active:
             tags.add("rp")
+        category = reaction_context(
+            semantic_tags,
+            reply_text,
+            joyful=state.mood == "happy" or state.emotions.memory.joy >= 0.60,
+        )
 
         entries = [
             entry
             for entry in self._repository.get_all()
-            if (tags.intersection(entry.tags) or requested and entry.rating == "safe")
+            if (
+                tags.intersection(entry.tags)
+                or requested
+                and entry.rating == "safe"
+                or category in entry.context_categories
+            )
+            and (
+                entry.rating == "adult"
+                or category in entry.context_categories
+                or requested
+                and "error" not in entry.context_categories
+            )
             and ("greeting" not in entry.tags or greeting or requested)
             and (_adult_stickers_allowed(state) or entry.rating == "safe")
             and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
