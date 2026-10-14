@@ -179,17 +179,14 @@ def test_dates_tables_and_candles_validate_provider_data() -> None:
 def test_currency_cross_rates_use_nominal_and_decimal() -> None:
     rates = CurrencyRates.parse(RATES)
     assert rates.rub_per_unit["KZT"] == Decimal("0.18")
-    assert rates.convert("1000", "RUB", "KZT")["result"] == "5555.555556"
-    assert rates.convert("2,5", "USD", "RUB")["result"] == "225.000000"
-    assert rates.convert("100", "KZT", "USD")["result"] == "0.200000"
-    assert rates.convert("0", "USD", "USD")["result"] == "0.000000"
-    assert rates.convert(".5", "USD", "RUB")["result"] == "45.000000"
+    assert rates.convert("1000", "RUB", "KZT")["result"] == "5555.56"
+    assert rates.convert("2,5", "USD", "RUB")["result"] == "225"
+    assert rates.convert("100", "KZT", "USD")["result"] == "0.2"
+    assert rates.convert("0", "USD", "USD")["result"] == "0"
+    assert rates.convert(".5", "USD", "RUB")["result"] == "45"
     with pytest.raises(ValueError):
         rates.convert("0e999999999", "USD", "RUB")
-    assert (
-        rates.convert("1000000000000", "USD", "KZT")["result"]
-        == "500000000000000.000000"
-    )
+    assert rates.convert("1000000000000", "USD", "KZT")["result"] == "500000000000000"
     assert rates.payload()["effective_date"] == "2026-10-14"
     for amount, source, target in [
         ("NaN", "RUB", "USD"),
@@ -228,6 +225,26 @@ def test_currency_cross_rates_use_nominal_and_decimal() -> None:
 def test_market_input_cannot_select_urls_or_secrets(market: str, raw: str) -> None:
     with pytest.raises(ValueError):
         selected_symbols(market, raw)
+
+
+@pytest.mark.parametrize(
+    "amount,expected",
+    [
+        ("3744", "3744"),
+        ("106837.606838", "106837.61"),
+        ("238.237897", "238.24"),
+        ("1.005", "1.01"),
+        ("1.0049999", "1"),
+        ("0.995", "1"),
+        ("1000000000000", "1000000000000"),
+    ],
+)
+def test_currency_result_rounds_once_and_has_at_most_two_decimals(
+    amount: str, expected: str
+) -> None:
+    """Денежный итог округляется один раз без хвоста нулей и потери больших целых."""
+    rates = CurrencyRates.parse(RATES)
+    assert rates.convert(amount, "RUB", "RUB")["result"] == expected
 
 
 def test_quotes_charts_and_partial_unavailability() -> None:
@@ -497,7 +514,7 @@ def test_market_routes_auth_validation_calculation_and_isolation() -> None:
             )
             assert (
                 response.status == 200
-                and (await response.json())["result"] == "5555.555556"
+                and (await response.json())["result"] == "5555.56"
             )
             response = await client.post(
                 "/api/markets/consult",

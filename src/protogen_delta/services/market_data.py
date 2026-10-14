@@ -25,7 +25,7 @@ from protogen_delta.services.tools.web import web_search
 
 WATCHLISTS = {
     "us": ("SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"),
-    "ru": ("SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN", "YDEX"),
+    "ru": ("SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN", "YDEX", "OZON"),
     "crypto": ("BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD", "DOGE/USD"),
 }
 ALPACA = "https://data.alpaca.markets"

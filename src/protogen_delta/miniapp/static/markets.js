@@ -2,6 +2,7 @@
   'use strict';
   const q = id => document.getElementById(id), initData = window.Telegram?.WebApp?.initData || '';
   const number = value => value == null ? '—' : Number(value).toLocaleString('ru-RU', {maximumFractionDigits:6});
+  const money = value => {const [whole,fraction]=String(value).split('.');return BigInt(whole).toLocaleString('ru-RU')+(fraction ? ','+fraction : '');};
   const date = value => { if (!value) return 'Дата не указана'; const d = new Date(value); return Number.isNaN(d.valueOf()) ? String(value) : d.toLocaleString('ru-RU'); };
   const text = (id,value) => {q(id).textContent=value;};
   let quotes=[], candles=[], selected='', sort='all', loaded=false, quoteVersion=0, chartVersion=0, chatBusy=false;
@@ -80,7 +81,7 @@
   }
   async function convert() {
     q('currency-convert').disabled=true;text('currency-result','Считаю…');
-    try {const result=await api('convert','POST',{amount:q('currency-amount').value,from:q('currency-from').value,to:q('currency-to').value});text('currency-result',`${result.result} ${result.to}`);text('currency-note',`1 ${result.from} = ${number(result.rate)} ${result.to}. ЦБ РФ · ${result.effective_date}. ${result.notice}`);}
+    try {const result=await api('convert','POST',{amount:q('currency-amount').value,from:q('currency-from').value,to:q('currency-to').value});text('currency-result',`${money(result.result)} ${result.to}`);text('currency-note',`1 ${result.from} = ${number(result.rate)} ${result.to}. ЦБ РФ · ${result.effective_date}. ${result.notice}`);}
     catch(error){text('currency-result','—');text('currency-note',error.message);}finally{q('currency-convert').disabled=false;}
   }
   function bubble(value,kind) {const node=document.createElement('div');node.className='market-bubble '+kind;node.textContent=value;q('market-chat').append(node);while(q('market-chat').children.length>12)q('market-chat').firstElementChild.remove();q('market-chat').scrollTop=q('market-chat').scrollHeight;}
