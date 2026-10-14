@@ -333,6 +333,13 @@ class DeepSeekService:
         }
         return model
 
+    def for_consultant(self) -> "DeepSeekService":
+        """Изолированный консультант: без инструментов обычного чата и его личности."""
+        model = copy(self)
+        model._tools = None
+        model._adaptive_thinking = True
+        return model
+
     async def _complete(
         self, *, client: AsyncOpenAI | None = None, **kwargs: Any
     ) -> ChatCompletion:

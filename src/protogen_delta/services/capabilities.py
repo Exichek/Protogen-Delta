@@ -55,6 +55,18 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
         else ""
     )
     version = ".".join(str(part) for part in sys.version_info[:3])
+    markets = (
+        "В Mini App есть отдельный раздел «Рынки»: российские акции MOEX, "
+        "валютный калькулятор ЦБ, графики, новости и изолированный финансовый консультант. "
+        + (
+            "Alpaca подключена для акций США/ETF и криптокотировок; доступ зависит от тарифа. "
+            if settings.alpaca_api_key and settings.alpaca_secret_key
+            else "Котировки США/ETF и криптокотировки Alpaca ждут серверную пару ключей. "
+        )
+        + "Это функции отдельного раздела; текущий чат не получает его котировки автоматически."
+        if settings.mini_app_server_enabled
+        else ""
+    )
     provider = (
         "DeepSeek" if settings.llm_provider == "deepseek" else "OpenAI-совместимый API"
     )
@@ -73,6 +85,7 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
     )
     summary = "\n".join(
         (
+            markets,
             f"Приложение Дельты: Python {version}, aiogram, SQLite. Настроенный провайдер: {provider}.",
             f"Настроенное имя модели запросов: {settings.llm_model!r}. Это настройка API, "
             "а не доказательство архитектуры модели или прошлых замен провайдера.",
@@ -107,6 +120,7 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
     )
     overview = "\n".join(
         (
+            markets,
             "Собеседник просит обзор возможностей Дельты. Дай дружелюбный ответ от первого лица, "
             "короткое приветствие и 6–8 понятных пунктов с выделенными названиями. "
             "У каждой группы назови пользу и один короткий пример задачи. Заверши предложением попробовать задачу. "

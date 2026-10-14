@@ -1,7 +1,7 @@
 """Настройки приложения и загрузка переменных окружения."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
 
@@ -51,6 +51,8 @@ class Settings:
     code_review_user_ids: frozenset[int] = frozenset()
     favorites_user_ids: frozenset[int] = frozenset()
     brave_search_api_key: str | None = None
+    alpaca_api_key: str | None = field(default=None, repr=False)
+    alpaca_secret_key: str | None = field(default=None, repr=False)
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
     e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
@@ -450,6 +452,8 @@ def load_settings() -> Settings:
             os.getenv("CODE_REVIEW_USER_IDS", ""), "CODE_REVIEW_USER_IDS"
         ),
         brave_search_api_key=brave_search_api_key or None,
+        alpaca_api_key=os.getenv("ALPACA_API_KEY", "").strip() or None,
+        alpaca_secret_key=os.getenv("ALPACA_SECRET_KEY", "").strip() or None,
         e621_user_agent=(
             os.getenv(
                 "E621_USER_AGENT",
