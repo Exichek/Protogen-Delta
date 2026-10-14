@@ -4,6 +4,7 @@ import ast
 import asyncio
 import hashlib
 import re
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -211,6 +212,10 @@ class SourceAccess:
                     "start": start,
                     "total_lines": len(lines),
                     "sha256": file.digest,
+                    "python_version": ".".join(
+                        str(part) for part in sys.version_info[:3]
+                    ),
+                    "syntax_check": "Исходный файл прошёл ast.parse до маскирования; импорт и тесты не запускались.",
                     "source": "\n".join(
                         f"{number}: {line}"
                         for number, line in enumerate(selected, start)

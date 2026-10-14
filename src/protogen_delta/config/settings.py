@@ -23,6 +23,7 @@ class Settings:
     deepseek_model: str = "deepseek-flash"
     llm_provider: str = "deepseek"
     llm_disable_thinking: bool = True
+    llm_adaptive_thinking: bool = True
     mini_app_url: str | None = None
     mini_app_server_enabled: bool = False
     mini_app_host: str = "127.0.0.1"
@@ -203,6 +204,9 @@ def load_settings() -> Settings:
         ),
         "LLM_DISABLE_THINKING",
     )
+    llm_adaptive_thinking = _parse_bool(
+        os.getenv("LLM_ADAPTIVE_THINKING", "true"), "LLM_ADAPTIVE_THINKING"
+    )
 
     telegram_proxy_url = os.getenv(
         "TELEGRAM_PROXY_URL",
@@ -371,6 +375,7 @@ def load_settings() -> Settings:
         art_chat_id=art_chat_id,
         llm_provider=llm_provider,
         llm_disable_thinking=llm_disable_thinking,
+        llm_adaptive_thinking=llm_adaptive_thinking,
         mini_app_url=mini_app_url or None,
         mini_app_server_enabled=mini_app_server_enabled,
         mini_app_host=mini_app_host,

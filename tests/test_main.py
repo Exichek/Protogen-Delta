@@ -469,6 +469,7 @@ def test_main_builds_application_and_starts_polling(
         base_url="https://api.test.local",
         model="test-model",
         disable_thinking=True,
+        adaptive_thinking=provider == "deepseek",
         tools=ANY,
     )
 

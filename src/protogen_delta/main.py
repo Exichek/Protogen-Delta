@@ -326,6 +326,9 @@ async def main() -> None:
             base_url=settings.llm_base_url,
             model=settings.llm_model,
             disable_thinking=settings.llm_disable_thinking,
+            adaptive_thinking=(
+                settings.llm_adaptive_thinking and settings.llm_provider == "deepseek"
+            ),
             tools=ToolExecutor(
                 default_registry(
                     source_access=source_access,

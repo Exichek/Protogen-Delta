@@ -1,6 +1,7 @@
 """Обзор не дублирует платные запросы и сохраняет отчёт до доставки."""
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
@@ -16,6 +17,36 @@ from protogen_delta.repositories.code_reviews import CodeReviewsRepository
 from protogen_delta.services.code_review import CodeReviewService, answer_review
 from protogen_delta.services.deepseek import DeepSeekConnectionError, DeepSeekService
 from protogen_delta.services.source_access import current_source_owner
+
+
+def test_review_receives_runtime_and_parse_facts_and_cache_is_explicit(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        model = AsyncMock(spec=DeepSeekService)
+        model.chat.return_value = "Явных дефектов в просмотренном коде нет."
+        service = CodeReviewService(
+            AsyncMock(spec=Bot),
+            model,
+            source(tmp_path),
+            CodeReviewsRepository(tmp_path),
+            clock=lambda: 10000,
+        )
+        report = await service.review(10, "services/sample.py")
+        version = ".".join(str(part) for part in sys.version_info[:3])
+        prompt = model.chat.await_args.kwargs["system_prompt"]
+        assert f"Python {version}" in prompt
+        assert "PEP 758" in prompt and "при наличии as" in prompt
+        assert "ast.parse" in prompt and "до маскирования" in prompt
+        assert "continue/return" in prompt
+        assert model.chat.await_args.kwargs["thinking"] is True
+        assert report and f"Среда: Python {version}" in report
+        cached = await service.review(10, "services/sample.py")
+        assert cached and "Сохранённый предыдущий обзор" in cached
+        assert "новая проверка не запускалась" in cached and report in cached
+        assert model.chat.await_count == 1
+
+    asyncio.run(run())
 
 
 def test_allowed_command_returns_report_and_long_automatic_notice_keeps_full_cache(

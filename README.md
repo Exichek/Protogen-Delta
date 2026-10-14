@@ -157,6 +157,7 @@ Tesseract rus+eng для первых 40 PDF-страниц; при сбое о�
 Доступ включается отдельно через `CODE_REVIEW_USER_IDS`; редактирование файлов и
 исполнение кода отсутствуют. Обзор частичный и не заменяет тесты.
 Настройка и ограничения: [чтение исходников](docs/code-review.md).
+Выбор режима для сложных задач: [размышления для отдельного ответа](docs/adaptive-reasoning.md).
 
 <a id="memory"></a>
 ## 🧠 Состояние и память
@@ -621,6 +622,7 @@ cp .env.example .env
 | `LLM_BASE_URL` | `https://api.deepseek.com`; для `openai-compatible` задаётся явно |
 | `LLM_MODEL` | `deepseek-flash`; для `openai-compatible` задаётся явно |
 | `LLM_DISABLE_THINKING` | `true` для обычных запросов DeepSeek, `false` для совместимого провайдера; назначение облика через DeepSeek отдельно включает thinking с усилием high |
+| `LLM_ADAPTIVE_THINKING` | `true`: выбирать размышления для отдельного сложного ответа и аудита кода; только для `LLM_PROVIDER=deepseek`, без переключения профиля |
 | `DEEPSEEK_API_KEY` | Совместимое старое имя для `LLM_API_KEY` |
 | `BRAVE_SEARCH_API_KEY` | Пусто; ключ [Brave Search API](https://brave.com/search/api/) для общего поиска |
 | `ART_CHAT_ID` | Обязательный целочисленный ID группы артов |
