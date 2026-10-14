@@ -7,6 +7,7 @@ from functools import wraps
 from typing import Any, ParamSpec, TypeVar
 
 current_llm_user: ContextVar[int | None] = ContextVar("current_llm_user", default=None)
+current_llm_chat: ContextVar[int | None] = ContextVar("current_llm_chat", default=None)
 P = ParamSpec("P")
 T = TypeVar("T")
 
@@ -28,12 +29,14 @@ class LlmUsageUnavailableError(LlmBudgetError):
 
 
 @contextmanager
-def llm_user(user_id: int | None) -> Iterator[None]:
+def llm_user(user_id: int | None, chat_id: int | None = None) -> Iterator[None]:
     token = current_llm_user.set(user_id)
+    chat_token = current_llm_chat.set(chat_id)
     try:
         yield
     finally:
         current_llm_user.reset(token)
+        current_llm_chat.reset(chat_token)
 
 
 def user_scoped(
@@ -44,7 +47,8 @@ def user_scoped(
         user_id = kwargs.get("user_id", args[1] if len(args) > 1 else None)
         if not isinstance(user_id, int) or isinstance(user_id, bool):
             raise ValueError("Нужен Telegram ID владельца запроса")
-        with llm_user(user_id):
+        chat_id = kwargs.get("chat_id")
+        with llm_user(user_id, chat_id if type(chat_id) is int else None):
             return await method(*args, **kwargs)
 
     return wrapped

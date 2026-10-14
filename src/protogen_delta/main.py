@@ -103,6 +103,7 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
+from protogen_delta.services.public_github import PublicGithubReader
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
@@ -173,6 +174,7 @@ async def main() -> None:
     bot.session.middleware.register(PollingHealthMiddleware(health))
     menu_task: asyncio.Task[None] | None = None
     deepseek: DeepSeekService | None = None
+    github_reader: PublicGithubReader | None = None
     proactive_messenger: ProactiveMessenger | None = None
     native_work = NativeWorkPool(2)
     health.add_diagnostics("native", native_work.snapshot)
@@ -336,6 +338,9 @@ async def main() -> None:
             "personality/rp.txt",
         )
 
+        github_reader = PublicGithubReader(
+            settings.data_dir, proxy_url=settings.telegram_proxy_url
+        )
         deepseek = DeepSeekService(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
@@ -346,6 +351,7 @@ async def main() -> None:
             ),
             tools=ToolExecutor(
                 default_registry(
+                    github_reader=github_reader,
                     source_access=source_access,
                     favorites=favorites if settings.favorites_user_ids else None,
                     proxy_url=settings.telegram_proxy_url,
@@ -398,8 +404,13 @@ async def main() -> None:
             if settings.mini_app_server_enabled
             else None
         )
-        if market_advisor is not None:
-            memory.extra_cleanup = market_advisor.clear
+
+        async def clear_extra_memory(user_id: int) -> None:
+            if market_advisor is not None:
+                await market_advisor.clear(user_id)
+            await github_reader.clear_user(user_id)
+
+        memory.extra_cleanup = clear_extra_memory
         capabilities = build_capabilities(settings)
         release_journal = ReleaseJournal(
             settings.data_dir, settings.recognized_creator_ids, health=health
@@ -436,6 +447,7 @@ async def main() -> None:
         )
         dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
+            github_reader=github_reader,
             deepseek=deepseek,
             appearance_model=(
                 deepseek.for_appearance()
@@ -739,6 +751,8 @@ async def main() -> None:
                 await mini_app_server.close()
             if deepseek is not None:
                 await deepseek.close()
+            if github_reader is not None:
+                await github_reader.close()
             if dialogue_archive is not None:
                 await dialogue_archive.close()
         finally:

@@ -79,7 +79,12 @@ class ToolExecutor:
                 or any(
                     not isinstance(value, str)
                     or len(value)
-                    > (2048 if name == "fetch_web_page" and key == "url" else 200)
+                    > (
+                        2048
+                        if key == "url"
+                        and (name == "fetch_web_page" or name.startswith("github_"))
+                        else 200
+                    )
                     for key, value in args.items()
                 )
             ):
