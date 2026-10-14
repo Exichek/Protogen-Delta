@@ -29,7 +29,27 @@ async def archive_edit(message: Message) -> None:
     return None
 
 
-def archive_message(message: Message, *, incoming: bool) -> DialogueMessage:
+def telegram_source_key(message: Message, bot_id: int | None = None) -> str:
+    """Номера сообщений разных ботов/чатов не являются одним источником."""
+    if bot_id is None:
+        # Совместимость отдельного преобразования старых сообщений без Bot-контекста.
+        return f"telegram:{message.message_id}"
+    if (
+        type(bot_id) is not int
+        or not 0 < bot_id < 2**63
+        or type(message.chat.id) is not int
+        or not -(2**63) <= message.chat.id < 2**63
+        or message.chat.id == 0
+        or type(message.message_id) is not int
+        or not 0 < message.message_id < 2**63
+    ):
+        raise ValueError("Некорректные идентификаторы источника Telegram")
+    return f"telegram:{bot_id}:{message.chat.id}:{message.message_id}"
+
+
+def archive_message(
+    message: Message, *, incoming: bool, bot_id: int | None = None
+) -> DialogueMessage:
     """Сохранить текст/подпись и вид вложения без токенов и ссылок скачивания."""
     kind = message.content_type
     text = message.text or message.caption or ""
@@ -41,7 +61,7 @@ def archive_message(message: Message, *, incoming: bool) -> DialogueMessage:
         label = f"[Вложение: {kind}]"
         text = f"{label}\n{text}" if text else label
     return DialogueMessage(
-        f"telegram:{message.message_id}",
+        telegram_source_key(message, bot_id),
         "user" if incoming else "assistant",
         text or "[Служебное сообщение]",
         message.date.timestamp(),
@@ -74,14 +94,19 @@ class ArchiveIncomingMiddleware(BaseMiddleware):
         if ticket is not None and not self._operations.is_current(ticket):
             return None
         user_id = event.from_user.id
+        try:
+            bot = data.get("bot")
+            bot_id = bot.id if isinstance(bot, Bot) else None
+            item = archive_message(event, incoming=True, bot_id=bot_id)
+        except Exception:
+            logger.error("Не удалось определить источник входящего сообщения")
+            return await handler(event, data)
         generation = self._archive.generation(user_id)
         token = archive_generation.set((user_id, generation))
-        message_token = current_archive_message.set(f"telegram:{event.message_id}")
+        message_token = current_archive_message.set(item.source_key)
         try:
             try:
-                await self._archive.record(
-                    user_id, archive_message(event, incoming=True), generation
-                )
+                await self._archive.record(user_id, item, generation)
             except Exception:
                 logger.error("Не удалось архивировать входящее сообщение")
             return await handler(event, data)
@@ -126,7 +151,13 @@ class ArchiveOutgoingMiddleware(BaseRequestMiddleware):
                 continue
             try:
                 await self._archive.record(
-                    owner, archive_message(message, incoming=False), generation
+                    owner,
+                    archive_message(
+                        message,
+                        incoming=False,
+                        bot_id=bot.id if isinstance(bot, Bot) else None,
+                    ),
+                    generation,
                 )
             except Exception:
                 # Ошибка архива не должна повторно отправлять уже доставленный ответ.
