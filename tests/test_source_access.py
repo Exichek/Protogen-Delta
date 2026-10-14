@@ -25,6 +25,85 @@ def source(tmp_path: Path) -> SourceAccess:
     return SourceAccess(frozenset({10}), tmp_path)
 
 
+def test_canonical_alias_to_private_directory_is_not_indexed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access = source(tmp_path)
+    original = Path.resolve
+    public = tmp_path / "services/sample.py"
+
+    def resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == public:
+            return tmp_path / "data/private.py"
+        return original(path)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert access.snapshot_sync() == ()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [".env.py", "secrets.py", "credentials.py", "keys.py", "tokens.py", "env.py"],
+)
+def test_explicit_secret_file_denylist_applies_to_read_and_search(
+    tmp_path: Path, name: str
+) -> None:
+    async def run() -> None:
+        access = source(tmp_path)
+        (tmp_path / "services" / name).write_text(
+            "anything='SHOULD_NEVER_BE_INDEXED'", "utf-8"
+        )
+        with source_owner(10):
+            with pytest.raises(ValueError):
+                await access.read_tool({"path": "services/" + name})
+            assert not (await access.search_tool({"query": "SHOULD_NEVER_BE_INDEXED"}))[
+                "matches"
+            ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "def send(api_key='PRIVATE_SECRET'): pass",
+        "async def send(*, password='PRIVATE_SECRET'): pass",
+        "config={'credentials': {'value': 'PRIVATE_SECRET'}}",
+    ],
+)
+def test_defaults_and_nested_secret_literals_are_hidden(
+    tmp_path: Path, declaration: str
+) -> None:
+    access = source(tmp_path)
+    (tmp_path / "services/sample.py").write_text(declaration, "utf-8")
+    assert "PRIVATE_SECRET" not in access.snapshot_sync()[0].text
+
+
+def test_actual_runtime_credential_is_hidden_even_under_unrelated_variable_name(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        source(tmp_path)
+        (tmp_path / "services/sample.py").write_text(
+            "value='FAKE_RUNTIME_CREDENTIAL_997'", "utf-8"
+        )
+        access = SourceAccess(
+            frozenset({10}), tmp_path, secrets=("FAKE_RUNTIME_CREDENTIAL_997",)
+        )
+        with source_owner(10):
+            assert (
+                "FAKE_RUNTIME_CREDENTIAL_997"
+                not in (await access.read_tool({"path": "services/sample.py"}))[
+                    "source"
+                ]
+            )
+            assert not (
+                await access.search_tool({"query": "FAKE_RUNTIME_CREDENTIAL_997"})
+            )["matches"]
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("owner", [None, 11])
 def test_source_requires_trusted_owner(tmp_path: Path, owner: int | None) -> None:
     async def run() -> None:

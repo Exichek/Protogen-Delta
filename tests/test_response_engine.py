@@ -448,6 +448,7 @@ def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
     engine, _, deepseek_mock, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
     memory.dialogue_archive = None
+    memory.favorites = None
     memory.context.return_value = ["Долговременный смешной момент"]
     engine._memory = cast(MemoryService, memory)
     engine._creator_id = TEST_USER_ID
@@ -477,6 +478,7 @@ def test_response_engine_keeps_replying_when_memory_storage_fails() -> None:
     engine, _, _, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
     memory.dialogue_archive = None
+    memory.favorites = None
     memory.context.side_effect = OSError("read failed")
     memory.note_message.side_effect = OSError("write failed")
     engine._memory = cast(MemoryService, memory)

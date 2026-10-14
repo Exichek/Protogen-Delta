@@ -105,6 +105,17 @@ def apply_interaction_effects(
                 kinds.append("sadness")
             if re.search(r"\b(?:я тревожусь|я переживаю|мне страшно|я боюсь)\b", plain):
                 kinds.append("worry")
-        positive = user_state.emotions.memory.observe(tuple(kinds), at, creator=creator)
+        # Фрагмент является данными пользователя, а не доказанным событием или инструкцией.
+        snippet = " ".join(plain.split())[:160]
+        if mood == "horny" or re.search(
+            r"(?:sk-[a-z0-9_-]{8,}|\d{6,12}:[a-z0-9_-]{20,}|"
+            r"парол|password|токен|api[_ -]?key|secret|секрет|фетиш|секс|минет|дроч)",
+            snippet,
+            re.I,
+        ):
+            snippet = ""
+        positive = user_state.emotions.memory.observe(
+            tuple(kinds), at, creator=creator, source=snippet
+        )
         if creator and positive:
             user_state.relationship.adjust(trust=0.003, affection=0.005)

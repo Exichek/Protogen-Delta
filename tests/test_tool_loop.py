@@ -111,8 +111,12 @@ def test_loop_caps_execution_and_stops_ignoring_model_requests(
     )
     assert "Не удалось" in asyncio.run(service.chat("system", "question"))
     assert handler.await_count == 6
-    assert client.chat.completions.create.await_count == 4
-    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == "none"
+    assert client.chat.completions.create.await_count == 5
+    assert "tools" not in client.chat.completions.create.await_args.kwargs
+    assert (
+        client.chat.completions.create.await_args_list[-2].kwargs["tool_choice"]
+        == "none"
+    )
     client.chat.completions.create.return_value = response(7)
     with pytest.raises(DeepSeekAPIError):
         asyncio.run(service.chat("system", "question"))

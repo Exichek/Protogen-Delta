@@ -76,7 +76,12 @@ class ToolExecutor:
                 not isinstance(args, dict)
                 or set(args) - set(tool.parameters)
                 or set(tool.required) - set(args)
-                or any(not isinstance(v, str) or len(v) > 200 for v in args.values())
+                or any(
+                    not isinstance(value, str)
+                    or len(value)
+                    > (2048 if name == "fetch_web_page" and key == "url" else 200)
+                    for key, value in args.items()
+                )
             ):
                 raise ValueError("Некорректные аргументы инструмента")
             result = await asyncio.wait_for(tool.handler(args), self.timeout)

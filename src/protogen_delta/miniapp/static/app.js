@@ -28,6 +28,42 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
     renderAppearance(p, true);
   };
+  const archiveFile = document.querySelector('#archive-file');
+  const archiveView = document.querySelector('#archive-view');
+  const archiveAnalyze = document.querySelector('#archive-analyze');
+  const archiveStatus = document.querySelector('#archive-status');
+  const archiveResult = document.querySelector('#archive-result');
+  let archiveBusy = false;
+  const archiveUpdate = () => {
+    archiveView.disabled = archiveAnalyze.disabled = archiveBusy || !archiveFile.files?.length || !initData;
+  };
+  archiveFile.addEventListener('change', () => {
+    archiveResult.textContent = ''; archiveResult.hidden = true; archiveStatus.textContent = ''; archiveUpdate();
+  });
+  const inspectArchive = async analyze => {
+    const file = archiveFile.files?.[0];
+    if (!file || archiveBusy) return;
+    if (!file.name.toLowerCase().endsWith('.zip') || file.size > 50 * 1024 * 1024) {
+      archiveStatus.textContent = 'Выбери ZIP до 50 МБ.'; return;
+    }
+    archiveBusy = true; archiveUpdate(); archiveFile.disabled = true;
+    archiveResult.hidden = true;
+    archiveStatus.textContent = analyze ? 'Читаю файлы и готовлю ответ Дельты…' : 'Читаю файлы архива…';
+    try {
+      const options = encodeURIComponent(JSON.stringify({file_name:file.name,
+        question:document.querySelector('#archive-question').value, analyze}));
+      if (options.length > 7500) throw new Error('Сократи вопрос или название архива.');
+      const result = await api('POST', file, '/api/tools/archive', {
+        'X-Archive-Options': options
+      });
+      archiveResult.textContent = (result.reply ? `Ответ Дельты:\n${result.reply}\n\n` : '') + result.text;
+      archiveResult.hidden = false;
+      archiveStatus.textContent = result.truncated ? 'Просмотр частичный: достигнут лимит объёма, числа файлов или времени.' : 'Готово.';
+    } catch (error) { archiveStatus.textContent = error.message; }
+    finally { archiveBusy = false; archiveFile.disabled = false; archiveUpdate(); }
+  };
+  archiveView.addEventListener('click', () => inspectArchive(false));
+  archiveAnalyze.addEventListener('click', () => inspectArchive(true));
   const appearanceStatus = document.querySelector("#appearance-status");
   const fileInput = document.querySelector("#appearance-file");
   const preview = document.querySelector("#appearance-preview");

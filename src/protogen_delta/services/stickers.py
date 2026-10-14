@@ -228,6 +228,44 @@ class ContextualStickerService:
             previous_reply=previous.assistant_message if previous else "",
         )
 
+    def proactive_available(self) -> bool:
+        return self._chance > 0 and any(
+            entry.rating == "safe" for entry in self._repository.get_all()
+        )
+
+    async def send_proactive(self, user_id: int, context_text: str = "") -> str | None:
+        """Одна безопасная самостоятельная реакция; не изображать её пользовательской репликой."""
+        if not self.proactive_available() or declines_stickers(context_text):
+            return None
+        state = self._user_states.get(user_id)
+        tags = sticker_context_tags(context_text) | {state.mood, "greeting"}
+        if state.emotions.memory.joy >= 0.60:
+            tags.add("happy")
+        entries = [
+            entry for entry in self._repository.get_all() if entry.rating == "safe"
+        ]
+        best = max(len(tags.intersection(entry.tags)) for entry in entries)
+        entries = [
+            entry for entry in entries if len(tags.intersection(entry.tags)) == best
+        ]
+        reaction = self._reactions.setdefault(user_id, _ReactionState())
+        candidates = [
+            entry
+            for entry in entries
+            if entry.file_unique_id != reaction.last_file_unique_id
+        ]
+        selected = self._choose(candidates or entries)
+        try:
+            await self._bot.send_sticker(chat_id=user_id, sticker=selected.file_id)
+        except TelegramAPIError:
+            logger.warning("Proactive sticker outcome=delivery_failed")
+            return None
+        reaction.last_file_unique_id = selected.file_unique_id
+        reaction.last_sent_at = self._clock()
+        reaction.replies_since_sticker = 0
+        label = selected.name or selected.emoji or ", ".join(selected.tags[:3])
+        return f"[Дельта самостоятельно отправил стикер: {label[:120]}]"
+
     def correct_reply(self, user_id: int, reply: str) -> str:
         """Не отправлять ложное отрицание и не закреплять его в истории."""
         if not self.is_available(user_id):

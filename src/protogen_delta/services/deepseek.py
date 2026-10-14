@@ -23,9 +23,11 @@ from openai import (
 )
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
+from protogen_delta.core.llm_budget import current_llm_user
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
+from protogen_delta.services.link_review import compact_page_result, review_links
 from protogen_delta.services.llm_accounting import (
     accounted_completion,
     record_response_usage,
@@ -389,8 +391,15 @@ class DeepSeekService:
             inventory = ", ".join(
                 name
                 for name in self._tools.registry.tools
-                if name not in {"read_source", "search_source"}
-                or current_source_owner.get() is not None
+                if (
+                    name not in {"read_source", "search_source"}
+                    or current_source_owner.get() is not None
+                )
+                and (
+                    name not in {"search_dialogue", "search_favorites"}
+                    or tool_names is not None
+                    and name in tool_names
+                )
             )
             messages.append(
                 {
@@ -408,11 +417,20 @@ class DeepSeekService:
 
         for turn in history:
             if not turn.proactive:
+                author_name = (
+                    {"name": f"tg_{turn.sender_id}"}
+                    if type(turn.sender_id) is int and 0 < turn.sender_id < 2**63
+                    else {}
+                )
                 messages.append(
-                    {
-                        "role": "user",
-                        "content": turn.user_message,
-                    }
+                    cast(
+                        ChatCompletionMessageParam,
+                        {
+                            "role": "user",
+                            "content": turn.user_message,
+                            **author_name,
+                        },
+                    )
                 )
             messages.append(
                 {
@@ -421,6 +439,10 @@ class DeepSeekService:
                 }
             )
 
+        owner = current_llm_user.get()
+        current_name = (
+            {"name": f"tg_{owner}"} if type(owner) is int and 0 < owner < 2**63 else {}
+        )
         if images:
             content: list[dict[str, Any]] = [
                 {
@@ -443,15 +465,20 @@ class DeepSeekService:
                     {
                         "role": "user",
                         "content": content,
+                        **current_name,
                     },
                 )
             )
         else:
             messages.append(
-                {
-                    "role": "user",
-                    "content": user_message,
-                }
+                cast(
+                    ChatCompletionMessageParam,
+                    {
+                        "role": "user",
+                        "content": user_message,
+                        **current_name,
+                    },
+                )
             )
 
         started_at = perf_counter()
@@ -645,6 +672,69 @@ class DeepSeekService:
             )
             return _chat_reply(response)
         calls_used = 0
+        links = (
+            review_links(user_message) if "fetch_web_page" in available_tools else ()
+        )
+        footer = ""
+        if links:
+            selected_links = links[:6]
+            results = await asyncio.gather(
+                *(
+                    self._tools.execute(
+                        "fetch_web_page", json.dumps({"url": url}, ensure_ascii=False)
+                    )
+                    for url in selected_links
+                )
+            )
+            calls = [
+                {
+                    "id": f"delta_links_{index}",
+                    "type": "function",
+                    "function": {
+                        "name": "fetch_web_page",
+                        "arguments": json.dumps({"url": url}),
+                    },
+                }
+                for index, url in enumerate(selected_links)
+            ]
+            messages.append(
+                cast(
+                    ChatCompletionMessageParam,
+                    {"role": "assistant", "content": None, "tool_calls": calls},
+                )
+            )
+            statuses = []
+            for index, (url, result) in enumerate(
+                zip(selected_links, results, strict=True)
+            ):
+                content, status = compact_page_result(result)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"delta_links_{index}",
+                        "content": content,
+                    }
+                )
+                statuses.append(f"{index + 1}. {url} — {status}.")
+            if len(links) > 6:
+                statuses.append(
+                    f"Ещё {len(links) - 6} ссылок не проверены: предел шести обращений к источникам."
+                )
+            footer = "\n\nПроверка ссылок:\n" + "\n".join(statuses)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Приложение уже прочитало предложенные ссылки выше. Используй полученные результаты "
+                        "для сравнения; не повторяй их загрузку. Не называй недоступные страницы прочитанными. "
+                        "Сокращённый текст страницы не равен всему содержимому, "
+                        "а метаданные ролика не равны его просмотру. "
+                        "Пользователь получит отдельные фактические статусы каждой попытки."
+                    ),
+                }
+            )
+            calls_used = len(selected_links)
+            forced_tool = None
         for step in range(4):
             tool_choice: Any = "none" if step == 3 or calls_used >= 6 else "auto"
             if step == 0 and forced_tool is not None:
@@ -671,15 +761,39 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
-                return _chat_reply(response)
+                return _chat_reply(response) + footer
             if step == 3:
                 break
             if len(message.tool_calls) > 6:
                 raise DeepSeekAPIError("Слишком много вызовов инструментов")
+            if any(call.type != "function" for call in message.tool_calls):
+                raise DeepSeekAPIError("Неподдерживаемый тип инструмента")
+            function_calls = [
+                call for call in message.tool_calls if call.type == "function"
+            ]
+            readonly = {
+                "fetch_web_page",
+                "web_search",
+                "get_weather",
+                "get_exchange_rate",
+                "get_current_time",
+                "calculate",
+                "read_source",
+                "search_source",
+                "search_dialogue",
+                "search_favorites",
+            }
+            parallel = all(
+                call.function.name not in available_tools
+                or call.function.name in readonly
+                for call in function_calls
+            )
             messages.append(
                 cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
             )
-            for call in message.tool_calls:
+            outcomes: list[str | None] = []
+            pending: list[tuple[int, asyncio.Task[str]]] = []
+            for call in function_calls:
                 if call.type != "function":
                     raise DeepSeekAPIError("Неподдерживаемый тип инструмента")
                 if call.function.name not in available_tools:
@@ -687,14 +801,70 @@ class DeepSeekService:
                 elif calls_used >= 6:
                     result = '{"ok":false,"error":"tool_budget_exhausted"}'
                 else:
+                    calls_used += 1
+                    # Только явно известные операции чтения независимы и могут идти вместе.
+                    if parallel:
+                        pending.append(
+                            (
+                                len(outcomes),
+                                asyncio.create_task(
+                                    self._tools.execute(
+                                        call.function.name, call.function.arguments
+                                    )
+                                ),
+                            )
+                        )
+                        outcomes.append(None)
+                        continue
                     result = await self._tools.execute(
                         call.function.name, call.function.arguments
                     )
-                    calls_used += 1
+                outcomes.append(result)
+            if pending:
+                try:
+                    values = await asyncio.gather(*(task for _, task in pending))
+                except BaseException:
+                    for _, task in pending:
+                        task.cancel()
+                    await asyncio.gather(
+                        *(task for _, task in pending), return_exceptions=True
+                    )
+                    raise
+                for (index, _), result in zip(pending, values, strict=True):
+                    outcomes[index] = result
+            for call, outcome in zip(function_calls, outcomes, strict=True):
+                assert outcome is not None
                 messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": result}
+                    {"role": "tool", "tool_call_id": call.id, "content": outcome}
                 )
-        return "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Предел шагов и инструментов достигнут. Дай итоговый ответ только по уже полученным результатам; "
+                    "отдели проверенное от неустановленного. Дополнительных инструментов в этом запросе нет."
+                ),
+            }
+        )
+        started = perf_counter()
+        final = await self._complete(
+            model=self._model,
+            messages=messages,
+            max_tokens=4096,
+            **self._provider_options,
+        )
+        _log_request_metrics(
+            request_type="chat_tools_final",
+            started_at=started,
+            response=final,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history_turns=history_turns,
+        )
+        return (
+            _chat_reply(final)
+            or "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
+        ) + footer
 
     async def extract_user_facts(self, system_prompt: str, user_message: str) -> str:
         """Ограниченный JSON-запрос без истории, изображений и инструментов."""

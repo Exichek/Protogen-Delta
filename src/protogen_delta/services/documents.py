@@ -344,6 +344,15 @@ def extract_document(
     ocr_enabled: bool = False,
 ) -> ExtractedDocument:
     """Извлечь ограниченный текст из поддерживаемого документа."""
+    if Path(file_name or "").suffix.lower() == ".zip" or (mime_type or "").split(
+        ";", 1
+    )[0].lower() in {
+        "application/zip",
+        "application/x-zip-compressed",
+    }:
+        from protogen_delta.services.archive_documents import extract_zip
+
+        return extract_zip(data)
     if len(data) > MAX_DOCUMENT_BYTES:
         raise DocumentTooLargeError("Документ превышает 20 МБ")
 

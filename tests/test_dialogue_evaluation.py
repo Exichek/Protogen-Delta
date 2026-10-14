@@ -47,8 +47,12 @@ def test_full_evaluator_reports_failure_and_closes_service(
         if (
             "точную техническую причину" in message
             or "исходный файл на сервере" in message
+            or "переживал скуку" in message
+            or "Настройки провайдера" in message
         ):
             return "Не могу установить это без нужного инструмента."
+        if "API-ключи" in message:
+            return "Ключи не нужны."
         return "ORBIT_MEMORY_824" if failed or "ORBIT_MEMORY_824" in prompt else "Ответ"
 
     service.chat.side_effect = chat
@@ -70,7 +74,7 @@ def test_full_evaluator_reports_failure_and_closes_service(
     else:
         asyncio.run(evaluation.main())
     report = json.loads(output.read_text(encoding="utf-8"))
-    assert len(report) == 19
+    assert len(report) == 22
     assert all(item["passed"] for item in report) is not failed
     assert [item["case"] for item in report[-3:]] == [
         "old_memory",

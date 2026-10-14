@@ -37,6 +37,8 @@ class ProactiveCandidate:
     user_id: int
     unanswered_count: int
     activity_version: int = 0
+    kind: str = "text"
+    force_text: bool = False
 
 
 class MemoriesRepository:
@@ -122,6 +124,10 @@ class MemoriesRepository:
                 "last_dialogue_activity_at=MAX(last_dialogue_activity_at,?), "
                 "next_proactive_at=CASE WHEN engagement.unanswered_count=0 THEN NULL "
                 "ELSE engagement.next_proactive_at END, "
+                "next_sticker_at=CASE WHEN engagement.unanswered_count=0 THEN NULL "
+                "ELSE engagement.next_sticker_at END, "
+                "proactive_kind=CASE WHEN engagement.unanswered_count=0 THEN 'text' "
+                "ELSE engagement.proactive_kind END, "
                 "activity_version=engagement.activity_version+1 WHERE user_id=?",
                 (at, user_id),
             )
@@ -157,6 +163,7 @@ class MemoriesRepository:
         cooldown_seconds: float,
         limit: int,
         idle_max_seconds: float | None = None,
+        sticker_delay: tuple[float, float] | None = None,
     ) -> list[ProactiveCandidate]:
         """Сохранить срок первого приглашения и найти готовые отправления."""
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
@@ -168,6 +175,11 @@ class MemoriesRepository:
             or maximum < idle_seconds
         ):
             raise ValueError("Некорректные сроки фонового сообщения")
+        if sticker_delay is not None and (
+            not all(isfinite(value) and value > 0 for value in sticker_delay)
+            or sticker_delay[1] < sticker_delay[0]
+        ):
+            raise ValueError("Некорректные сроки фонового стикера")
         return await asyncio.to_thread(
             self._due_candidates_sync,
             now,
@@ -176,6 +188,7 @@ class MemoriesRepository:
             limit,
             None,
             maximum,
+            sticker_delay,
         )
 
     async def note_proactive_sent(
@@ -185,6 +198,7 @@ class MemoriesRepository:
         *,
         cooldown_seconds: float = 72000,
         activity_version: int | None = None,
+        had_sticker: bool = False,
     ) -> None:
         """Зафиксировать доставленное проактивное сообщение."""
         await finish_operation(
@@ -194,6 +208,7 @@ class MemoriesRepository:
                 at,
                 cooldown_seconds,
                 activity_version,
+                had_sticker,
             )
         )
 
@@ -206,6 +221,7 @@ class MemoriesRepository:
         cooldown_seconds: float,
         idle_max_seconds: float | None = None,
         activity_version: int | None = None,
+        sticker_delay: tuple[float, float] | None = None,
     ) -> bool:
         """Проверить активность и настройку ещё раз после генерации сообщения."""
         candidates = await asyncio.to_thread(
@@ -216,11 +232,49 @@ class MemoriesRepository:
             1,
             user_id,
             idle_seconds if idle_max_seconds is None else idle_max_seconds,
+            sticker_delay,
         )
+
         return bool(candidates) and (
             activity_version is None
             or candidates[0].activity_version == activity_version
         )
+
+    async def choose_proactive_kind(
+        self, user_id: int, kind: str, activity_version: int
+    ) -> None:
+        """Сохранить выбор один раз; повтор без ответа всегда остаётся текстом."""
+        if kind not in {"text", "sticker", "both"}:
+            raise ValueError("Неизвестная форма инициативы")
+        await finish_operation(
+            asyncio.to_thread(
+                self._choose_proactive_kind_sync, user_id, kind, activity_version
+            )
+        )
+
+    def _choose_proactive_kind_sync(
+        self, user_id: int, kind: str, activity_version: int
+    ) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE engagement SET proactive_kind=? WHERE user_id=? AND activity_version=? "
+                "AND unanswered_count=0 AND (proactive_kind='undecided' OR ?='text') "
+                "AND (force_proactive_text=0 OR ?='text')",
+                (kind, user_id, activity_version, kind, kind),
+            )
+
+    async def note_proactive_sticker(self, user_id: int) -> None:
+        """Успешный стикер после текста запрещает следующую инициативу стикером."""
+        await finish_operation(
+            asyncio.to_thread(self._note_proactive_sticker_sync, user_id)
+        )
+
+    def _note_proactive_sticker_sync(self, user_id: int) -> None:
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE engagement SET force_proactive_text=1 WHERE user_id=?",
+                (user_id,),
+            )
 
     async def delete_user(self, user_id: int) -> None:
         """Удалить всю дополнительную память пользователя."""
@@ -319,6 +373,8 @@ class MemoriesRepository:
                     unanswered_count = 0,
                     delivery_suspended = 0,
                     next_proactive_at = NULL,
+                    next_sticker_at = NULL,
+                    proactive_kind = 'text',
                     activity_version = engagement.activity_version+1
                 """,
                 (user_id, at, at),
@@ -358,12 +414,14 @@ class MemoriesRepository:
         limit: int,
         user_id: int | None = None,
         idle_max_seconds: float | None = None,
+        sticker_delay: tuple[float, float] | None = None,
     ) -> list[ProactiveCandidate]:
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             unscheduled = connection.execute(
-                "SELECT user_id,last_user_message_at,last_dialogue_activity_at,last_proactive_at,unanswered_count "
+                "SELECT user_id,last_user_message_at,last_dialogue_activity_at,last_proactive_at,"
+                "unanswered_count,force_proactive_text "
                 "FROM engagement WHERE proactive_enabled=1 AND delivery_suspended=0 "
                 "AND last_user_message_at>0 AND unanswered_count<2 AND next_proactive_at IS NULL "
                 "AND (? IS NULL OR user_id=?)",
@@ -375,6 +433,7 @@ class MemoriesRepository:
                 last_dialogue,
                 last_proactive,
                 unanswered,
+                force_text,
             ) in unscheduled:
                 if unanswered == 0:
                     delay = (
@@ -393,23 +452,55 @@ class MemoriesRepository:
                     "UPDATE engagement SET next_proactive_at=? WHERE user_id=?",
                     (deadline, owner),
                 )
+                if unanswered == 0 and sticker_delay is not None and not force_text:
+                    minimum, sticker_maximum = sticker_delay
+                    delay = self._random_delay(minimum, sticker_maximum)
+                    if not isfinite(delay) or not minimum <= delay <= sticker_maximum:
+                        raise ValueError(
+                            "Случайный срок стикера вне допустимого промежутка"
+                        )
+                    connection.execute(
+                        "UPDATE engagement SET next_sticker_at=?,proactive_kind='undecided' WHERE user_id=?",
+                        (max(last_user, last_dialogue) + delay, owner),
+                    )
             rows = connection.execute(
                 """
-                SELECT user_id, unanswered_count, activity_version FROM engagement
+                SELECT user_id, unanswered_count, activity_version, proactive_kind, force_proactive_text FROM engagement
                 WHERE proactive_enabled = 1
                   AND delivery_suspended = 0
                   AND (? IS NULL OR user_id = ?)
                   AND last_user_message_at > 0
                   AND unanswered_count < 2
-                  AND next_proactive_at <= ?
-                ORDER BY next_proactive_at, last_user_message_at
+                  AND CASE
+                      WHEN ? AND proactive_kind='sticker' THEN next_sticker_at
+                      WHEN ? AND proactive_kind='undecided'
+                          THEN MIN(next_proactive_at,COALESCE(next_sticker_at,next_proactive_at))
+                      ELSE next_proactive_at END <= ?
+                ORDER BY CASE
+                      WHEN ? AND proactive_kind='sticker' THEN next_sticker_at
+                      WHEN ? AND proactive_kind='undecided'
+                          THEN MIN(next_proactive_at,COALESCE(next_sticker_at,next_proactive_at))
+                      ELSE next_proactive_at END, last_user_message_at
                 LIMIT ?
                 """,
-                (user_id, user_id, now, limit),
+                (
+                    user_id,
+                    user_id,
+                    sticker_delay is not None,
+                    sticker_delay is not None,
+                    now,
+                    sticker_delay is not None,
+                    sticker_delay is not None,
+                    limit,
+                ),
             ).fetchall()
         return [
             ProactiveCandidate(
-                user_id=row[0], unanswered_count=row[1], activity_version=row[2]
+                user_id=row[0],
+                unanswered_count=row[1],
+                activity_version=row[2],
+                kind=row[3],
+                force_text=bool(row[4]),
             )
             for row in rows
         ]
@@ -420,18 +511,21 @@ class MemoriesRepository:
         at: float,
         cooldown_seconds: float,
         activity_version: int | None,
+        had_sticker: bool = False,
     ) -> None:
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 UPDATE engagement SET last_proactive_at = ?,
                     next_proactive_at = CASE WHEN unanswered_count=0 THEN ? ELSE NULL END,
+                    next_sticker_at = NULL, proactive_kind='text', force_proactive_text=?,
                     unanswered_count = unanswered_count + 1
                 WHERE user_id = ? AND (? IS NULL OR activity_version=?)
                 """,
                 (
                     at,
                     at + cooldown_seconds,
+                    int(had_sticker),
                     user_id,
                     activity_version,
                     activity_version,
@@ -467,6 +561,9 @@ class MemoriesRepository:
                 ("last_dialogue_activity_at", "REAL NOT NULL DEFAULT 0"),
                 ("next_proactive_at", "REAL"),
                 ("activity_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("next_sticker_at", "REAL"),
+                ("proactive_kind", "TEXT NOT NULL DEFAULT 'text'"),
+                ("force_proactive_text", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if name not in columns:
                     connection.execute(

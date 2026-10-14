@@ -48,6 +48,7 @@ class Settings:
     creator_id: int | None = None
     creator_ids: frozenset[int] = frozenset()
     code_review_user_ids: frozenset[int] = frozenset()
+    favorites_user_ids: frozenset[int] = frozenset()
     brave_search_api_key: str | None = None
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
     e621_request_interval_seconds: float = 1.0
@@ -419,6 +420,9 @@ def load_settings() -> Settings:
         ),
         creator_id=creator_id,
         creator_ids=_parse_archive_ids(os.getenv("CREATOR_IDS", ""), "CREATOR_IDS"),
+        favorites_user_ids=_parse_archive_ids(
+            os.getenv("FAVORITES_USER_IDS", ""), "FAVORITES_USER_IDS"
+        ),
         code_review_user_ids=_parse_archive_ids(
             os.getenv("CODE_REVIEW_USER_IDS", ""), "CODE_REVIEW_USER_IDS"
         ),

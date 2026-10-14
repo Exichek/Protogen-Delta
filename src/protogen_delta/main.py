@@ -40,6 +40,7 @@ from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.download import create_download_router
 from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
+from protogen_delta.handlers.favorites import create_favorites_router
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.image_source import create_image_source_router
 from protogen_delta.handlers.llm_budget import LlmUserMiddleware
@@ -53,6 +54,7 @@ from protogen_delta.handlers.proactive_activity import (
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.safety import AgeSafetyMiddleware
+from protogen_delta.handlers.sender import SenderMiddleware
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.stickers import create_sticker_admin_router
 from protogen_delta.handlers.text import create_text_router
@@ -66,6 +68,7 @@ from protogen_delta.repositories.code_reviews import CodeReviewsRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.dialogue_archive import DialogueArchiveRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
+from protogen_delta.repositories.favorites import FavoritesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -82,6 +85,7 @@ from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.dialogue_archive import DialogueArchiveService
 from protogen_delta.services.e621 import E621Client
+from protogen_delta.services.favorites import FavoritesService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
@@ -93,6 +97,7 @@ from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
+from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
 from protogen_delta.services.source_access import SourceAccess
@@ -206,7 +211,25 @@ async def main() -> None:
         )
         bot.session.middleware.register(ArchiveOutgoingMiddleware(dialogue_archive))
         memories_repository = MemoriesRepository(settings.data_dir)
-        source_access = SourceAccess(settings.code_review_user_ids)
+        favorites = FavoritesService(
+            FavoritesRepository(settings.data_dir), settings.favorites_user_ids
+        )
+        source_access = SourceAccess(
+            settings.code_review_user_ids,
+            secrets=tuple(
+                value
+                for value in (
+                    settings.telegram_token,
+                    settings.deepseek_api_key,
+                    settings.audio_api_key,
+                    settings.music_audd_api_token,
+                    settings.saucenao_api_key,
+                    settings.brave_search_api_key,
+                    settings.telegram_proxy_url,
+                )
+                if value is not None
+            ),
+        )
         bot.session.middleware.register(
             ProactiveOutgoingMiddleware(memories_repository)
         )
@@ -230,6 +253,7 @@ async def main() -> None:
         )
         input_operations = InputOperations()
         dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        dispatcher.message.outer_middleware(SenderMiddleware())
         dispatcher.message.outer_middleware(
             ProactiveIncomingMiddleware(
                 memories_repository, user_states, input_operations
@@ -305,6 +329,7 @@ async def main() -> None:
             tools=ToolExecutor(
                 default_registry(
                     source_access=source_access,
+                    favorites=favorites if settings.favorites_user_ids else None,
                     proxy_url=settings.telegram_proxy_url,
                     brave_search_api_key=settings.brave_search_api_key,
                     dialogue_archive=(
@@ -320,6 +345,7 @@ async def main() -> None:
             facts=UserFactsService(facts_repository, deepseek),
             creator_messages=creator_messages_repository,
             dialogue_archive=dialogue_archive,
+            favorites=favorites,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -336,6 +362,9 @@ async def main() -> None:
 
         deepseek.set_usage_repository(usage_repository)
         capabilities = build_capabilities(settings)
+        release_journal = ReleaseJournal(
+            settings.data_dir, settings.recognized_creator_ids, health=health
+        )
         response_engine_config = ResponseEngineConfig(
             fetish_triggers=fetish_triggers,
             fetish_names=fetish_names,
@@ -384,8 +413,12 @@ async def main() -> None:
             source_access=source_access,
             creator_messages=creator_messages,
             reply_transform=sticker_service.correct_reply,
+            release_journal=release_journal,
             interaction_classifier=InteractionClassifier(
-                deepseek, mood_prompt, insult_prompt
+                deepseek,
+                mood_prompt,
+                insult_prompt,
+                favorite_prompt=load_prompt("favorite_selection"),
             ),
         )
         sticker_importer = StickerPackImporter(bot, stickers_repository)
@@ -561,6 +594,7 @@ async def main() -> None:
         dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(create_memory_router(memory, user_states))
+        dispatcher.include_router(create_favorites_router(favorites, user_states))
         dispatcher.include_router(rp_router)
         downloader = MediaDownloader(settings.youtube_cookies_file)
         dispatcher.include_router(create_download_router(downloader))
@@ -619,11 +653,15 @@ async def main() -> None:
             user_states=user_states,
             creator_ids=settings.recognized_creator_ids,
             system_prompt=core_prompt,
+            stickers=sticker_service,
+            release_journal=release_journal,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,
                 idle_max_seconds=settings.proactive_idle_max_seconds,
                 cooldown_seconds=settings.proactive_cooldown_seconds,
+                sticker_idle_seconds=1800.0,
+                sticker_idle_max_seconds=7200.0,
             ),
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())

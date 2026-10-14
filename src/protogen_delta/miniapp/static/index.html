@@ -237,6 +237,17 @@
   </section>
   </div>
   <div id="tools-panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+    <section class="card" aria-labelledby="archive-title">
+      <h2 id="archive-title">ZIP-архив</h2>
+      <p class="muted">До 50 МБ. Просмотр списка и текста файлов бесплатен; разбор с Дельтой использует модель. Вложенные архивы и секретные файлы пропускаются.</p>
+      <label for="archive-file">Архив с документами или кодом</label>
+      <input id="archive-file" type="file" accept=".zip,application/zip">
+      <label for="archive-question">Что проверить в архиве?</label>
+      <textarea id="archive-question" maxlength="2000" rows="2" placeholder="Например: объясни устройство проекта или найди возможную ошибку"></textarea>
+      <div class="grid"><button id="archive-view" type="button" disabled>Просмотреть файлы</button><button id="archive-analyze" type="button" disabled>Разобрать с Дельтой</button></div>
+      <div id="archive-status" class="tool-status" role="status" aria-live="polite"></div>
+      <pre id="archive-result" style="max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
+    </section>
     <section class="card converter" aria-labelledby="conversion-title">
       <h2 id="conversion-title">Конвертер видео и аудио</h2>
       <div class="translation-modes" role="group" aria-label="Тип результата">

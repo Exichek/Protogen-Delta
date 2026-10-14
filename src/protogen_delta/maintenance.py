@@ -53,6 +53,7 @@ def copy_snapshot(source: Path, destination: Path) -> None:
         ("user_facts.db", "user_facts"),
         ("user_statistics.db", "stats_users"),
         ("dialogue_archive.db", "dialogue_messages"),
+        ("favorites.db", "favorite_messages"),
     ):
         database = source / filename
         if database.exists():

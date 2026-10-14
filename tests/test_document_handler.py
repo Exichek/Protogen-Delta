@@ -136,8 +136,8 @@ def test_unsupported_and_broken_documents_get_clear_replies() -> None:
     unsupported = SimpleNamespace(
         file_id="zip-id",
         file_size=7,
-        file_name="archive.zip",
-        mime_type="application/zip",
+        file_name="archive.rar",
+        mime_type="application/x-rar-compressed",
     )
     unsupported_message, unsupported_answer = _message(unsupported)
     asyncio.run(unsupported_router.message.handlers[0].callback(unsupported_message))
