@@ -5,7 +5,7 @@ import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
@@ -217,13 +217,13 @@ class CurrencyRates:
         with localcontext() as context:
             context.prec = 64
             rate = self.rub_per_unit[source] / self.rub_per_unit[target]
-            result = (number * rate).quantize(Decimal("0.000001"))
+            result = (number * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return {
             "amount": str(number),
             "from": source,
             "to": target,
             "rate": str(rate),
-            "result": format(result, "f"),
+            "result": format(result, "f").rstrip("0").rstrip("."),
             "effective_date": self.effective_date,
             "source": "Банк России",
             "source_url": "https://www.cbr.ru/currency_base/daily/",
