@@ -84,7 +84,7 @@ class _SilentLogger:
 
 
 def _twitter_gif(info: dict[str, Any]) -> bool:
-    """X exposes GIF media as silent MP4 under its tweet_video path."""
+    """X передаёт GIF как MP4 без звука по пути tweet_video."""
     formats = [info, *(info.get("formats") or [])]
     for item in formats:
         url = item.get("url", "")
@@ -102,7 +102,7 @@ def _twitter_gif(info: dict[str, Any]) -> bool:
 
 
 def _check_animation(directory: Path) -> None:
-    """Check missing X duration against the local file before delivery."""
+    """Проверить неизвестную длительность видео X по локальному файлу перед отправкой."""
     paths = [p for p in directory.glob("*.mp4") if p.is_file() and not p.is_symlink()]
     if len(paths) != 1 or not 0 < paths[0].stat().st_size <= MAX_DOWNLOAD_BYTES:
         raise ValueError("Expected one bounded animation")

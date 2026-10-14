@@ -2,7 +2,10 @@
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Self
+from typing import TYPE_CHECKING, Self
+
+if TYPE_CHECKING:
+    from protogen_delta.core.user_state import UserState
 
 PROFILE_FIELDS = ("personality", "behavior", "preferences", "boundaries", "fetishes")
 PROFILE_FIELD_LIMIT = 1000
@@ -48,3 +51,12 @@ class AppearanceProfile:
     def encode(self) -> str:
         values = asdict(self)
         return json.dumps(values, ensure_ascii=False) if any(values.values()) else ""
+
+
+def active_appearance_profile(state: "UserState") -> AppearanceProfile | None:
+    """Стандартный и загруженный образы сохраняют отдельные анкеты."""
+    return AppearanceProfile.decode(
+        state.delta_appearance_profile
+        if state.delta_appearance
+        else state.delta_default_profile
+    )

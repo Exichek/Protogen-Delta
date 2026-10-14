@@ -84,6 +84,10 @@ def test_explicit_sticker_survives_random_gate_but_obeys_intervals(
         assert not await service.maybe_send(chat_id=7, user_id=42, context_text=":D")
         assert not await service.maybe_send(chat_id=7, user_id=42, context_text=":D")
         now[0] += 61
+        assert not await service.maybe_send(
+            chat_id=7, user_id=42, reply_text="*рассмеялся*"
+        )
+        now[0] += 1800
         assert await service.maybe_send(
             chat_id=7, user_id=42, reply_text="*рассмеялся*"
         )

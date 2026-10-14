@@ -13,6 +13,7 @@ from typing import Literal, Protocol
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.conversation_gate import ConversationGate
 from protogen_delta.core.emotional_memory import EmotionalMemory
+from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class PersistentUserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_default_profile: str = ""
     delta_appearance_profile: str = ""
     roleplay_character_thumbnail: str = ""
     roleplay_character_restricted: bool = False
@@ -180,6 +182,7 @@ class UserStatePersistence(Protocol):
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -227,6 +230,7 @@ class UserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_default_profile: str = ""
     delta_appearance_profile: str = ""
     roleplay_character_thumbnail: str = ""
     roleplay_character_restricted: bool = False
@@ -306,6 +310,7 @@ class UserState:
         self.delta_appearance = ""
         self.delta_species = ""
         self.delta_appearance_thumbnail = ""
+        self.delta_default_profile = ""
         self.delta_appearance_profile = ""
         self.roleplay_character_thumbnail = ""
         self.roleplay_character_restricted = False
@@ -325,6 +330,7 @@ class UserStateStore:
         retention_seconds: float = 86400.0,
         clock: Callable[[], float] | None = None,
         wall_clock: Callable[[], float] | None = None,
+        shared_dialogue: SharedDialogueAccounts | None = None,
         persistence: UserStatePersistence | None = None,
         history_ttl_seconds: float = 7 * 86400,
     ) -> None:
@@ -343,6 +349,7 @@ class UserStateStore:
                 "history_ttl_seconds должен быть положительным конечным числом"
             )
         self._history_ttl_seconds = history_ttl_seconds
+        self.shared_dialogue = shared_dialogue or SharedDialogueAccounts()
         self._states: OrderedDict[StateKey, UserState] = OrderedDict()
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
@@ -415,6 +422,27 @@ class UserStateStore:
     async def _coordinate(
         self, key: StateKey, *, exclusive: bool
     ) -> AsyncIterator[UserState]:
+        owner = key if isinstance(key, int) else key[1]
+        async with self.shared_dialogue.coordinate(owner):
+            async with self._coordinate_account(key, exclusive=exclusive) as state:
+                yield state
+
+    async def forget_dialogue_context(self, user_id: int) -> None:
+        """Удалить цитаты из короткой памяти, сохранив настройки и возрастные запреты."""
+        async with self._coordinate(user_id, exclusive=True):
+            for key, state in self._states.items():
+                if key == user_id or isinstance(key, tuple) and key[1] == user_id:
+                    state.history.clear()
+                    state.history_updated_at = 0
+                    state.emotions.memory.events.clear()
+            clear = getattr(self._persistence, "forget_dialogue_context", None)
+            if clear is not None:
+                await finish_operation(clear(user_id))
+
+    @asynccontextmanager
+    async def _coordinate_account(
+        self, key: StateKey, *, exclusive: bool
+    ) -> AsyncIterator[UserState]:
         user_id = key if isinstance(key, int) else key[1]
         private = self.get(user_id)
         # Очередь и активные чаты удерживают один и тот же gate в кеше.
@@ -474,6 +502,7 @@ class UserStateStore:
                                     delta_appearance=state.delta_appearance,
                                     delta_species=state.delta_species,
                                     delta_appearance_thumbnail=state.delta_appearance_thumbnail,
+                                    delta_default_profile=state.delta_default_profile,
                                     delta_appearance_profile=state.delta_appearance_profile,
                                     roleplay_character_thumbnail=state.roleplay_character_thumbnail,
                                     roleplay_character_restricted=state.roleplay_character_restricted,
@@ -626,6 +655,7 @@ class UserStateStore:
             state.delta_appearance_thumbnail = (
                 persistent_state.delta_appearance_thumbnail
             )
+            state.delta_default_profile = persistent_state.delta_default_profile
             state.delta_appearance_profile = persistent_state.delta_appearance_profile
             state.roleplay_character_thumbnail = (
                 persistent_state.roleplay_character_thumbnail

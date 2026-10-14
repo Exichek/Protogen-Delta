@@ -316,7 +316,7 @@ class DeepSeekService:
         model._thinking_enabled = True
         model._provider_options = {
             "extra_body": {"thinking": {"type": "enabled"}},
-            "reasoning_effort": "high",
+            "reasoning_effort": "medium",
         }
         return model
 
@@ -329,7 +329,7 @@ class DeepSeekService:
         model._thinking_enabled = True
         model._provider_options = {
             "extra_body": {"thinking": {"type": "enabled"}},
-            "reasoning_effort": "high",
+            "reasoning_effort": "medium",
         }
         return model
 

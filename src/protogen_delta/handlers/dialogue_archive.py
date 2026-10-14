@@ -9,12 +9,15 @@ from aiogram.client.session.middlewares.base import (
     BaseRequestMiddleware,
     NextRequestMiddlewareType,
 )
-from aiogram.methods import Response, TelegramMethod
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.methods import Response, SendMessage, TelegramMethod
 from aiogram.methods.base import TelegramType
 from aiogram.types import Message, TelegramObject
 
 from protogen_delta.core.input_operations import InputOperations, input_ticket
+from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
 from protogen_delta.repositories.dialogue_archive import DialogueMessage
+from protogen_delta.services.delivery_ledger import current_delivery
 from protogen_delta.services.dialogue_archive import (
     DialogueArchiveService,
     archive_generation,
@@ -116,8 +119,13 @@ class ArchiveIncomingMiddleware(BaseMiddleware):
 
 
 class ArchiveOutgoingMiddleware(BaseRequestMiddleware):
-    def __init__(self, archive: DialogueArchiveService) -> None:
+    def __init__(
+        self,
+        archive: DialogueArchiveService,
+        ledger: DeliveryLedgerRepository | None = None,
+    ) -> None:
         self._archive = archive
+        self._ledger = ledger
 
     async def __call__(
         self,
@@ -137,7 +145,45 @@ class ArchiveOutgoingMiddleware(BaseRequestMiddleware):
             if scope and scope[0] == owner
             else self._archive.generation(owner or 0)
         )
-        response = await make_request(bot, method)
+        operation = current_delivery.get()
+        tracking = (
+            operation is not None
+            and operation.answering
+            and chat_id == operation.owner
+            and isinstance(method, SendMessage)
+        )
+        if tracking and operation is not None:
+            operation.uncertain = True
+            if self._ledger is not None:
+                await self._ledger.mark(
+                    operation.key, "delivery_unknown", operation.confirmed
+                )
+        try:
+            response = await make_request(bot, method)
+        except TelegramBadRequest, TelegramForbiddenError:
+            if tracking and operation is not None:
+                operation.uncertain = False
+                operation.failed = True
+            raise
+        confirmed_value = (
+            response.result if isinstance(response, Response) else response
+        )
+        if (
+            tracking
+            and operation is not None
+            and isinstance(confirmed_value, Message)
+            and confirmed_value.chat.id == chat_id
+        ):
+            operation.uncertain = False
+            operation.confirmed += 1
+            if self._ledger is not None:
+                try:
+                    await self._ledger.mark(
+                        operation.key, "partial", operation.confirmed
+                    )
+                except Exception:
+                    logger.error("Не удалось отметить подтверждённую часть ответа")
+
         if owner is None:
             return response
         value = response.result if isinstance(response, Response) else response

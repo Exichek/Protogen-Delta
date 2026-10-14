@@ -110,9 +110,9 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     document.querySelector("#save-appearance-species").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || !speciesValue || (savedSpecies?.source === "user" && speciesValue === savedSpecies.name);
     document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
     document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
-    for (const name of profileFields) document.querySelector(`#delta-${name}`).disabled = busy || !appearanceEnabled || !customAppearance;
+    for (const name of profileFields) document.querySelector(`#delta-${name}`).disabled = busy || !appearanceEnabled;
     updateAppearanceTopicHint();
-    document.querySelector("#save-delta-profile").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || JSON.stringify(profileDraft()) === JSON.stringify(savedProfile);
+    document.querySelector("#save-delta-profile").disabled = busy || !appearanceEnabled || Boolean(selectedFile) || JSON.stringify(profileDraft()) === JSON.stringify(savedProfile);
     updateCharacterButtons();
   };
   const renderAppearance = (p, preserveProfileDraft=false) => {
@@ -126,7 +126,7 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
       for (const name of profileFields) document.querySelector(`#delta-${name}`).value = savedProfile[name];
       document.querySelector("#delta-profile-status").textContent="";
     }
-    document.querySelector("#delta-profile-hint").textContent = savedDescription ? "Для текущего облика. Заполни вручную: эти сведения не определяются по картинке." : "Сначала задай облик Дельты, затем заполни его характер и поведение.";
+    document.querySelector("#delta-profile-hint").textContent = savedDescription ? "Для текущего облика. Заполни вручную: эти сведения не определяются по картинке." : "Для стандартного Дельты. Настройки этого образа сохраняются отдельно от загруженного облика.";
     customAppearance = Boolean(p.delta_appearance);
     appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
     const species = p.delta_species;

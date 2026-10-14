@@ -454,6 +454,7 @@ def test_main_builds_application_and_starts_polling(
         history_ttl_seconds=604800.0,
         retention_seconds=3600.0,
         persistence=user_state_repository,
+        shared_dialogue=ANY,
     )
 
     bot_constructor_mock.assert_called_once_with(
@@ -507,10 +508,11 @@ def test_main_builds_application_and_starts_polling(
     inputs = reset_router_call.kwargs["input_operations"]
     assert isinstance(inputs, main_module.InputOperations)
     outer = dispatcher_mock.message.outer_middleware.call_args_list
-    assert len(outer) == 7
+    assert len(outer) == 8
     assert isinstance(outer[0].args[0], main_module.LlmUserMiddleware)
     dispatcher_mock.callback_query.outer_middleware.assert_called_once()
-    outer = outer[1:]
+    assert isinstance(outer[1].args[0], main_module.DeliveryLedgerMiddleware)
+    outer = outer[2:]
     assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
     assert outer[0].args[0]._operations is inputs
     assert isinstance(outer[1].args[0], main_module.SenderMiddleware)

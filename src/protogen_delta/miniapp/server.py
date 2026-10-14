@@ -11,12 +11,16 @@ from urllib.parse import quote, unquote
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
-from protogen_delta.core.appearance_profile import AppearanceProfile
+from protogen_delta.core.appearance_profile import (
+    AppearanceProfile,
+    active_appearance_profile,
+)
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.conversation_safety import (
     reference_is_child,
     validate_stopword,
 )
+from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
 from protogen_delta.core.operation_metrics import Measurement, OperationMetrics
 from protogen_delta.core.rate_limiter import UserRateLimiter
@@ -89,13 +93,8 @@ def _profile(
             state.roleplay_character_thumbnail if state.roleplay_character else ""
         ),
         "roleplay_character_restricted": state.roleplay_character_restricted,
-        "delta_appearance_profile": (
-            asdict(
-                AppearanceProfile.decode(state.delta_appearance_profile)
-                or AppearanceProfile()
-            )
-            if state.delta_appearance
-            else asdict(AppearanceProfile())
+        "delta_appearance_profile": asdict(
+            active_appearance_profile(state) or AppearanceProfile()
         ),
         "delta_appearance": state.delta_appearance,
         "delta_appearance_thumbnail": (
@@ -125,6 +124,7 @@ class MiniAppServer:
         port: int = 8080,
         auth_max_age_seconds: int = 3600,
         response_engine: ResponseEngine | None = None,
+        input_operations: InputOperations | None = None,
         on_mode_change: ModeChange | None = None,
         tools: MiniAppTools | None = None,
         native_work: WorkRunner | None = None,
@@ -146,6 +146,7 @@ class MiniAppServer:
         self._port = port
         self._auth_max_age_seconds = auth_max_age_seconds
         self._response_engine = response_engine
+        self._input_operations = input_operations
         self._on_mode_change = on_mode_change
         self._tools = tools
         self._native_work = native_work or NativeWorkPool(2)
@@ -783,7 +784,7 @@ class MiniAppServer:
                     or set(payload)
                     != {"profile", "expected_appearance", "expected_profile"}
                     or not isinstance(payload["expected_appearance"], str)
-                    or not 1 <= len(payload["expected_appearance"]) <= 2000
+                    or len(payload["expected_appearance"]) > 2000
                 ):
                     raise ValueError("Нужны профиль и исходная версия облика.")
                 await self._response_engine.set_delta_appearance_profile(
@@ -1022,6 +1023,15 @@ class MiniAppServer:
         self._archive_pending.add(user.id)
         try:
             with self._archive_metrics.measure(queued=True) as measurement:
+                if analyze and self._input_operations is not None:
+                    async with self._input_operations.receive(user.id) as ticket:
+                        if not self._input_operations.start_memory(ticket):
+                            raise web.HTTPConflict(
+                                text="Память была очищена; загрузи архив заново."
+                            )
+                        return await self._read_archive(
+                            request, user, name, question, analyze, measurement
+                        )
                 return await self._read_archive(
                     request, user, name, question, analyze, measurement
                 )

@@ -7,7 +7,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from protogen_delta.core.appearance_profile import AppearanceProfile
+from protogen_delta.core.appearance_profile import (
+    AppearanceProfile,
+    active_appearance_profile,
+)
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.conversation_safety import (
@@ -67,6 +70,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekTimeoutError,
     ImageInput,
 )
+from protogen_delta.services.delivery_ledger import current_delivery, recovery_context
 from protogen_delta.services.dialogue_archive import dialogue_owner
 from protogen_delta.services.fetishes import (
     FetishRole,
@@ -394,7 +398,13 @@ class ResponseEngine:
                     user_state.stop_roleplay()
                     reply = "Спасибо, что сказал. Остаёмся в обычном общении, взрослый режим выключен."
                     if deliver is not None:
+                        operation = current_delivery.get()
+                        if operation is not None:
+                            operation.answering = operation.reply_started = True
                         await deliver(reply)
+                        if operation is not None:
+                            operation.completed = True
+                            operation.answering = False
                     return reply
                 if self._creator_messages is not None and (
                     use_personal_facts or chat_id is not None
@@ -430,7 +440,15 @@ class ResponseEngine:
                     else prepared.text
                 )
                 if deliver is not None:
+                    operation = current_delivery.get()
+                    if operation is not None:
+                        operation.answering = operation.reply_started = (
+                            prepared.user_message is not None
+                        )
                     await deliver(reply)
+                    if operation is not None and prepared.user_message is not None:
+                        operation.completed = True
+                        operation.answering = False
                 if prepared.user_message is not None:
                     self._register_reply(user_state)
                     if prepared.remember_history:
@@ -872,6 +890,17 @@ class ResponseEngine:
                         user_id, user_message
                     )
                     memory_context = archived_context + memory_context
+                    ledger = getattr(self._memory, "delivery_ledger", None)
+                    if ledger is not None:
+                        memory_context = (
+                            await recovery_context(
+                                ledger,
+                                self._memory.dialogue_archive.repository,
+                                user_id,
+                                user_message,
+                            )
+                            + memory_context
+                        )
             except Exception:
                 logger.exception(
                     "Не удалось загрузить эпизодическую память пользователя %s",
@@ -1418,8 +1447,7 @@ class ResponseEngine:
         try:
             async with self._user_states.use_conversation(user_id) as state:
                 if expected_appearance is not None and (
-                    not state.delta_appearance
-                    or state.delta_appearance != expected_appearance
+                    state.delta_appearance != expected_appearance
                 ):
                     raise ValueError(
                         "Облик уже изменился. Открой панель заново перед редактированием."
@@ -1462,16 +1490,18 @@ class ResponseEngine:
         self._delivering_users.add(user_id)
         try:
             async with self._user_states.use_conversation(user_id) as state:
-                current = AppearanceProfile.decode(state.delta_appearance_profile)
+                current = active_appearance_profile(state)
                 if (
-                    not state.delta_appearance
-                    or state.delta_appearance != expected_appearance
+                    state.delta_appearance != expected_appearance
                     or current != expected_profile
                 ):
                     raise ValueError(
                         "Облик или его профиль изменился. Открой панель заново."
                     )
-                state.delta_appearance_profile = profile.encode()
+                if state.delta_appearance:
+                    state.delta_appearance_profile = profile.encode()
+                else:
+                    state.delta_default_profile = profile.encode()
         finally:
             self._delivering_users.remove(user_id)
 
@@ -1544,8 +1574,7 @@ class ResponseEngine:
             async with self._user_states.use_conversation(user_id) as state:
                 previous = AppearanceSpecies.decode(state.delta_species)
                 if (
-                    not state.delta_appearance
-                    or state.delta_appearance != expected_appearance
+                    state.delta_appearance != expected_appearance
                     or previous != expected_species
                 ):
                     raise ValueError(

@@ -2,7 +2,7 @@
 
 import re
 
-from protogen_delta.core.appearance_profile import AppearanceProfile
+from protogen_delta.core.appearance_profile import active_appearance_profile
 from protogen_delta.core.user_state import UserState
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
 
@@ -39,22 +39,17 @@ def is_appearance_preferences_query(message: str) -> bool:
 def appearance_preferences_reply(
     state: UserState, triggers: FetishTriggers, names: dict[str, str]
 ) -> str:
-    """Показать исходный текст и словарные метки текущего облика владельца."""
-    if not state.delta_appearance:
-        return (
-            "У тебя сейчас не выбран отдельный облик Дельты. "
-            "Выбери его в «RP и функции», чтобы заполнить поля профиля."
-        )
-    profile = AppearanceProfile.decode(state.delta_appearance_profile)
+    """Показать исходный текст и словарные метки активного образа владельца."""
+    profile = active_appearance_profile(state)
     if profile is None or not profile.fetishes:
         return (
-            "В поле «Фетиши и предпочтения» текущего облика пока ничего не записано. "
+            "В поле «Фетиши и предпочтения» активного образа пока ничего не записано. "
             "Заполнить его можно в «RP и функции»."
         )
     topics = detect_fetishes(profile.fetishes, triggers)
     labels = ", ".join(names.get(key, key) for key in topics)
     return (
-        "В поле «Фетиши и предпочтения» текущего облика у тебя сейчас записано:\n"
+        "В поле «Фетиши и предпочтения» активного образа у тебя сейчас записано:\n"
         + profile.fetishes
         + "\n\nРаспознанные темы: "
         + (labels or "совпадений со словарём нет")
