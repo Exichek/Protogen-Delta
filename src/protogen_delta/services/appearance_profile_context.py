@@ -1,14 +1,12 @@
 """Профиль Дельты для обычной сцены, отдельно от персонажа пользователя."""
 
-from protogen_delta.core.appearance_profile import AppearanceProfile
+from protogen_delta.core.appearance_profile import active_appearance_profile
 from protogen_delta.core.user_state import UserState
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
 
 
 def appearance_profile_context(state: UserState) -> str:
-    if not state.delta_appearance:
-        return ""
-    profile = AppearanceProfile.decode(state.delta_appearance_profile)
+    profile = active_appearance_profile(state)
     if profile is None or not profile.encode():
         return ""
     labels = (
@@ -18,7 +16,7 @@ def appearance_profile_context(state: UserState) -> str:
         ("Границы Дельты", profile.boundaries),
     )
     return (
-        "Ручной профиль текущего облика Дельты для обычных RP-сцен. "
+        "Ручной профиль активного образа Дельты для обычных RP-сцен. "
         "Эти черты уточняют базовый характер Дельты в текущей сцене; "
         "они относятся к твоему выбранному образу, не персонажу пользователя. "
         "Имя Дельты сохраняется; из внешности характер не выводится. "
@@ -40,10 +38,7 @@ def appearance_fetishes_context(
 ) -> str:
     """Предпочтения текущего облика Дельты для взрослого RP."""
 
-    if not state.delta_appearance:
-        return ""
-
-    profile = AppearanceProfile.decode(state.delta_appearance_profile)
+    profile = active_appearance_profile(state)
 
     if profile is None or not profile.fetishes:
         return ""

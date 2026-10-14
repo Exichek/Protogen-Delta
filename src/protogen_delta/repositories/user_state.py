@@ -61,6 +61,7 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -89,6 +90,7 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_default_profile=delta_default_profile,
             delta_appearance_profile=delta_appearance_profile,
             roleplay_character_thumbnail=roleplay_character_thumbnail,
             roleplay_character_restricted=bool(roleplay_character_restricted),
@@ -111,6 +113,23 @@ class UserStateRepository:
             self._delete_sync,
             user_id,
         )
+
+    async def forget_dialogue_context(self, user_id: int) -> None:
+        def update() -> None:
+            with closing(sqlite3.connect(self._path)) as db, db:
+                for table in ("user_states", "conversation_states"):
+                    for row in db.execute(
+                        f"SELECT rowid,emotional_memory FROM {table} WHERE user_id=?",
+                        (user_id,),
+                    ).fetchall():
+                        memory = EmotionalMemory.decode(row[1])
+                        memory.events.clear()
+                        db.execute(
+                            f"UPDATE {table} SET history='[]',history_updated_at=0,emotional_memory=? WHERE rowid=?",
+                            (memory.encode(), row[0]),
+                        )
+
+        await asyncio.to_thread(update)
 
     async def restrict_conversations(self, user_id: int) -> None:
         def update() -> None:
@@ -170,7 +189,8 @@ class UserStateRepository:
                         roleplay_allow_profanity,
                         history,
                         history_updated_at,
-                        emotional_memory
+                        emotional_memory,
+                        delta_default_profile
                     FROM {table}
                     WHERE {where}
                     """,
@@ -214,6 +234,7 @@ class UserStateRepository:
             history,
             history_updated_at,
             emotional_memory,
+            delta_default_profile,
         ) = row
 
         species = AppearanceSpecies.decode(delta_species)
@@ -250,6 +271,7 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_default_profile=delta_default_profile,
             delta_appearance_profile=delta_appearance_profile,
             roleplay_character_thumbnail=roleplay_character_thumbnail,
             roleplay_character_restricted=bool(roleplay_character_restricted),
@@ -278,6 +300,7 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -420,8 +443,15 @@ class UserStateRepository:
                     ),
                 )
                 connection.execute(
-                    f"UPDATE {table} SET emotional_memory=? WHERE {where}",
-                    (emotions.memory.encode(), *key),
+                    f"UPDATE {table} SET emotional_memory=?,delta_default_profile=? WHERE {where}",
+                    (
+                        emotions.memory.encode(),
+                        (
+                            AppearanceProfile.decode(delta_default_profile)
+                            or AppearanceProfile()
+                        ).encode(),
+                        *key,
+                    ),
                 )
                 if history_expires_before is not None:
                     for history_table in ("user_states", "conversation_states"):
@@ -513,6 +543,7 @@ class UserStateRepository:
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_profile", "TEXT NOT NULL DEFAULT ''"),
+                    ("delta_default_profile", "TEXT NOT NULL DEFAULT ''"),
                     ("roleplay_character_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("roleplay_character_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),

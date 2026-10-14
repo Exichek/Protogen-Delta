@@ -198,6 +198,107 @@ class DialogueArchiveRepository:
                 )
             ]
 
+    async def get_message(self, owner: int, key: str) -> DialogueMessage | None:
+        self._owner(owner)
+
+        def read() -> DialogueMessage | None:
+            with closing(self._connect()) as db:
+                row = db.execute(
+                    "SELECT source_key,role,text,created_at,kind FROM dialogue_messages "
+                    "WHERE user_id=? AND source_key=?",
+                    (owner, key),
+                ).fetchone()
+                return DialogueMessage(*row) if row else None
+
+        return await asyncio.to_thread(read)
+
+    async def search_shared(
+        self,
+        owners: frozenset[int],
+        query: str,
+        *,
+        limit: int = 4,
+        exclude_key: str | None = None,
+    ) -> list[tuple[int, DialogueMessage]]:
+        for owner in owners:
+            self._owner(owner)
+        terms = memory_terms(query, limit=16)
+        if not owners or not terms or limit <= 0:
+            return []
+        expression = " OR ".join('"' + term + '"' for term in terms)
+        return await asyncio.to_thread(
+            self._shared_sync, owners, expression, min(limit, 6), exclude_key
+        )
+
+    async def recent_shared(
+        self,
+        owners: frozenset[int],
+        *,
+        limit: int = 6,
+        exclude_key: str | None = None,
+    ) -> list[tuple[int, DialogueMessage]]:
+        for owner in owners:
+            self._owner(owner)
+        return await asyncio.to_thread(
+            self._shared_sync, owners, None, min(max(limit, 0), 12), exclude_key
+        )
+
+    def _shared_sync(
+        self,
+        owners: frozenset[int],
+        expression: str | None,
+        limit: int,
+        exclude_key: str | None,
+    ) -> list[tuple[int, DialogueMessage]]:
+        if not owners or not limit:
+            return []
+        placeholders = ",".join("?" for _ in owners)
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT m.id,m.user_id,m.source_key,m.role,m.text,m.created_at,m.kind "
+                + (
+                    "FROM dialogue_fts JOIN dialogue_messages m ON m.id=dialogue_fts.rowid "
+                    if expression is not None
+                    else "FROM dialogue_messages m "
+                )
+                + f"WHERE m.user_id IN ({placeholders}) "
+                + ("AND dialogue_fts MATCH ? " if expression is not None else "")
+                + "AND (? IS NULL OR m.source_key<>?) ORDER BY "
+                + ("bm25(dialogue_fts)," if expression is not None else "")
+                + "m.created_at DESC,m.id DESC LIMIT ?",
+                (
+                    *sorted(owners),
+                    *((expression,) if expression is not None else ()),
+                    exclude_key,
+                    exclude_key,
+                    limit,
+                ),
+            ).fetchall()
+            results = {row[0]: (row[1], DialogueMessage(*row[2:])) for row in rows}
+            if expression is not None:
+                for row in rows:
+                    direction, order = (
+                        (">", "ASC") if row[3] == "user" else ("<", "DESC")
+                    )
+                    neighbor = db.execute(
+                        "SELECT id,user_id,source_key,role,text,created_at,kind FROM dialogue_messages "
+                        f"WHERE user_id=? AND (created_at,id) {direction} (?,?) "
+                        "AND (? IS NULL OR source_key<>?) "
+                        f"ORDER BY created_at {order},id {order} LIMIT 1",
+                        (row[1], row[5], row[0], exclude_key, exclude_key),
+                    ).fetchone()
+                    if neighbor and abs(neighbor[5] - row[5]) <= 600:
+                        results[neighbor[0]] = (
+                            neighbor[1],
+                            DialogueMessage(*neighbor[2:]),
+                        )
+            return [
+                item
+                for _, item in sorted(
+                    results.items(), key=lambda pair: (pair[1][1].created_at, pair[0])
+                )
+            ]
+
     async def delete_user(self, user_id: int) -> None:
         self._owner(user_id)
         await finish_operation(asyncio.to_thread(self._delete_sync, user_id, ()))

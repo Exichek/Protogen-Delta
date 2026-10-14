@@ -1,8 +1,8 @@
-"""Compare the existing appearance pipeline without Telegram or saved user states.
+"""Сравнить существующий разбор облика без Telegram и сохранённых состояний пользователей.
 
-Dry run is the default. --run sends at most six requests to each provider,
-without retries, history, tools or automatic fallback. Reports remain local.
-"""
+По умолчанию выполняется только проверка настроек. --run отправляет не более
+шести запросов каждому провайдеру, без повторных попыток, истории, инструментов
+и автоматического перехода на другую модель. Отчёты сохраняются локально."""
 
 import argparse
 import asyncio
@@ -87,7 +87,7 @@ def read_gemini_key(path: Path, env: dict[str, str | None]) -> str:
 
 
 class ComparisonModel:
-    """An isolated client; records usage and raw replies, never keys or requests."""
+    """Изолированный клиент: записывает расход и ответы, но не ключи или запросы."""
 
     def __init__(self, client: AsyncOpenAI, model: str, provider: str) -> None:
         self.client = client

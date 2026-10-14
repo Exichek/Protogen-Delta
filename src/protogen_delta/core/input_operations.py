@@ -10,6 +10,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 
 _TICKET_KEY = "_delta_input_ticket"
 
@@ -34,7 +35,8 @@ class InputTicket:
 class InputOperations:
     """Следить только за выполняющимися запросами; команды не отменять."""
 
-    def __init__(self) -> None:
+    def __init__(self, shared: SharedDialogueAccounts | None = None) -> None:
+        self._shared = shared or SharedDialogueAccounts()
         self._users: dict[int, _UserInputs] = {}
 
     def _release(self, user_id: int, entry: _UserInputs) -> None:
@@ -45,6 +47,7 @@ class InputOperations:
     @asynccontextmanager
     async def receive(self, user_id: int) -> AsyncIterator[InputTicket]:
         """Пометить момент получения до статистики и выбора обработчика."""
+        user_id = self._shared.key(user_id)
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("Входящий запрос должен выполняться в asyncio.Task")
@@ -82,6 +85,7 @@ class InputOperations:
         self, user_id: int, *, exempt: asyncio.Task[Any] | None = None
     ) -> AsyncIterator[None]:
         """Под общим барьером состояния остановить старые диалоговые запросы."""
+        user_id = self._shared.key(user_id)
         while True:
             entry = self._users.setdefault(user_id, _UserInputs())
             if entry.barrier is None:

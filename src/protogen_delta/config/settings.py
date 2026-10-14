@@ -59,6 +59,7 @@ class Settings:
     conversation_history_limit: int = 8
     conversation_history_ttl_seconds: float = 604800.0
     dialogue_archive_user_ids: frozenset[int] = frozenset()
+    dialogue_shared_groups: tuple[frozenset[int], ...] = ()
     user_state_retention_seconds: float = 86400.0
     proactive_check_seconds: float = 30.0
     proactive_idle_seconds: float = 5400.0
@@ -133,6 +134,23 @@ def _parse_archive_ids(
     if any(user_id >= 2**63 for user_id in ids):
         raise ValueError(name + " содержит слишком большой ID")
     return ids
+
+
+def _parse_dialogue_groups(value: str) -> tuple[frozenset[int], ...]:
+    """Группы через точку с запятой; один аккаунт не входит в две группы."""
+    groups = tuple(
+        _parse_archive_ids(part, "DIALOGUE_SHARED_GROUPS")
+        for part in value.split(";")
+        if part.strip()
+    )
+    seen: set[int] = set()
+    for group in groups:
+        if len(group) < 2 or seen.intersection(group):
+            raise ValueError(
+                "DIALOGUE_SHARED_GROUPS: нужны непересекающиеся группы от двух ID"
+            )
+        seen.update(group)
+    return groups
 
 
 def _parse_non_negative_float(
@@ -449,6 +467,9 @@ def load_settings() -> Settings:
         conversation_history_ttl_seconds=conversation_history_ttl_seconds,
         dialogue_archive_user_ids=_parse_archive_ids(
             os.getenv("DIALOGUE_ARCHIVE_USER_IDS", "")
+        ),
+        dialogue_shared_groups=_parse_dialogue_groups(
+            os.getenv("DIALOGUE_SHARED_GROUPS", "")
         ),
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,

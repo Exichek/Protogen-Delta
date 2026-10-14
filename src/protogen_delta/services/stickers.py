@@ -3,8 +3,9 @@
 import logging
 import random
 import re
+from collections import deque
 from collections.abc import Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 
 from aiogram import Bot
@@ -153,6 +154,7 @@ class _ReactionState:
     replies_since_sticker: int = 0
     last_sent_at: float | None = None
     last_file_unique_id: str | None = None
+    recent: deque[tuple[str, float]] = field(default_factory=lambda: deque(maxlen=5))
 
 
 class ContextualStickerService:
@@ -238,28 +240,36 @@ class ContextualStickerService:
         if not self.proactive_available() or declines_stickers(context_text):
             return None
         state = self._user_states.get(user_id)
-        tags = sticker_context_tags(context_text) | {state.mood, "greeting"}
+        tags = sticker_context_tags(context_text) | {state.mood}
+        if not state.history and not context_text.strip():
+            tags.add("greeting")
         if state.emotions.memory.joy >= 0.60:
             tags.add("happy")
         entries = [
-            entry for entry in self._repository.get_all() if entry.rating == "safe"
+            entry
+            for entry in self._repository.get_all()
+            if entry.rating == "safe"
+            and ("greeting" not in entry.tags or "greeting" in tags)
         ]
+        if not entries:
+            return None
+        reaction = self._reactions.setdefault(user_id, _ReactionState())
+        now = self._clock()
+        recent = {key for key, at in reaction.recent if 0 <= now - at < 1800}
+        entries = [entry for entry in entries if entry.file_unique_id not in recent]
+        if not entries:
+            return None
         best = max(len(tags.intersection(entry.tags)) for entry in entries)
         entries = [
             entry for entry in entries if len(tags.intersection(entry.tags)) == best
         ]
-        reaction = self._reactions.setdefault(user_id, _ReactionState())
-        candidates = [
-            entry
-            for entry in entries
-            if entry.file_unique_id != reaction.last_file_unique_id
-        ]
-        selected = self._choose(candidates or entries)
+        selected = self._choose(entries)
         try:
             await self._bot.send_sticker(chat_id=user_id, sticker=selected.file_id)
         except TelegramAPIError:
             logger.warning("Proactive sticker outcome=delivery_failed")
             return None
+        reaction.recent.append((selected.file_unique_id, self._clock()))
         reaction.last_file_unique_id = selected.file_unique_id
         reaction.last_sent_at = self._clock()
         reaction.replies_since_sticker = 0
@@ -323,6 +333,7 @@ class ContextualStickerService:
             entry
             for entry in self._repository.get_all()
             if (tags.intersection(entry.tags) or requested and entry.rating == "safe")
+            and ("greeting" not in entry.tags or greeting or requested)
             and (_adult_stickers_allowed(state) or entry.rating == "safe")
             and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
         ]
@@ -351,15 +362,14 @@ class ContextualStickerService:
                 tags.intersection(entry.tags)
             )
 
+        recent = {key for key, at in reaction.recent if 0 <= now - at < 1800}
+        fresh = [entry for entry in entries if entry.file_unique_id not in recent]
+        if not fresh and not requested and not greeting:
+            return False
+        entries = fresh or entries
         best_score = max(map(score, entries))
         entries = [entry for entry in entries if score(entry) == best_score]
-
-        without_repeat = [
-            entry
-            for entry in entries
-            if entry.file_unique_id != reaction.last_file_unique_id
-        ]
-        selected = self._choose(without_repeat or entries)
+        selected = self._choose(entries)
         try:
             await self._bot.send_sticker(chat_id=chat_id, sticker=selected.file_id)
         except TelegramAPIError:
@@ -368,6 +378,7 @@ class ContextualStickerService:
 
         reaction.replies_since_sticker = 0
         reaction.last_sent_at = now
+        reaction.recent.append((selected.file_unique_id, now))
         reaction.last_file_unique_id = selected.file_unique_id
         logger.info(
             "Sticker reaction outcome=sent explicit=%s rating=%s requested=%s",

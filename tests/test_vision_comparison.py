@@ -1,4 +1,4 @@
-"""Comparison never retries, leaks SDK errors, or exceeds its request budget."""
+"""Сравнение не повторяет запросы, не раскрывает ошибки SDK и не превышает бюджет."""
 
 import asyncio
 import json

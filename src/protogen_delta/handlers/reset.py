@@ -12,6 +12,7 @@ from aiogram.types import (
     Message,
 )
 
+from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
@@ -158,8 +159,15 @@ def create_reset_router(
 
         created_at = int(time())
 
+        shared_notice = (
+            "\n\nОбщая память связанных аккаунтов тоже будет удалена: архив, факты, эпизоды, "
+            "избранное и короткая история. Настройки и права второго аккаунта сохранятся."
+            if memory is not None
+            and len(memory.dialogue_members(message.from_user.id)) > 1
+            else ""
+        )
         await message.answer(
-            RESET_CONFIRMATION_TEXT,
+            RESET_CONFIRMATION_TEXT + shared_notice,
             reply_markup=_build_reset_keyboard(
                 message.from_user.id,
                 created_at,
@@ -226,7 +234,26 @@ def create_reset_router(
                 ):
                     await delete_related_memory()
 
-        await response_engine.reset_user(expected_user_id, cleanup=clear_related_memory)
+        async def reset_linked_memory() -> None:
+            assert input_operations is not None
+            async with input_operations.resetting(
+                expected_user_id, exempt=reset_requester
+            ):
+                await response_engine.reset_user(
+                    expected_user_id, cleanup=delete_related_memory
+                )
+
+        if (
+            input_operations is not None
+            and memory is not None
+            and len(memory.dialogue_members(expected_user_id)) > 1
+        ):
+            # Остановить оба аккаунта до входа в общий барьер состояния.
+            await finish_operation(reset_linked_memory())
+        else:
+            await response_engine.reset_user(
+                expected_user_id, cleanup=clear_related_memory
+            )
         if on_mode_change is not None:
             await on_mode_change(expected_user_id, "unselected")
 

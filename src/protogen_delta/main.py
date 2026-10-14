@@ -21,6 +21,7 @@ from protogen_delta.core.input_operations import (
 from protogen_delta.core.logging_config import setup_logging
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import PollingHealthMiddleware, RuntimeHealth
+from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands, set_user_commands
 from protogen_delta.core.user_state import ContentMode, UserStateStore
@@ -31,6 +32,7 @@ from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
 from protogen_delta.handlers.code_review import create_code_review_router
 from protogen_delta.handlers.creator import create_creator_router
+from protogen_delta.handlers.delivery_ledger import DeliveryLedgerMiddleware
 from protogen_delta.handlers.dialogue_archive import (
     ArchiveIncomingMiddleware,
     ArchiveOutgoingMiddleware,
@@ -66,6 +68,7 @@ from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
 from protogen_delta.repositories.code_reviews import CodeReviewsRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
+from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
 from protogen_delta.repositories.dialogue_archive import DialogueArchiveRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.favorites import FavoritesRepository
@@ -204,12 +207,17 @@ async def main() -> None:
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
+        shared_dialogue = SharedDialogueAccounts(settings.dialogue_shared_groups)
+        delivery_ledger = DeliveryLedgerRepository(settings.data_dir)
         dialogue_archive = DialogueArchiveService(
             DialogueArchiveRepository(settings.data_dir),
             settings.dialogue_archive_user_ids,
             settings.data_dir,
+            shared_dialogue,
         )
-        bot.session.middleware.register(ArchiveOutgoingMiddleware(dialogue_archive))
+        bot.session.middleware.register(
+            ArchiveOutgoingMiddleware(dialogue_archive, delivery_ledger)
+        )
         memories_repository = MemoriesRepository(settings.data_dir)
         favorites = FavoritesService(
             FavoritesRepository(settings.data_dir), settings.favorites_user_ids
@@ -247,11 +255,13 @@ async def main() -> None:
             history_ttl_seconds=settings.conversation_history_ttl_seconds,
             retention_seconds=settings.user_state_retention_seconds,
             persistence=user_state_repository,
+            shared_dialogue=shared_dialogue,
         )
         creator_messages = CreatorMessageService(
             bot, creator_messages_repository, user_states
         )
-        input_operations = InputOperations()
+        input_operations = InputOperations(shared_dialogue)
+        dispatcher.message.outer_middleware(DeliveryLedgerMiddleware(delivery_ledger))
         dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
         dispatcher.message.outer_middleware(SenderMiddleware())
         dispatcher.message.outer_middleware(
@@ -349,6 +359,9 @@ async def main() -> None:
             creator_messages=creator_messages_repository,
             dialogue_archive=dialogue_archive,
             favorites=favorites,
+            states=user_states,
+            delivery_ledger=delivery_ledger,
+            inputs=input_operations,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -632,6 +645,7 @@ async def main() -> None:
                 port=settings.mini_app_port,
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
                 response_engine=response_engine,
+                input_operations=input_operations,
                 on_mode_change=on_mode_change,
                 tools=mini_app_tools,
                 native_work=native_work,
