@@ -271,6 +271,7 @@ class DeepSeekService:
         max_retries: int = 1,
         tools: ToolExecutor | None = None,
         disable_thinking: bool = True,
+        adaptive_thinking: bool = False,
     ) -> None:
         """Инициализировать клиент DeepSeek."""
         if timeout <= 0:
@@ -287,6 +288,9 @@ class DeepSeekService:
         )
         self._model = model
         self._max_output_tokens = 4096
+        self._thinking_enabled = adaptive_thinking and not disable_thinking
+        self._adaptive_thinking = adaptive_thinking
+        self._tool_timeout = 45.0
         self._json_temperature: dict[str, Any] = {"temperature": 0}
         self._metrics = OperationMetrics()
         self._tools = tools
@@ -309,6 +313,20 @@ class DeepSeekService:
         model._tools = None
         model._max_output_tokens = 16384
         model._json_temperature = {}
+        model._thinking_enabled = True
+        model._provider_options = {
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "reasoning_effort": "high",
+        }
+        return model
+
+    def for_reasoning(self) -> "DeepSeekService":
+        """Копия для одного сложного ответа; общий клиент и профиль не переключаются."""
+        model = copy(self)
+        model._client = self._client.with_options(timeout=60.0, max_retries=0)
+        model._max_output_tokens = 8192
+        model._tool_timeout = 120.0
+        model._thinking_enabled = True
         model._provider_options = {
             "extra_body": {"thinking": {"type": "enabled"}},
             "reasoning_effort": "high",
@@ -372,10 +390,20 @@ class DeepSeekService:
         tool_names: Collection[str] | None = None,
         *,
         json_response: bool = False,
+        thinking: bool = False,
     ) -> str:
         """Получить ответ; JSON-режим исключает внешние инструменты."""
         if json_response and tool_names:
             raise ValueError("JSON-ответ нельзя объединять с внешними инструментами")
+        if thinking and self._adaptive_thinking and not self._thinking_enabled:
+            return await self.for_reasoning().chat(
+                system_prompt,
+                user_message,
+                history,
+                images,
+                tool_names,
+                json_response=json_response,
+            )
         json_options: dict[str, Any] = (
             {"response_format": {"type": "json_object"}, **self._json_temperature}
             if json_response
@@ -481,6 +509,11 @@ class DeepSeekService:
                 )
             )
 
+        if self._thinking_enabled and self._tools is not None and not json_response:
+            # В архиве хранятся только ответы, не внутренние размышления.
+            for prior in messages:
+                if prior["role"] == "assistant":
+                    cast(dict[str, Any], prior).setdefault("reasoning_content", "")
         started_at = perf_counter()
 
         try:
@@ -489,7 +522,7 @@ class DeepSeekService:
                 and not json_response
                 and (tool_names is None or tool_names)
             ):
-                async with asyncio.timeout(45):
+                async with asyncio.timeout(self._tool_timeout):
                     return await self._chat_with_tools(
                         messages,
                         system_prompt,
@@ -659,7 +692,7 @@ class DeepSeekService:
             response = await self._complete(
                 model=self._model,
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=self._max_output_tokens,
                 **self._provider_options,
             )
             _log_request_metrics(
@@ -703,6 +736,8 @@ class DeepSeekService:
                     {"role": "assistant", "content": None, "tool_calls": calls},
                 )
             )
+            if self._thinking_enabled:
+                cast(dict[str, Any], messages[-1])["reasoning_content"] = ""
             statuses = []
             for index, (url, result) in enumerate(
                 zip(selected_links, results, strict=True)
@@ -743,13 +778,18 @@ class DeepSeekService:
                     "function": {"name": forced_tool},
                 }
             started = perf_counter()
+            options = self._provider_options
+            if self._thinking_enabled and isinstance(tool_choice, dict):
+                # DeepSeek запрещает именованный tool_choice с thinking=enabled.
+                # Только выбор обязательного источника быстрый; итоговый разбор думает.
+                options = {"extra_body": {"thinking": {"type": "disabled"}}}
             response = await self._complete(
                 model=self._model,
                 messages=messages,
                 tools=cast(Any, schemas),
                 tool_choice=tool_choice,
-                max_tokens=4096,
-                **self._provider_options,
+                max_tokens=self._max_output_tokens,
+                **options,
             )
             _log_request_metrics(
                 request_type=f"chat_tools_{step}",
@@ -791,6 +831,8 @@ class DeepSeekService:
             messages.append(
                 cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
             )
+            if self._thinking_enabled:
+                cast(dict[str, Any], messages[-1]).setdefault("reasoning_content", "")
             outcomes: list[str | None] = []
             pending: list[tuple[int, asyncio.Task[str]]] = []
             for call in function_calls:
@@ -850,7 +892,7 @@ class DeepSeekService:
         final = await self._complete(
             model=self._model,
             messages=messages,
-            max_tokens=4096,
+            max_tokens=self._max_output_tokens,
             **self._provider_options,
         )
         _log_request_metrics(
@@ -908,7 +950,7 @@ class DeepSeekService:
                     {"role": "user", "content": user_message},
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=80,
+                max_tokens=100,
                 temperature=0,
                 **self._provider_options,
             )

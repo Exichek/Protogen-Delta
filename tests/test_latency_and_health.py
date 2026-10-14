@@ -96,7 +96,7 @@ def test_combined_classifier_sdk_request_is_bounded(
     assert create.await_args and create.await_count == 1
     kwargs = create.await_args.kwargs
     assert kwargs["response_format"] == {"type": "json_object"}
-    assert kwargs["max_tokens"] == 80 and kwargs["temperature"] == 0
+    assert kwargs["max_tokens"] == 100 and kwargs["temperature"] == 0
     assert len(kwargs["messages"]) == 2 and "tools" not in kwargs
 
 

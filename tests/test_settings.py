@@ -110,6 +110,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_DISABLE_THINKING", raising=False)
+    monkeypatch.delenv("LLM_ADAPTIVE_THINKING", raising=False)
     monkeypatch.delenv("MINI_APP_URL", raising=False)
     monkeypatch.delenv("MINI_APP_SERVER_ENABLED", raising=False)
     monkeypatch.delenv("MINI_APP_HOST", raising=False)
@@ -160,6 +161,7 @@ def test_load_settings_with_defaults(
     assert settings.deepseek_model == "deepseek-flash"
     assert settings.llm_provider == "deepseek"
     assert settings.llm_disable_thinking is True
+    assert settings.llm_adaptive_thinking is True
     assert settings.mini_app_url is None
     assert settings.mini_app_server_enabled is False
     assert settings.mini_app_host == "127.0.0.1"

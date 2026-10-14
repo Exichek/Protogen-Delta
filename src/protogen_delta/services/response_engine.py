@@ -5,6 +5,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
@@ -85,6 +86,7 @@ from protogen_delta.services.prompt_composer import (
     PromptComposer,
     PromptSections,
 )
+from protogen_delta.services.reasoning_policy import needs_reasoning
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
@@ -205,6 +207,7 @@ class _MessageAnalysis:
     fact_context: list[str]
     fact_update: FactsUpdate
     favorite: FavoriteReason | None = None
+    reasoning: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,7 +521,9 @@ class ResponseEngine:
             return gates
         analysis = await self._classify_and_load_facts(request, gates)
         context = await self._collect_reply_context(request, gates, analysis)
-        result = await self._call_reply_model(request, gates, context)
+        result = await self._call_reply_model(
+            request, gates, context, analysis.reasoning
+        )
         if isinstance(result, PreparedReply):
             return result
         return await self._postprocess_reply(request, gates, analysis, result)
@@ -658,6 +663,7 @@ class ResponseEngine:
 
         mood: MoodType | None
         favorite: FavoriteReason | None = None
+        reasoning = False
 
         if capability_overview:
             # The complete, benign functional question needs no paid sentiment
@@ -665,9 +671,23 @@ class ResponseEngine:
             insult_type, mood = "none", "neutral"
             user_state.mood = "neutral"
         elif self._interaction_classifier is not None:
-            interaction = await self._interaction_classifier.classify(user_message)
+            prior = user_state.history[-1] if user_state.history else None
+            reasoning_context = (
+                f"Предыдущий вопрос: {prior.user_message[:400]}\n"
+                f"Предыдущий ответ: {prior.assistant_message[:600]}"
+                if prior is not None and not prior.proactive and not is_rp
+                else ""
+            )
+            interaction = (
+                await self._interaction_classifier.classify(
+                    user_message, reasoning_context=reasoning_context
+                )
+                if reasoning_context
+                else await self._interaction_classifier.classify(user_message)
+            )
             insult_type, mood = interaction.insult, interaction.mood
             favorite = interaction.favorite
+            reasoning = interaction.reasoning is True
             if mood is not None:
                 user_state.mood = mood
         else:
@@ -714,7 +734,14 @@ class ResponseEngine:
             except Exception:
                 logger.warning("User fact profile unavailable")
 
-        return _MessageAnalysis(insult_type, mood, fact_context, fact_update, favorite)
+        reasoning = (
+            not is_rp
+            and not capability_overview
+            and needs_reasoning(user_message, reasoning)
+        )
+        return _MessageAnalysis(
+            insult_type, mood, fact_context, fact_update, favorite, reasoning
+        )
 
     async def _collect_reply_context(
         self, request: _ReplyInput, gates: _ReplyGates, analysis: _MessageAnalysis
@@ -1141,13 +1168,25 @@ class ResponseEngine:
         return fetish_context
 
     async def _call_reply_model(
-        self, request: _ReplyInput, gates: _ReplyGates, context: _ReplyContext
+        self,
+        request: _ReplyInput,
+        gates: _ReplyGates,
+        context: _ReplyContext,
+        reasoning: bool = False,
     ) -> str | PreparedReply:
         images = request.images
         attachment_text = request.attachment_text
         model_message_override = request.model_message_override
         user_message = gates.user_message
         prompt, history = context.prompt, context.history
+        reasoning_options: dict[str, Any] = {"thinking": True} if reasoning else {}
+        if reasoning:
+            prompt += (
+                "\nДля этого ответа выбран тщательный разбор задачи. Сохраняй манеру "
+                "Дельты и отвечай по существу: исходные условия, проверяемый результат "
+                "и существенная неопределённость. Сложность задачи не требует длинной "
+                "лекции; не выдумывай проверок или действий."
+            )
         try:
             model_user_message = model_message_override or user_message
             if attachment_text is not None:
@@ -1197,6 +1236,7 @@ class ResponseEngine:
                         history=history.recent,
                         images=images,
                         tool_names=tool_names,
+                        **reasoning_options,
                     )
                 else:
                     reply = await self._deepseek.chat(
@@ -1204,6 +1244,7 @@ class ResponseEngine:
                         user_message=model_user_message,
                         history=history.recent,
                         tool_names=tool_names,
+                        **reasoning_options,
                     )
         except LlmBudgetError as error:
             return PreparedReply(str(error))

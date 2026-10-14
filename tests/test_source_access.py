@@ -1,6 +1,7 @@
 """Исходники доступны только доверенному личному запросу, без файлов данных."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,35 @@ def source(tmp_path: Path) -> SourceAccess:
     (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config/private.py").write_text("secret = 'PRIVATE_SECRET'", "utf-8")
     return SourceAccess(frozenset({10}), tmp_path)
+
+
+@pytest.mark.parametrize("with_as", [False, True])
+def test_python314_exception_syntax_is_parsed_without_executing(
+    tmp_path: Path,
+    with_as: bool,
+) -> None:
+    async def run() -> None:
+        access = source(tmp_path)
+        suffix = " as error" if with_as else ""
+        # Если файл импортировать, эта строка упадёт. Обзор только разбирает AST.
+        (tmp_path / "services/sample.py").write_text(
+            "raise RuntimeError('Не исполнять исходник')\n"
+            "try:\n    pass\n"
+            f"except TypeError, ValueError, KeyError{suffix}:\n    pass\n",
+            "utf-8",
+        )
+        if with_as:
+            assert not access.snapshot_sync()
+            return
+        with source_owner(10):
+            result = await access.read_tool({"path": "services/sample.py"})
+        assert "except TypeError, ValueError, KeyError:" in result["source"]
+        assert result["python_version"] == ".".join(
+            str(part) for part in sys.version_info[:3]
+        )
+        assert "ast.parse до маскирования" in result["syntax_check"]
+
+    asyncio.run(run())
 
 
 def test_canonical_alias_to_private_directory_is_not_indexed(
