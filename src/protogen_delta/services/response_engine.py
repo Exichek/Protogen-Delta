@@ -92,7 +92,7 @@ from protogen_delta.services.prompt_composer import (
     PromptSections,
 )
 from protogen_delta.services.reasoning_policy import needs_reasoning
-from protogen_delta.services.release_journal import ReleaseJournal
+from protogen_delta.services.release_journal import ReleaseJournal, is_release_question
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
 from protogen_delta.services.scene_continuity import scene_continuity_context
@@ -635,7 +635,11 @@ class ResponseEngine:
         )
 
         technical_topic = capability_overview or (
-            PromptComposer.is_technical(user_message) and not contains_rp_action
+            (
+                PromptComposer.is_technical(user_message)
+                or is_release_question(user_message)
+            )
+            and not contains_rp_action
         )
 
         is_rp = user_state.roleplay_active and not technical_topic
@@ -1065,7 +1069,9 @@ class ResponseEngine:
         )
         if self._release_journal is not None and use_personal_facts:
             try:
-                journal = await self._release_journal.context(user_id)
+                journal = await self._release_journal.context(
+                    user_id, question=user_message
+                )
                 trusted_input_context = (
                     "\n\n".join(
                         part for part in (trusted_input_context, journal) if part
