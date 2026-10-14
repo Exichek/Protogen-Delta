@@ -73,6 +73,63 @@ def test_zip_symlink_is_never_read() -> None:
     assert "TARGET_MARKER" not in archives.extract_zip(output.getvalue()).text
 
 
+def test_small_repository_with_over_200_entries_is_read_and_listing_keeps_text() -> (
+    None
+):
+    """Малый проект с сотнями файлов не считается слишком большим из-за числа записей."""
+    entries = {"main.py": b"PROJECT_CONTENT_MARKER"}
+    entries.update(
+        {f"src/{'long_name_' * 10}{index}.py": b"pass" for index in range(377)}
+    )
+    result = archives.extract_zip(_zip(entries))
+    assert result.truncated and "PROJECT_CONTENT_MARKER" in result.text
+    assert "378 записей" in result.text and len(result.text) <= 60000
+    assert "Список имён показан частично" in result.text
+
+
+def test_heavy_nested_document_is_skipped_without_rejecting_zip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Превышение лимита одного DOCX не мешает прочитать соседние исходники."""
+    from protogen_delta.services.documents import ExtractedDocument
+
+    def read(data: bytes, name: str, mime: str | None) -> ExtractedDocument:
+        if name.endswith(".docx"):
+            raise DocumentTooLargeError("Office limit")
+        return ExtractedDocument("SURVIVING_CODE", "TEXT", False)
+
+    monkeypatch.setattr(archives, "extract_document", read)
+    result = archives.extract_zip(_zip({"large.docx": b"office", "main.py": b"code"}))
+    assert result.truncated and "SURVIVING_CODE" in result.text
+    assert "внутренний документ превышает лимиты" in result.text
+
+
+def test_archive_limit_reason_survives_real_worker() -> None:
+    """Родитель получает число записей, а не общую ошибку про мегабайты."""
+
+    async def run() -> None:
+        data = _zip({f"{index}.txt": b"hi" for index in range(2001)})
+        with pytest.raises(archives.ArchiveLimitError, match="2001 записей") as caught:
+            await NativeWorkPool().run(archives.extract_zip, data)
+        assert caught.value.reason == "entries"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "reason,actual", [("bad", 1), ("entries", True), ("expanded", -1)]
+)
+def test_invalid_archive_limit_metadata_is_rejected(reason: str, actual: int) -> None:
+    from protogen_delta.services.native_work import NativeWorkError
+
+    with pytest.raises(ValueError):
+        archives.ArchiveLimitError(reason, actual)
+    with pytest.raises(NativeWorkError):
+        NativeWorkPool._decode(
+            "archive", {"error": "archive_limit", "reason": reason, "actual": actual}
+        )
+
+
 @pytest.mark.parametrize(
     "field,value", [("MAX_ZIP_BYTES", 3), ("MAX_ZIP_EXPANDED", 3), ("MAX_ZIP_FILES", 0)]
 )

@@ -210,6 +210,20 @@ class NativeWorkPool:
             if not isinstance(error, str):
                 raise NativeWorkError("Некорректный ответ обработчика файла.")
             if operation in {"document", "archive"}:
+                if error == "archive_limit":
+                    from protogen_delta.services.archive_documents import (
+                        ArchiveLimitError,
+                    )
+
+                    reason, actual = value.get("reason"), value.get("actual")
+                    if (
+                        not isinstance(reason, str)
+                        or reason not in {"compressed", "expanded", "entries"}
+                        or type(actual) is not int
+                        or not 0 <= actual < 2**63
+                    ):
+                        raise NativeWorkError("Некорректная причина отказа ZIP.")
+                    raise ArchiveLimitError(reason, actual)
                 errors = {
                     "too_large": DocumentTooLargeError,
                     "unsupported": UnsupportedDocumentError,

@@ -21,6 +21,7 @@ def apply_limits() -> None:
 
 
 def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
+    from protogen_delta.services.archive_documents import ArchiveLimitError
     from protogen_delta.services.deepseek import ImageInput
     from protogen_delta.services.documents import (
         DocumentReadError,
@@ -109,6 +110,12 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
             for i in images
         ]
         return value
+    except ArchiveLimitError as error:
+        return {
+            "error": "archive_limit",
+            "reason": error.reason,
+            "actual": error.actual,
+        }
     except DocumentTooLargeError:
         return {"error": "too_large"}
     except UnsupportedDocumentError:

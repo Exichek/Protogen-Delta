@@ -12,6 +12,7 @@ from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.failure_reply import send_failure_reply
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.services.archive_documents import ArchiveLimitError
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.documents import (
@@ -112,6 +113,9 @@ def create_document_router(
                 **arguments,
             )
         except NativeWorkError as error:
+            await message.answer(str(error))
+            return
+        except ArchiveLimitError as error:
             await message.answer(str(error))
             return
         except DocumentTooLargeError:
