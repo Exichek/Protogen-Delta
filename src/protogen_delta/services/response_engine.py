@@ -91,6 +91,7 @@ from protogen_delta.services.prompt_composer import (
     PromptComposer,
     PromptSections,
 )
+from protogen_delta.services.public_github import GITHUB_TOOLS, PublicGithubReader
 from protogen_delta.services.reasoning_policy import needs_reasoning
 from protogen_delta.services.release_journal import ReleaseJournal, is_release_question
 from protogen_delta.services.rp_profile_context import saved_character_context
@@ -221,6 +222,7 @@ class _MessageAnalysis:
 class _ReplyContext:
     prompt: str
     history: HistorySelection
+    github_active: bool = False
 
 
 class ResponseEngine:
@@ -244,6 +246,7 @@ class ResponseEngine:
         creator_messages: CreatorMessageService | None = None,
         appearance_model: VisualModel | None = None,
         release_journal: ReleaseJournal | None = None,
+        github_reader: PublicGithubReader | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -287,6 +290,7 @@ class ResponseEngine:
         self._interaction_classifier = interaction_classifier
         self._creator_messages = creator_messages
         self._release_journal = release_journal
+        self._github_reader = github_reader
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
         self._delivering_users: set[StateKey] = set()
 
@@ -1080,6 +1084,16 @@ class ResponseEngine:
                 )
             except Exception:
                 logger.warning("Журнал сборки временно недоступен")
+        github_context = ""
+        if self._github_reader is not None and not is_rp:
+            try:
+                github_context = await self._github_reader.context()
+            except Exception:
+                logger.warning("Контекст выбранного репозитория временно недоступен")
+            if github_context:
+                trusted_input_context = "\n\n".join(
+                    part for part in (trusted_input_context, github_context) if part
+                )
 
         prompt = self._build_prompt(
             user_message=user_message,
@@ -1123,7 +1137,7 @@ class ResponseEngine:
             capability_overview=capability_overview,
         )
 
-        return _ReplyContext(prompt, history)
+        return _ReplyContext(prompt, history, bool(github_context))
 
     def _append_scene_context(
         self,
@@ -1250,6 +1264,15 @@ class ResponseEngine:
             tool_names = self._prompt_composer.select_tools(
                 user_message, history.recent
             )
+            if context.github_active and (
+                gates.technical_topic
+                or re.search(
+                    r"репо|проект|реализ|функци|систем|память|архитект|у них|там|README",
+                    user_message,
+                    re.I,
+                )
+            ):
+                tool_names |= GITHUB_TOOLS
             archive_owner = (
                 request.user_id
                 if request.use_personal_facts

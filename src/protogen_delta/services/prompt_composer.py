@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
 
 _LORE_PATTERN = re.compile(
     r"\b(?:протоген\w*|киборг\w*|нанит\w*|визор\w*|кто\s+ты|"
@@ -161,7 +162,7 @@ class PromptComposer:
 
     @staticmethod
     def is_technical(message: str) -> bool:
-        return bool(_TECHNICAL_PATTERN.search(message))
+        return bool(_TECHNICAL_PATTERN.search(message) or github_links(message))
 
     @staticmethod
     def select_tools(
@@ -169,6 +170,10 @@ class PromptComposer:
     ) -> frozenset[str]:
         """Выбрать только инструменты, нужные текущему запросу."""
         selected: set[str] = set()
+        if github_links(user_message) or re.search(
+            r"\b(?:github|гитхаб\w*|репозитори\w*|репо)\b", user_message, re.I
+        ):
+            selected.update(GITHUB_TOOLS)
         if _URL_PATTERN.search(user_message):
             selected.add("fetch_web_page")
         if _WEB_PATTERN.search(user_message):

@@ -33,6 +33,7 @@ from protogen_delta.services.llm_accounting import (
     record_response_usage,
 )
 from protogen_delta.services.prompt_composer import PromptComposer
+from protogen_delta.services.public_github import github_links
 from protogen_delta.services.source_access import current_source_owner
 from protogen_delta.services.tools import ToolExecutor, get_current_time
 
@@ -715,15 +716,28 @@ class DeepSeekService:
         links = (
             review_links(user_message) if "fetch_web_page" in available_tools else ()
         )
+        repository_links = (
+            github_links(user_message) if "github_get_repo" in available_tools else ()
+        )
+        links = tuple(dict.fromkeys((*repository_links, *links)))
         footer = ""
         if links:
             selected_links = links[:6]
+            link_requests = [
+                (
+                    (
+                        "github_get_repo",
+                        {"url": url, "activate": "yes" if index == 0 else "no"},
+                    )
+                    if url in repository_links
+                    else ("fetch_web_page", {"url": url})
+                )
+                for index, url in enumerate(selected_links)
+            ]
             results = await asyncio.gather(
                 *(
-                    self._tools.execute(
-                        "fetch_web_page", json.dumps({"url": url}, ensure_ascii=False)
-                    )
-                    for url in selected_links
+                    self._tools.execute(name, json.dumps(arguments, ensure_ascii=False))
+                    for name, arguments in link_requests
                 )
             )
             calls = [
@@ -731,11 +745,11 @@ class DeepSeekService:
                     "id": f"delta_links_{index}",
                     "type": "function",
                     "function": {
-                        "name": "fetch_web_page",
-                        "arguments": json.dumps({"url": url}),
+                        "name": name,
+                        "arguments": json.dumps(arguments),
                     },
                 }
-                for index, url in enumerate(selected_links)
+                for index, (name, arguments) in enumerate(link_requests)
             ]
             messages.append(
                 cast(
@@ -829,6 +843,9 @@ class DeepSeekService:
                 "search_source",
                 "search_dialogue",
                 "search_favorites",
+                "github_list_tree",
+                "github_read_file",
+                "github_search_files",
             }
             parallel = all(
                 call.function.name not in available_tools
