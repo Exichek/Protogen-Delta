@@ -1,6 +1,7 @@
 """Реальные функции, полный вопрос о возможностях и один основной запрос."""
 
 import asyncio
+import sys
 from dataclasses import replace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
@@ -26,6 +27,38 @@ from protogen_delta.services.memory import MemoryService
 
 def _settings() -> Settings:
     return Settings(telegram_token="test", deepseek_api_key="test", art_chat_id=1)
+
+
+@pytest.mark.parametrize("provider", ["deepseek", "openai-compatible"])
+def test_implementation_facts_follow_settings_without_exposing_credentials(
+    provider: str,
+) -> None:
+    settings = replace(
+        _settings(),
+        llm_provider=provider,
+        deepseek_model="test-model",
+        deepseek_api_key="PRIVATE_API_VALUE",
+    )
+    facts = build_capabilities(settings).implementation
+    assert "Python " + ".".join(str(p) for p in sys.version_info[:3]) in facts
+    assert "aiogram" in facts and "SQLite" in facts and "test-model" in facts
+    assert "PRIVATE_API_VALUE" not in facts
+    assert ("провайдера DeepSeek" in facts) is (provider == "deepseek")
+    assert "не отвечай общим «не знаю»" in facts
+
+
+def test_question_about_implementation_receives_facts_and_ends_no_scene() -> None:
+    engine, _, model, *_ = _create_engine()
+    facts = build_capabilities(_settings()).implementation
+    engine._config = replace(engine._config, implementation_context=facts)
+    state = engine._user_states.get(42)
+    state.roleplay_active = True
+    state.history.append(ConversationTurn("На чём ты создан?", "Не знаю провайдера"))
+    asyncio.run(engine.respond(42, "И теперь знаешь, на чём ты создан?"))
+    prompt = model.chat.await_args.kwargs["system_prompt"]
+    assert facts in prompt and "SYSTEM PROMPT" in prompt
+    assert "RP PROMPT" not in prompt
+    assert state.roleplay_active
 
 
 @pytest.mark.parametrize(

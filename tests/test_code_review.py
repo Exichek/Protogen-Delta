@@ -49,6 +49,35 @@ def test_review_receives_runtime_and_parse_facts_and_cache_is_explicit(
     asyncio.run(run())
 
 
+def test_review_validates_model_diff_before_cache_and_delivery(tmp_path: Path) -> None:
+    async def run() -> None:
+        access = source(tmp_path)
+        model = AsyncMock(spec=DeepSeekService)
+        model.chat.return_value = (
+            "Предложение для обсуждения:\n```diff\n"
+            "--- a/src/protogen_delta/services/sample.py\n"
+            "+++ b/src/protogen_delta/services/sample.py\n"
+            "@@ -1 +1 @@\n-value = 42\n+value = 43\n```\n"
+        )
+        original = (tmp_path / "services/sample.py").read_text("utf-8")
+        repo = CodeReviewsRepository(tmp_path)
+        service = CodeReviewService(
+            AsyncMock(spec=Bot),
+            model,
+            access,
+            repo,
+            clock=lambda: 10000,
+        )
+        report = await service.review(10, "services/sample.py")
+        assert report and "Контекст строк совпал" in report
+        assert "Код не изменялся" in report and "AST предложения прошёл" in report
+        assert (await repo.load(10)).report == report  # type: ignore[union-attr]
+        assert (tmp_path / "services/sample.py").read_text("utf-8") == original
+        assert "администратор решит" in model.chat.await_args.kwargs["system_prompt"]
+
+    asyncio.run(run())
+
+
 def test_allowed_command_returns_report_and_long_automatic_notice_keeps_full_cache(
     tmp_path: Path,
 ) -> None:

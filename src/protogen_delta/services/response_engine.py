@@ -165,6 +165,7 @@ class ResponseEngineConfig:
     history_live_turns: int = 4
     capabilities_context: str = ""
     capabilities_overview_context: str = ""
+    implementation_context: str = ""
     adult_conversation_prompt: str = ""
     female_body_prompt: str = ""
     adult_body_male_prompt: str = ""
@@ -802,6 +803,7 @@ class ResponseEngine:
             (
                 "Архив личной переписки с поиском старых сообщений доступен в этом ходе. "
                 "Сохранённый архив не равен целиком загруженной истории: используй поиск, когда нужны старые реплики."
+                " Отдельная команда пользователя для поиска своего разрешённого архива не требуется."
                 if archive_enabled
                 else "Поиск полного личного архива в этом ходе недоступен. Переданный контекст и профиль "
                 "не означают, что ты видишь всю прошлую переписку."
@@ -1013,7 +1015,16 @@ class ResponseEngine:
         trusted_input_context = (
             "\n\n".join(
                 part
-                for part in (trusted_input_context, character_context, style_context)
+                for part in (
+                    (
+                        self._config.implementation_context
+                        if technical_topic and not is_rp
+                        else ""
+                    ),
+                    trusted_input_context,
+                    character_context,
+                    style_context,
+                )
                 if part
             )
             or None
