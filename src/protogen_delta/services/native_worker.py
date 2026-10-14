@@ -58,8 +58,13 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
                     "ascii"
                 )
             }
-        if operation == "document":
-            result = extract_document(data, *args, **kwargs)
+        if operation in {"document", "archive"}:
+            if operation == "archive":
+                from protogen_delta.services.archive_documents import extract_zip
+
+                result = extract_zip(data)
+            else:
+                result = extract_document(data, *args, **kwargs)
             value: dict[str, Any] = {
                 "text": result.text,
                 "kind": result.kind,
@@ -119,12 +124,16 @@ def perform(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
 def main() -> None:
     apply_limits()
     source, target, request = map(Path, sys.argv[1:])
-    if (
-        not 0 < source.stat().st_size <= 20 * 1024 * 1024
-        or request.stat().st_size > 8192
-    ):
+    if request.stat().st_size > 8192:
         raise ValueError("input_size")
     parsed_request = json.loads(request.read_text("utf-8"))
+    maximum_input = (
+        50 * 1024 * 1024
+        if parsed_request.get("operation") == "archive"
+        else 20 * 1024 * 1024
+    )
+    if not 0 < source.stat().st_size <= maximum_input:
+        raise ValueError("input_size")
     if parsed_request.get("operation") == "speech":
         from protogen_delta.services.speech_audio import prepare_speech_audio
 
@@ -137,7 +146,7 @@ def main() -> None:
             target.write_bytes(b'{"error":"failed"}')
         return
     payload = json.dumps(
-        perform(source.read_bytes(), json.loads(request.read_text("utf-8"))),
+        perform(source.read_bytes(), parsed_request),
         ensure_ascii=False,
     ).encode("utf-8")
     if len(payload) > MAX_OUTPUT:

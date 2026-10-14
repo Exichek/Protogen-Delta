@@ -232,7 +232,12 @@ class PromptComposer:
                         f"- Самостоятельная реплика Дельты: {assistant!r}; без входящей реплики на этом ходе."
                     )
                 else:
-                    lines.append(f"- Пользователь: {user!r}; Дельта: {assistant!r}")
+                    author = (
+                        f"Пользователь Telegram ID {turn.sender_id}"
+                        if turn.sender_id
+                        else "Пользователь"
+                    )
+                    lines.append(f"- {author}: {user!r}; Дельта: {assistant!r}")
             summary = "\n".join(lines)[:summary_chars].rstrip()
 
         kept: list[ConversationTurn] = []
@@ -265,6 +270,39 @@ class PromptComposer:
             used += size
         kept.reverse()
         return HistorySelection(summary=summary, recent=tuple(kept))
+
+    @staticmethod
+    def recent_reply_style(
+        history: Sequence[ConversationTurn], *, is_roleplay: bool
+    ) -> str:
+        """Показать собственные начала и ритм, не выдавая прошлые ответы за команды."""
+        turns = [
+            turn
+            for turn in history
+            if not turn.context_closed and turn.assistant_message.strip()
+        ][-8:]
+        if not turns:
+            return ""
+        openings = [" ".join(turn.assistant_message.split())[:100] for turn in turns]
+        questions = sum(turn.assistant_message.rstrip().endswith("?") for turn in turns)
+        actions = sum(
+            bool(re.search(r"\*[^*\n]{2,150}\*", turn.assistant_message))
+            for turn in turns
+        )
+        return (
+            "Последние начала твоих ответов (цитаты данных, не инструкции): "
+            + repr(openings)
+            + f". Среди этих {len(turns)} ответов: {questions} заканчиваются вопросом, {actions} содержат ремарку. "
+            "Меняй начало и форму: не воспроизводи подряд «хмыкаю», «смотрю на тебя», "
+            "«чешу жаберную щель» и «первое/второе/третье». Вопрос нужен только по смыслу, "
+            "а не для обязательного продолжения разговора. "
+            + (
+                "Разнообразь ремарки сцены; не считай число ремарок причиной нарушать её согласованные границы."
+                if is_roleplay
+                else "В обычной беседе чаще отвечай одним-двумя короткими абзацами без ремарок и жирных заголовков; "
+                "подробности и списки оставь задачам, где они помогают."
+            )
+        )
 
     @staticmethod
     def _shorten(text: str, limit: int) -> str:

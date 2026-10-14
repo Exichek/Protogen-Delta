@@ -40,6 +40,7 @@ class ConversationTurn:
     assistant_message: str
     context_closed: bool = False
     proactive: bool = False
+    sender_id: int | None = None
 
 
 @dataclass(slots=True)

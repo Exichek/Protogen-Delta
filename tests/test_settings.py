@@ -18,7 +18,9 @@ def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "abc", "9223372036854775808"])
-@pytest.mark.parametrize("name", ["CREATOR_IDS", "CODE_REVIEW_USER_IDS"])
+@pytest.mark.parametrize(
+    "name", ["CREATOR_IDS", "CODE_REVIEW_USER_IDS", "FAVORITES_USER_IDS"]
+)
 def test_creator_ids_reject_invalid_accounts(
     monkeypatch: pytest.MonkeyPatch, value: str, name: str
 ) -> None:

@@ -299,6 +299,7 @@ def create_admin_router(
                 "translation": "Переводчик",
                 "converter": "Конвертер медиа",
                 "reminders": "Напоминания",
+                "archives": "ZIP-архивы",
             }
             outcomes = {
                 "unknown": "ещё нет запросов",

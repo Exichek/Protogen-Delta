@@ -41,7 +41,9 @@ DOCUMENT_DOWNLOAD_ERROR_REPLY = (
 DOCUMENT_READ_ERROR_REPLY = (
     "Не смог прочитать этот документ: возможно, он повреждён или защищён паролем."
 )
-UNSUPPORTED_DOCUMENT_REPLY = "Этот формат пока не разбираю. Пришли TXT, Markdown, код, JSON, CSV, PDF, DOCX или XLSX."
+UNSUPPORTED_DOCUMENT_REPLY = (
+    "Этот формат пока не разбираю. Пришли текст, код, PDF, DOCX, XLSX или ZIP."
+)
 
 
 def _safe_file_name(file_name: str | None) -> str:
@@ -80,7 +82,12 @@ def create_document_router(
             await message.answer(RATE_LIMIT_REPLY)
             return
         if document.file_size is not None and document.file_size > MAX_DOCUMENT_BYTES:
-            await message.answer(DOCUMENT_TOO_LARGE_REPLY)
+            await message.answer(
+                "В чат можно прислать ZIP до 20 МБ; архив до 50 МБ загрузи в Mini App, "
+                "вкладка «Полезное» → «ZIP-архив»."
+                if (document.file_name or "").lower().endswith(".zip")
+                else DOCUMENT_TOO_LARGE_REPLY
+            )
             return
 
         destination = io.BytesIO()

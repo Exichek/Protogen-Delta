@@ -18,8 +18,10 @@ from protogen_delta.core.conversation_safety import (
     validate_stopword,
 )
 from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
+from protogen_delta.core.operation_metrics import Measurement, OperationMetrics
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
+from protogen_delta.core.sender import Sender, current_sender
 from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.core.user_state import ContentMode, UserState, UserStateStore
 from protogen_delta.miniapp.auth import (
@@ -38,7 +40,9 @@ from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_upload,
 )
+from protogen_delta.services.archive_documents import MAX_ZIP_BYTES, extract_zip
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.documents import DocumentError
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
 from protogen_delta.services.media_conversion import (
     MIME_TYPES,
@@ -47,7 +51,7 @@ from protogen_delta.services.media_conversion import (
     MediaConversionService,
 )
 from protogen_delta.services.media_conversion_worker import MAX_INPUT, validate_options
-from protogen_delta.services.native_work import NativeWorkPool
+from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
     ResponseBusyError,
@@ -154,11 +158,18 @@ class MiniAppServer:
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
         self._translation_export_slots = asyncio.Semaphore(2)
         self._translation_export_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._archive_pending: set[int] = set()
+        self._archive_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._archive_slots = asyncio.Semaphore(2)
+        self._archive_metrics = OperationMetrics(capacity=2)
         self._runner: web.AppRunner | None = None
         self._media_converter = media_converter or MediaConversionService()
         if self._runtime_health is not None:
             self._runtime_health.add_diagnostics(
                 "converter", self._media_converter.snapshot
+            )
+            self._runtime_health.add_diagnostics(
+                "archives", self._archive_metrics.snapshot
             )
 
     def application(self) -> web.Application:
@@ -192,6 +203,7 @@ class MiniAppServer:
                 web.post("/api/tools/{tool}", self._run_tool),
                 web.post("/api/tools/translate/file", self._translate_file),
                 web.post("/api/tools/translate/export", self._export_translation),
+                web.post("/api/tools/archive", self._inspect_archive),
                 web.post("/api/tools/convert/file", self._convert_media),
                 web.delete("/api/tools/convert/{token}", self._delete_conversion),
                 web.get("/converted-media/{token}/{kind}", self._conversion_file),
@@ -960,6 +972,128 @@ class MiniAppServer:
         finally:
             if acquired:
                 self._translation_export_slots.release()
+
+    async def _inspect_archive(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if user.id in self._archive_pending or not self._archive_limiter.allow(user.id):
+            raise web.HTTPTooManyRequests(
+                text="Архив уже обрабатывается или запросы идут слишком часто."
+            )
+        try:
+            raw = request.headers.get("X-Archive-Options", "")
+            if len(raw) > 7500:
+                raise ValueError("Слишком длинные параметры архива.")
+            options = json.loads(unquote(raw, errors="strict"))
+            if not isinstance(options, dict) or set(options) != {
+                "file_name",
+                "question",
+                "analyze",
+            }:
+                raise ValueError("Некорректные параметры архива.")
+            name, question, analyze = (
+                options["file_name"],
+                options["question"],
+                options["analyze"],
+            )
+            if (
+                not isinstance(name, str)
+                or not 1 <= len(name) <= 160
+                or not name.lower().endswith(".zip")
+                or not isinstance(question, str)
+                or len(question) > 2000
+                or type(analyze) is not bool
+            ):
+                raise ValueError("Нужен ZIP и вопрос до 2000 символов.")
+            if analyze and self._response_engine is None:
+                raise web.HTTPServiceUnavailable(
+                    text="Разбор с Дельтой сейчас недоступен."
+                )
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(text="Проверь ZIP и параметры запроса.") from error
+        if (
+            request.content_length is not None
+            and request.content_length > MAX_ZIP_BYTES
+        ):
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_ZIP_BYTES,
+                actual_size=request.content_length,
+                text="ZIP должен быть до 50 МБ.",
+            )
+        self._archive_pending.add(user.id)
+        try:
+            with self._archive_metrics.measure(queued=True) as measurement:
+                return await self._read_archive(
+                    request, user, name, question, analyze, measurement
+                )
+        finally:
+            self._archive_pending.discard(user.id)
+
+    async def _read_archive(
+        self,
+        request: web.Request,
+        user: MiniAppUser,
+        name: str,
+        question: str,
+        analyze: bool,
+        measurement: Measurement,
+    ) -> web.Response:
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(self._archive_slots.acquire(), 0.1)
+                acquired = True
+                measurement.start()
+            except TimeoutError as error:
+                raise web.HTTPTooManyRequests(
+                    text="Обработка архивов занята. Попробуй немного позже."
+                ) from error
+            async with asyncio.timeout(90):
+                data = await request.clone(client_max_size=MAX_ZIP_BYTES + 1).read()
+            if len(data) > MAX_ZIP_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=MAX_ZIP_BYTES,
+                    actual_size=len(data),
+                    text="ZIP должен быть до 50 МБ.",
+                )
+            document = await self._native_work.run(extract_zip, data)
+            reply = ""
+            if analyze:
+                assert self._response_engine is not None
+                token = current_sender.set(
+                    Sender(user.id, user.first_name, user.username or "")
+                )
+                try:
+                    reply = await self._response_engine.respond(
+                        user.id,
+                        question.strip()
+                        or "Покажи, что есть в архиве, и коротко разбери его содержимое.",
+                        attachment_name=name,
+                        attachment_text=document.text
+                        + (
+                            "\n[ZIP прочитан частично. Не считай пропущенные файлы прочитанными.]"
+                            if document.truncated
+                            else ""
+                        ),
+                    )
+                finally:
+                    current_sender.reset(token)
+            return web.json_response(
+                {
+                    "text": document.text,
+                    "reply": reply,
+                    "truncated": document.truncated,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        except (DocumentError, NativeWorkError) as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Загрузка ZIP заняла слишком много времени."
+            ) from error
+        finally:
+            if acquired:
+                self._archive_slots.release()
 
     async def _run_tool(self, request: web.Request) -> web.Response:
         """Авторизовать владельца до разбора тела и запуска инструмента."""

@@ -25,11 +25,12 @@ EVENT_LABELS = {
 
 @dataclass(frozen=True, slots=True)
 class EmotionalEvent:
-    """Причина хранится как проверенный тип события, без текста переписки."""
+    """Учтённый тип сигнала и короткий фрагмент его повода."""
 
     kind: str
     at: float
     creator: bool = False
+    source: str = ""
 
 
 @dataclass(slots=True)
@@ -66,13 +67,17 @@ class EmotionalMemory:
             tiredness=-0.02 * hours,
         )
 
-    def observe(self, kinds: tuple[str, ...], at: float, *, creator: bool) -> bool:
+    def observe(
+        self, kinds: tuple[str, ...], at: float, *, creator: bool, source: str = ""
+    ) -> bool:
         """Вернуть, принят ли новый позитивный сигнал для отношений."""
         if (
             not math.isfinite(at)
             or at < 0
             or at > 253402300799
             or any(kind not in EVENT_LABELS for kind in kinds)
+            or not isinstance(source, str)
+            or len(source) > 160
         ):
             raise ValueError("Некорректное эмоциональное событие")
         if creator:
@@ -100,7 +105,7 @@ class EmotionalMemory:
                 self.adjust(sadness=0.025)
             elif kind == "worry":
                 self.adjust(anxiety=0.03)
-            self.events.append(EmotionalEvent(kind, at, creator))
+            self.events.append(EmotionalEvent(kind, at, creator, source))
         self.events = self.events[-8:]
         self.adjust(tiredness=0.001)
         return permitted
@@ -154,15 +159,18 @@ class EmotionalMemory:
                     return fallback
                 at = event.get("at")
                 creator = event.get("creator", False)
+                source = event.get("source", "")
                 if (
                     not isinstance(at, (int, float))
                     or isinstance(at, bool)
                     or not math.isfinite(at)
                     or not 0 <= at <= 253402300799
                     or type(creator) is not bool
+                    or not isinstance(source, str)
+                    or len(source) > 160
                 ):
                     return fallback
-                events.append(EmotionalEvent(event["kind"], at, creator))
+                events.append(EmotionalEvent(event["kind"], at, creator, source))
             return cls(
                 **values,
                 creator_contacts=contacts,

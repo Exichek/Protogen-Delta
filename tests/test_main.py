@@ -146,6 +146,7 @@ def test_main_builds_application_and_starts_polling(
         "personality/core.txt": "CORE PROMPT",
         "initiative_system": "INITIATIVE PROMPT",
         "emotional_system": "EMOTIONAL SYSTEM PROMPT",
+        "favorite_selection": "FAVORITE SELECTION PROMPT",
         "personality/protogen_lore.txt": "LORE PROMPT",
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
@@ -437,6 +438,7 @@ def test_main_builds_application_and_starts_polling(
         call("conversation_visual"),
         call("voice_examples"),
         call("scene_examples"),
+        call("favorite_selection"),
     ]
 
     setup_logging_mock.assert_called_once_with(
@@ -504,12 +506,14 @@ def test_main_builds_application_and_starts_polling(
     inputs = reset_router_call.kwargs["input_operations"]
     assert isinstance(inputs, main_module.InputOperations)
     outer = dispatcher_mock.message.outer_middleware.call_args_list
-    assert len(outer) == 6
+    assert len(outer) == 7
     assert isinstance(outer[0].args[0], main_module.LlmUserMiddleware)
     dispatcher_mock.callback_query.outer_middleware.assert_called_once()
     outer = outer[1:]
     assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
     assert outer[0].args[0]._operations is inputs
+    assert isinstance(outer[1].args[0], main_module.SenderMiddleware)
+    outer = [outer[0], *outer[2:]]
     assert isinstance(outer[1].args[0], main_module.ProactiveIncomingMiddleware)
     assert outer[1].args[0]._operations is inputs
     assert isinstance(outer[2].args[0], main_module.ArchiveIncomingMiddleware)
@@ -553,7 +557,7 @@ def test_main_builds_application_and_starts_polling(
         user_states, ANY, restrict_minor=ANY
     )
 
-    assert dispatcher_mock.include_router.call_count == 22
+    assert dispatcher_mock.include_router.call_count == 23
     assert isinstance(
         reset_router_call.kwargs["reminders"], main_module.ReminderService
     )

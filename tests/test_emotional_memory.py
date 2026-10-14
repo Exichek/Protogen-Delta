@@ -39,6 +39,30 @@ def test_positive_signals_accumulate_with_rate_limit_and_silence_is_not_punishme
     assert len(memory.events) == 3
 
 
+@pytest.mark.parametrize(
+    "text,allowed",
+    [
+        ("Спасибо, исправили загрузку архивов!", True),
+        ("Спасибо, пароль MY_PASSWORD_993 теперь работает", False),
+        ("Спасибо, вот токен", False),
+    ],
+)
+def test_reason_excerpt_is_bounded_saved_and_not_a_secret(
+    text: str, allowed: bool
+) -> None:
+    state = UserState()
+    apply_interaction_effects(
+        state, mood="sweet", insult_type="none", text=text, at=1000
+    )
+    memory = state.emotions.memory
+    assert bool(memory.events[-1].source) is allowed
+    restored = EmotionalMemory.decode(memory.encode())
+    assert restored == memory
+    if allowed:
+        assert "архивов" in " ".join(build_state_context(state))
+    assert "MY_PASSWORD_993" not in memory.encode()
+
+
 @pytest.mark.parametrize("kind", list(EVENT_LABELS))
 def test_each_supported_event_roundtrips_without_raw_dialogue(kind: str) -> None:
     memory = EmotionalMemory()

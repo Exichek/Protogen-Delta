@@ -260,7 +260,8 @@ def test_worker_serializes_real_results(
 @pytest.mark.parametrize(
     "data,name,error",
     [
-        (b"text", "x.zip", "unsupported"),
+        (b"text", "x.rar", "unsupported"),
+        (b"text", "x.zip", "read_error"),
         (b"broken", "x.pdf", "read_error"),
         (b"", "x.txt", "read_error"),
     ],

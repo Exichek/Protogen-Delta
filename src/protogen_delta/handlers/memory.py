@@ -29,6 +29,7 @@ def create_memory_router(memory: MemoryService, states: UserStateStore) -> Route
             if len(parts) == 3 and parts[1] == "forget" and parts[2] in FACT_LABELS:
                 result = await memory.forget_facts(user_id, parts[2])
                 state.history.clear()
+                state.emotions.memory.events.clear()
                 await message.answer(
                     f"Убрано из профиля: {FACT_LABELS[parts[2]]}. Записей: {result.changed}."
                 )

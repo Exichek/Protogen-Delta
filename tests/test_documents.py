@@ -45,8 +45,10 @@ def test_rejects_binary_and_unsupported_documents() -> None:
     """Произвольный бинарный файл не должен маскироваться под текст."""
     with pytest.raises(DocumentReadError, match="бинарный"):
         extract_document(b"abc\x00def", "fake.txt", "text/plain")
-    with pytest.raises(UnsupportedDocumentError):
+    with pytest.raises(DocumentReadError):
         extract_document(b"data", "archive.zip", "application/zip")
+    with pytest.raises(UnsupportedDocumentError):
+        extract_document(b"data", "archive.rar", "application/x-rar-compressed")
     with pytest.raises(DocumentReadError, match="не найден"):
         extract_document(b"   ", "empty.txt", "text/plain")
 
