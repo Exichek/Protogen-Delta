@@ -29,6 +29,7 @@ from protogen_delta.handlers.dialogue_archive import (
     ArchiveOutgoingMiddleware,
     archive_edit,
     archive_message,
+    telegram_source_key,
 )
 from protogen_delta.repositories.dialogue_archive import (
     DialogueArchiveRepository,
@@ -75,6 +76,82 @@ def telegram(
         from_user=User(id=owner, is_bot=bot, first_name="Тест"),
         text=text,
     )
+
+
+def test_archive_keys_separate_bots_and_keep_legacy_rows(tmp_path: Path) -> None:
+    async def run() -> None:
+        repo = repository(tmp_path)
+        archive = DialogueArchiveService(repo, frozenset({1}), tmp_path)
+        middleware = ArchiveIncomingMiddleware(archive, InputOperations())
+        first, second = Bot("101:fake-token"), Bot("202:fake-token")
+        await repo.save(1, message("telegram:7", "ORBIT_LEGACY_MESSAGE"))
+        try:
+            for bot, text in ((first, "ORBIT_FIRST_BOT"), (second, "ORBIT_SECOND_BOT")):
+
+                async def handler(event: TelegramObject, data: dict[str, Any]) -> None:
+                    assert current_archive_message.get() == f"telegram:{bot.id}:1:7"
+
+                await middleware(handler, telegram(mid=7, text=text), {"bot": bot})
+            await middleware(
+                AsyncMock(), telegram(mid=7, text="ORBIT_FIRST_EDITED"), {"bot": first}
+            )
+            with closing(sqlite3.connect(tmp_path / "dialogue_archive.db")) as db:
+                rows = dict(
+                    db.execute(
+                        "SELECT source_key,text FROM dialogue_messages WHERE user_id=1"
+                    )
+                )
+            assert rows == {
+                "telegram:7": "ORBIT_LEGACY_MESSAGE",
+                "telegram:101:1:7": "ORBIT_FIRST_EDITED",
+                "telegram:202:1:7": "ORBIT_SECOND_BOT",
+            }
+            sender = ArchiveOutgoingMiddleware(archive)
+            request = AsyncMock(
+                return_value=telegram(mid=8, text="ORBIT_REPLY", bot=True)
+            )
+            await sender(request, first, SendMessage(chat_id=1, text="ORBIT_REPLY"))
+            with closing(sqlite3.connect(tmp_path / "dialogue_archive.db")) as db:
+                assert db.execute(
+                    "SELECT text,role FROM dialogue_messages WHERE user_id=1 AND source_key=?",
+                    ("telegram:101:1:8",),
+                ).fetchone() == ("ORBIT_REPLY", "assistant")
+            assert current_archive_message.get() is None
+        finally:
+            await first.session.close()
+            await second.session.close()
+
+    asyncio.run(run())
+
+
+def test_bad_incoming_namespace_does_not_prevent_reply(tmp_path: Path) -> None:
+    async def run() -> None:
+        archive = DialogueArchiveService(repository(tmp_path), frozenset({1}), tmp_path)
+        handler = AsyncMock(return_value="handled")
+        bot = Bot("101:fake-token")
+        try:
+            result = await ArchiveIncomingMiddleware(archive, InputOperations())(
+                handler, telegram(mid=0), {"bot": bot}
+            )
+            assert result == "handled" and current_archive_message.get() is None
+            handler.assert_awaited_once()
+        finally:
+            await bot.session.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 2**63])
+def test_namespace_rejects_invalid_bot_ids(value: int) -> None:
+    with pytest.raises(ValueError):
+        telegram_source_key(telegram(), value)
+
+
+def test_namespace_includes_chat_and_supports_legacy_transform() -> None:
+    assert telegram_source_key(telegram(1, mid=7), 101) == "telegram:101:1:7"
+    assert telegram_source_key(telegram(2, mid=7), 101) == "telegram:101:2:7"
+    assert telegram_source_key(telegram(mid=7, group=True), 101) == "telegram:101:-10:7"
+    assert archive_message(telegram(mid=7), incoming=True).source_key == "telegram:7"
 
 
 def test_full_archive_survives_retention_restart_and_backup_restore(
