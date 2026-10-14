@@ -1,6 +1,7 @@
 """Запись значимых эпизодов и подготовка контекста долговременной памяти."""
 
 import re
+from collections.abc import Awaitable
 from time import time
 from typing import Callable
 
@@ -42,6 +43,7 @@ class MemoryService:
         self.states = states
         self.delivery_ledger = delivery_ledger
         self.inputs = inputs
+        self.extra_cleanup: Callable[[int], Awaitable[None]] | None = None
 
     async def observe_facts(self, user_id: int, text: str) -> FactsUpdate:
         if self.facts is None:
@@ -177,6 +179,8 @@ class MemoryService:
         """Полностью удалить эпизодическую память и настройки пользователя."""
         for owner in self.dialogue_members(user_id):
             await self._repository.delete_user(owner)
+            if self.extra_cleanup is not None:
+                await self.extra_cleanup(owner)
             if self.favorites is not None:
                 await self.favorites.repository.delete_user(owner)
             if self._creator_messages is not None:

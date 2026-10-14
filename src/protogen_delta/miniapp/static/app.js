@@ -408,9 +408,10 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     } catch(error) { appearanceFail(error); }
     finally { appearanceBusy=false; updateAppearanceButtons(); }
   });
-  for (const name of ["rp", "tools", "translate"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
-    for (const tab of ["rp", "tools", "translate"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
+  for (const name of ["rp", "tools", "translate", "markets"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
+    for (const tab of ["rp", "tools", "translate", "markets"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
     document.body.classList.toggle("translation-view", name === "translate");
+    document.body.classList.toggle("markets-view", name === "markets");
   });
   const translationLanguages=[['ru','Русский'],['en','Английский'],['uk','Украинский'],['be','Белорусский'],['de','Немецкий'],['fr','Французский'],['es','Испанский'],['it','Итальянский'],['pt','Португальский'],['pl','Польский'],['nl','Нидерландский'],['cs','Чешский'],['tr','Турецкий'],['kk','Казахский'],['zh','Китайский'],['ja','Японский'],['ko','Корейский'],['ar','Арабский'],['hi','Хинди'],['ka','Грузинский']];
   const translationPanel=document.querySelector('#translate-panel'), translationInput=document.querySelector('#translation-input'), translationOutput=document.querySelector('#translation-output'), translationSource=document.querySelector('#translation-source'), translationTarget=document.querySelector('#translation-target'), translationStatus=document.querySelector('#translation-status'), translationUpload=document.querySelector('#translation-upload'), translationFileInput=document.querySelector('#translation-file'), translationPreview=document.querySelector('#translation-preview');

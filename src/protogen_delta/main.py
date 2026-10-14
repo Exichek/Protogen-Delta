@@ -93,6 +93,9 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
+from protogen_delta.services.market_advisor import MarketAdvisor
+from protogen_delta.services.market_data import MarketDataService
+from protogen_delta.services.market_http import MarketHTTP
 from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.menu_sync import synchronize_menus
@@ -233,6 +236,8 @@ async def main() -> None:
                     settings.music_audd_api_token,
                     settings.saucenao_api_key,
                     settings.brave_search_api_key,
+                    settings.alpaca_api_key,
+                    settings.alpaca_secret_key,
                     settings.telegram_proxy_url,
                 )
                 if value is not None
@@ -377,6 +382,24 @@ async def main() -> None:
         )
 
         deepseek.set_usage_repository(usage_repository)
+        market_advisor = (
+            MarketAdvisor(
+                MarketDataService(
+                    MarketHTTP(
+                        settings.alpaca_api_key,
+                        settings.alpaca_secret_key,
+                        proxy_url=settings.telegram_proxy_url,
+                    ),
+                    brave_key=settings.brave_search_api_key,
+                    proxy_url=settings.telegram_proxy_url,
+                ),
+                deepseek.for_consultant(),
+            )
+            if settings.mini_app_server_enabled
+            else None
+        )
+        if market_advisor is not None:
+            memory.extra_cleanup = market_advisor.clear
         capabilities = build_capabilities(settings)
         release_journal = ReleaseJournal(
             settings.data_dir, settings.recognized_creator_ids, health=health
@@ -654,6 +677,7 @@ async def main() -> None:
                 runtime_health=health,
                 fetish_triggers=fetish_triggers,
                 fetish_names=fetish_names,
+                market_advisor=market_advisor,
             )
             await mini_app_server.start()
 

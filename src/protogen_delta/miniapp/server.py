@@ -33,6 +33,7 @@ from protogen_delta.miniapp.auth import (
     MiniAppUser,
     validate_init_data,
 )
+from protogen_delta.miniapp.markets import MarketRoutes
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.appearance_analysis import (
@@ -48,6 +49,7 @@ from protogen_delta.services.archive_documents import MAX_ZIP_BYTES, extract_zip
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.documents import DocumentError
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
+from protogen_delta.services.market_advisor import MarketAdvisor
 from protogen_delta.services.media_conversion import (
     MIME_TYPES,
     ConversionBusyError,
@@ -133,6 +135,7 @@ class MiniAppServer:
         fetish_triggers: FetishTriggers | None = None,
         fetish_names: dict[str, str] | None = None,
         media_converter: MediaConversionService | None = None,
+        market_advisor: MarketAdvisor | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -165,6 +168,7 @@ class MiniAppServer:
         self._archive_metrics = OperationMetrics(capacity=2)
         self._runner: web.AppRunner | None = None
         self._media_converter = media_converter or MediaConversionService()
+        self._market_advisor = market_advisor
         if self._runtime_health is not None:
             self._runtime_health.add_diagnostics(
                 "converter", self._media_converter.snapshot
@@ -182,6 +186,7 @@ class MiniAppServer:
             [
                 web.get("/", self._index),
                 web.get("/static/app.js", self._javascript),
+                web.get("/static/markets.js", self._market_javascript),
                 web.get("/api/profile", self._get_profile),
                 web.get("/api/usage", self._get_usage),
                 web.patch("/api/profile", self._update_profile),
@@ -210,6 +215,9 @@ class MiniAppServer:
                 web.get("/converted-media/{token}/{kind}", self._conversion_file),
             ]
         )
+        application.add_routes(
+            MarketRoutes(self._authenticate, self._market_advisor).routes()
+        )
         application.on_startup.append(self._start_converter)
         application.on_cleanup.append(self._close_converter)
         return application
@@ -219,6 +227,8 @@ class MiniAppServer:
 
     async def _close_converter(self, application: web.Application) -> None:
         await self._media_converter.close()
+        if self._market_advisor is not None:
+            await self._market_advisor.close()
 
     async def _convert_media(self, request: web.Request) -> web.Response:
         user = self._authenticate(request)
@@ -410,6 +420,16 @@ class MiniAppServer:
             return web.json_response({"ok": True})
         state = self._runtime_health.snapshot()
         return web.json_response(state, status=200 if state["ok"] else 503)
+
+    async def _market_javascript(self, request: web.Request) -> web.Response:
+        """Отдать собственный скрипт без ключей и внешних библиотек графика."""
+        return web.Response(
+            text=files("protogen_delta.miniapp.static")
+            .joinpath("markets.js")
+            .read_text(encoding="utf-8"),
+            content_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+        )
 
     def _authenticate(self, request: web.Request) -> MiniAppUser:
         init_data = request.headers.get("X-Telegram-Init-Data", "")
