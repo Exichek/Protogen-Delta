@@ -1,6 +1,7 @@
 """Подтверждённые возможности приложения и локальный вопрос об их обзоре."""
 
 import re
+import sys
 from dataclasses import dataclass
 
 from protogen_delta.config.settings import Settings
@@ -28,6 +29,7 @@ class ApplicationCapabilities:
     summary: str
     overview: str
     greeting: str = ""
+    implementation: str = ""
 
 
 def build_capabilities(settings: Settings) -> ApplicationCapabilities:
@@ -52,8 +54,26 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
         if settings.saucenao_api_key
         else ""
     )
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    provider = (
+        "DeepSeek" if settings.llm_provider == "deepseek" else "OpenAI-совместимый API"
+    )
+    implementation = (
+        "Факты реализации Дельты, переданные работающим приложением. "
+        f"Telegram-бот написан на Python {version} с aiogram; сохранение состояния и памяти — SQLite. "
+        f"Основные ответы генерируются через настроенного провайдера {provider}; "
+        f"имя модели в запросах: {settings.llm_model!r}. Личность, промпты, память, "
+        "эмоциональные показатели и доступные инструменты реализованы кодом приложения, "
+        "а модель вызывается через внешний API. Это разные части системы. "
+        "На вопрос «на чём ты создан» прямо назови эти известные сведения, "
+        "а не отвечай общим «не знаю». Веса, внутренняя архитектура и обучение модели "
+        "из этих настроек не известны; также не известна история смены моделей. "
+        "Не выдумывай их. Чтение доступного кода не означает чтение всего репозитория, "
+        "доступ к секретам, самостоятельную правку или запуск тестов."
+    )
     summary = "\n".join(
         (
+            f"Приложение Дельты: Python {version}, aiogram, SQLite. Настроенный провайдер: {provider}.",
             f"Настроенное имя модели запросов: {settings.llm_model!r}. Это настройка API, "
             "а не доказательство архитектуры модели или прошлых замен провайдера.",
             "Текст, перевод, код, планы и объяснения; PDF, DOCX, XLSX, текстовые файлы/код до 20 МБ.",
@@ -122,4 +142,4 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
     )
     if settings.brave_search_api_key:
         greeting += " Можно упомянуть поиск информации с источниками."
-    return ApplicationCapabilities(summary, overview, greeting)
+    return ApplicationCapabilities(summary, overview, greeting, implementation)

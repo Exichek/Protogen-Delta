@@ -386,6 +386,7 @@ async def main() -> None:
             voice_prompt=load_prompt("voice_examples"),
             scene_voice_prompt=load_prompt("scene_examples"),
             capabilities_context=capabilities.summary,
+            implementation_context=capabilities.implementation,
             capabilities_overview_context=capabilities.overview,
         )
 
