@@ -18,7 +18,7 @@
     if(sort!=='all') visible.sort((a,b)=>sort==='up'?b.change_pct-a.change_pct:a.change_pct-b.change_pct);
     const rows=visible.map(row=>{
       const tr=document.createElement('tr'), first=document.createElement('td'), button=document.createElement('button');
-      button.type='button';button.textContent=row.symbol;button.title=`${row.name}\n${row.source}\nВремя сделки: ${date(row.as_of)}`;button.setAttribute('aria-pressed',String(selected===row.symbol));
+      button.type='button';button.textContent=row.symbol;button.title=`${row.name}\n${row.source}\nВремя источника: ${date(row.as_of)}`;button.setAttribute('aria-pressed',String(selected===row.symbol));
       button.onclick=()=>{selected=row.symbol;renderQuotes();context();loadChart();};const stamp=document.createElement('small');stamp.className='market-muted';stamp.textContent=date(row.as_of);first.append(button,stamp);tr.append(first);
       for(const value of [number(row.price)+' '+row.currency,row.change_pct==null?'—':(row.change_pct>0?'+':'')+number(row.change_pct)+'%',number(row.volume)]) {const td=document.createElement('td');td.textContent=value;tr.append(td);}
       tr.children[2].className=row.change_pct>0?'market-positive':row.change_pct<0?'market-negative':'';return tr;
