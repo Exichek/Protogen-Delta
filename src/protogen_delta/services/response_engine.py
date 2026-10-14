@@ -21,6 +21,7 @@ from protogen_delta.core.conversation_safety import (
 from protogen_delta.core.favorite_messages import FAVORITE_LABELS, FavoriteReason
 from protogen_delta.core.llm_budget import LlmBudgetError, user_scoped
 from protogen_delta.core.log_context import bind_log_context
+from protogen_delta.core.reply_outcome import error_reply
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
     has_delta_appearance_reset,
@@ -149,6 +150,7 @@ class PreparedReply:
     user_message: str | None = None
     forgotten: bool = False
     remember_history: bool = True
+    error: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,7 +447,10 @@ class ResponseEngine:
                         operation.answering = operation.reply_started = (
                             prepared.user_message is not None
                         )
-                    await deliver(reply)
+                    if operation is not None and prepared.error:
+                        operation.failed = True
+                    with error_reply(prepared.error):
+                        await deliver(reply)
                     if operation is not None and prepared.user_message is not None:
                         operation.completed = True
                         operation.answering = False
@@ -1292,26 +1297,28 @@ class ResponseEngine:
         except DeepSeekTimeoutError:
             logger.warning("DeepSeek не ответил за установленное время")
             return PreparedReply(
-                "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦"
+                "Я чёт завис и слишком долго думаю... попробуй ещё раз ≧◡≦", error=True
             )
 
         except DeepSeekRateLimitError:
             logger.warning("DeepSeek отклонил запрос из-за ограничения частоты")
             return PreparedReply(
                 "Меня сейчас слишком сильно дёргают запросами... "
-                "дай мне немного времени ≧◡≦"
+                "дай мне немного времени ≧◡≦",
+                error=True,
             )
 
         except DeepSeekConnectionError:
             logger.warning("Не удалось установить соединение с DeepSeek")
             return PreparedReply(
-                "У меня отвалилось соединение... попробуй чуть позже ≧◡≦"
+                "У меня отвалилось соединение... попробуй чуть позже ≧◡≦", error=True
             )
 
         except DeepSeekAuthError:
             logger.exception("Ошибка доступа к DeepSeek API")
             return PreparedReply(
-                "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦"
+                "У меня какая-то внутренняя хуйня сломалась... попробуй позже ≧◡≦",
+                error=True,
             )
 
         except DeepSeekAPIError as error:
@@ -1319,15 +1326,17 @@ class ResponseEngine:
                 "DeepSeek вернул ошибку API, HTTP-код: %s",
                 error.status_code,
             )
-            return PreparedReply("У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦")
+            return PreparedReply(
+                "У меня мозги сейчас чудят... попробуй чуть позже ≧◡≦", error=True
+            )
 
         except DeepSeekError:
             logger.exception("Неизвестная ошибка сервиса DeepSeek")
-            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦")
+            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦", error=True)
 
         except Exception:
             logger.exception("Непредвиденная ошибка при получении ответа от DeepSeek")
-            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦")
+            return PreparedReply("Бля, у тостера что-то сломалось... ≧◡≦", error=True)
 
         return reply
 

@@ -411,6 +411,7 @@ async def main() -> None:
             cooldown_seconds=settings.sticker_cooldown_seconds,
             min_replies=settings.sticker_min_replies,
         )
+        dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
             deepseek=deepseek,
             appearance_model=(
@@ -614,7 +615,7 @@ async def main() -> None:
         dispatcher.include_router(create_favorites_router(favorites, user_states))
         dispatcher.include_router(rp_router)
         downloader = MediaDownloader(settings.youtube_cookies_file)
-        dispatcher.include_router(create_download_router(downloader))
+        dispatcher.include_router(create_download_router(downloader, sticker_service))
         dispatcher.include_router(
             create_image_source_router(
                 bot, ImageSourceService(settings.saucenao_api_key or "")

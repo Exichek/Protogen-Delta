@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from protogen_delta.core.sticker_context import CONTEXT_LABELS, legacy_contexts
 from protogen_delta.repositories.stickers import StickerEntry, StickerRating
 from protogen_delta.repositories.stickers import StickersRepository as Repository
 from protogen_delta.services.sticker_pack import StickerPackImporter
@@ -22,7 +23,8 @@ _HELP = (
     "Удалить ответом: /stickers remove\n"
     "Проверить выбор: /stickers test playful\n"
     "Статистика: /stickers list\n\n"
-    "Основные теги: sweet, playful, angry, horny, neutral, rp. "
+    "Контексты: greeting, uncertain, agreement, refusal, happy, laugh, sweet, neutral. "
+    "Возрастной rating:safe/adult задаётся отдельно. "
     "Теги хранятся локально и не расходуют токены."
 )
 
@@ -101,7 +103,8 @@ def create_sticker_admin_router(
                 + "\n\n"
                 + "\n".join(
                     f"• {entry.name or entry.file_unique_id}: "
-                    f"{', '.join(entry.tags)} ({entry.rating})"
+                    f"{', '.join(entry.tags)} ({entry.rating}); "
+                    f"контекст: {', '.join(CONTEXT_LABELS[key] for key in entry.context_categories)}"
                     for entry in entries[:30]
                 )
             )
@@ -127,6 +130,7 @@ def create_sticker_admin_router(
                     file_unique_id=replied_sticker.file_unique_id,
                     tags=tags,
                     rating=rating,
+                    contexts=legacy_contexts(tags, rating),
                     emoji=replied_sticker.emoji,
                     set_name=replied_sticker.set_name,
                 )

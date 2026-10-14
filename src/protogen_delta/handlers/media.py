@@ -12,6 +12,7 @@ from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
+from protogen_delta.handlers.failure_reply import send_failure_reply
 from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.blocking_work import WorkRunner
@@ -260,7 +261,7 @@ def create_media_router(
             raise
         except Exception:
             logger.exception("Не удалось обработать Telegram-альбом")
-            await entries[0][0].answer(ALBUM_ERROR_REPLY)
+            await send_failure_reply(entries[0][0], ALBUM_ERROR_REPLY, sticker_service)
         finally:
             if albums.get(key) is entries:
                 albums.pop(key, None)
@@ -335,7 +336,9 @@ def create_media_router(
             return
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать изображение из Telegram", exc_info=True)
-            await message.answer(IMAGE_DOWNLOAD_ERROR_REPLY)
+            await send_failure_reply(
+                message, IMAGE_DOWNLOAD_ERROR_REPLY, sticker_service
+            )
             return
 
         await respond_with_images(
@@ -371,7 +374,9 @@ def create_media_router(
             return
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать анимацию из Telegram", exc_info=True)
-            await message.answer(IMAGE_DOWNLOAD_ERROR_REPLY)
+            await send_failure_reply(
+                message, IMAGE_DOWNLOAD_ERROR_REPLY, sticker_service
+            )
             return
         await respond_with_images(
             message,
