@@ -678,8 +678,12 @@ class ResponseEngine:
                 if prior is not None and not prior.proactive and not is_rp
                 else ""
             )
-            interaction = await self._interaction_classifier.classify(
-                user_message, reasoning_context=reasoning_context
+            interaction = (
+                await self._interaction_classifier.classify(
+                    user_message, reasoning_context=reasoning_context
+                )
+                if reasoning_context
+                else await self._interaction_classifier.classify(user_message)
             )
             insult_type, mood = interaction.insult, interaction.mood
             favorite = interaction.favorite
