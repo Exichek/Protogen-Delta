@@ -84,6 +84,7 @@ from protogen_delta.services.fetishes import (
     FetishTriggers,
     detect_fetishes,
 )
+from protogen_delta.services.initiative_context import initiative_reply_context
 from protogen_delta.services.insults import InsultClassifier, InsultType
 from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.interaction_state import (
@@ -1138,6 +1139,9 @@ class ResponseEngine:
             if remember_history and not is_rp and not images and attachment_text is None
             else ""
         )
+        initiative_context = initiative_reply_context(
+            "\n".join(request.controls), user_state
+        )
 
         trusted_input_context = (
             "\n\n".join(
@@ -1151,6 +1155,7 @@ class ResponseEngine:
                     trusted_input_context,
                     character_context,
                     style_context,
+                    initiative_context,
                 )
                 if part
             )

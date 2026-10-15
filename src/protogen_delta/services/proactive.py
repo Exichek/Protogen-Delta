@@ -26,6 +26,7 @@ from protogen_delta.core.user_state import (
 from protogen_delta.handlers.proactive_activity import proactive_delivery
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
+from protogen_delta.services.initiative_context import initiative_mood_context
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 _PROACTIVE_RULES = (
     "Это ненавязчивое фоновое сообщение от Дельты, а не продолжение RP. "
+    "Начни живой разговор по текущему эмоциональному фону и доступной теме. "
+    "Выраженные радость, игривость, грусть, усталость или недовольство могут "
+    "естественно проявляться от первого лица; не навязывай всегда весёлый тон. "
+    "Не объясняй механизм инициативы, расписание, показатели и внутреннее устройство. "
     "Отсутствие ответа не означает плохое настроение, скуку или одиночество. "
     "Не оценивай пользователя, не подкалывай за молчание и не требуй внимания. "
     "Не комментируй длительность паузы словами вроде 'давно не общались'. "
@@ -48,7 +53,7 @@ _PROACTIVE_RULES = (
     "один короткий абзац по-русски, не более 240 символов, без обязательного вопроса."
 )
 _PRESSURE_PATTERN = re.compile(
-    r"скучаю|соскучил\w*|без настроения|наши\w* вечер\w*|"
+    r"скучаю|соскучил\w*|ты\s+(?:опять\s+)?без настроения|наши\w* вечер\w*|"
     r"(?:почему|зачем)\s+(?:ты\s+)?(?:молч\w*|не отвеча\w*)|"
     r"(?:опять|снова)\s+(?:пропал\w*|игнор\w*)|"
     r"(?:найд[её]шь|найди)\s*,?\s*чем себя занять",
@@ -134,7 +139,8 @@ class _ConversationSnapshot:
                 state.roleplay_allow_profanity,
             ),
             state.roleplay_allow_profanity,
-            tuple(build_state_context(state)),
+            tuple(build_state_context(state, show_system=True))
+            + (initiative_mood_context(state),),
             state.emotions.memory.joy,
             state.emotions.memory.tiredness,
         )
