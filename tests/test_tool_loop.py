@@ -43,7 +43,9 @@ def test_serialized_tool_requests_are_never_returned_as_final_text(
     """Проверить утечку сразу, на последнем шаге и в резервном итоговом запросе."""
     handler = AsyncMock(return_value={"ok": True})
     malformed = response()
-    malformed.choices[0].message.content = '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="test">'
+    malformed.choices[0].message.content = (
+        '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="test">'
+    )
     client = Mock()
     client.chat.completions.create = AsyncMock(
         side_effect=[*(response(1) for _ in range(rounds)), malformed]
