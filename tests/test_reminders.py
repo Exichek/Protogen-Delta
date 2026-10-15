@@ -70,7 +70,9 @@ def test_limits_are_atomic_across_repository_instances(tmp_path: Path) -> None:
         await add(second, user=2)
         with pytest.raises(ValueError, match="Очередь"):
             await add(second, user=3)
-        assert (await add(first, message=1)).id
+        # Победителя гонки выбирает порядок транзакций, а не asyncio.gather.
+        saved = next(result for result in results if isinstance(result, Reminder))
+        assert (await add(first, message=saved.source_message_id)).id == saved.id
 
     asyncio.run(scenario())
 

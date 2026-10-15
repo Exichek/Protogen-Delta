@@ -42,16 +42,16 @@ jobs:
         run: poetry install --no-interaction --no-ansi
 
       - name: Проверка Black
-        run: poetry run black --check src tests
+        run: poetry run black --check src tests scripts
 
       - name: Проверка isort
-        run: poetry run isort --check-only src tests
+        run: poetry run isort --check-only src tests scripts
 
       - name: Проверка Flake8
-        run: poetry run flake8 src tests
+        run: poetry run flake8 src tests scripts
 
       - name: Проверка mypy
-        run: poetry run mypy src tests
+        run: poetry run mypy src tests scripts
 
       - name: Запуск тестов
         run: poetry run pytest --cov=src/protogen_delta --cov-report=term-missing --cov-fail-under=95

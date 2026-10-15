@@ -4,12 +4,14 @@ import argparse
 import asyncio
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from dotenv import dotenv_values
 
 from protogen_delta.config.prompt_loader import load_prompt
+from protogen_delta.config.settings import Settings
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -19,7 +21,8 @@ from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier
-from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.response_configuration import load_response_configuration
+from protogen_delta.services.response_engine import ResponseEngine
 
 
 def check_reply(
@@ -44,6 +47,7 @@ def check_reply(
 
 
 async def main() -> None:
+    """Запустить прежние сценарии памяти с общей текущей сборкой правил."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -52,14 +56,17 @@ async def main() -> None:
     api_key = env.get("DEEPSEEK_API_KEY")
     if not api_key:
         parser.error("В env-файле нет DEEPSEEK_API_KEY")
+    settings = Settings(
+        telegram_token="",
+        deepseek_api_key="",
+        art_chat_id=0,
+        deepseek_base_url=env.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com",
+        deepseek_model=env.get("DEEPSEEK_MODEL") or "deepseek-flash",
+    )
     service = DeepSeekService(
         api_key=api_key,
-        base_url=env.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com",
-        model=env.get("DEEPSEEK_MODEL") or "deepseek-flash",
-    )
-    system = "\n\n".join(
-        load_prompt("personality/" + name + ".txt")
-        for name in ["core", "protogen_lore", "body"]
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
     )
     states = UserStateStore()
     engine = ResponseEngine(
@@ -69,8 +76,15 @@ async def main() -> None:
         FetishRoleClassifier(service, load_prompt("fetish_role_classification.txt")),
         BotState(),
         states,
-        ResponseEngineConfig(
-            {}, {}, system, system + "\n\n" + load_prompt("personality/rp.txt")
+        replace(
+            load_response_configuration(settings, fetish_triggers={}, fetish_names={}),
+            capabilities_context=(
+                "Изолированный стенд диалога с временной памятью; Telegram, "
+                "внешние инструменты и серверные журналы не подключены. "
+                f"Настроенное имя модели запросов: {settings.llm_model!r}."
+            ),
+            implementation_context="",
+            capabilities_overview_context="",
         ),
         interaction_classifier=InteractionClassifier(
             service,

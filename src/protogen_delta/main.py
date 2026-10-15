@@ -107,7 +107,8 @@ from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenge
 from protogen_delta.services.public_github import PublicGithubReader
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.reminders import ReminderService
-from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.response_configuration import load_response_configuration
+from protogen_delta.services.response_engine import ResponseEngine
 from protogen_delta.services.source_access import SourceAccess
 from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
@@ -321,24 +322,13 @@ async def main() -> None:
             "repeat_start_greeting.txt",
         )
 
-        core_prompt = load_prompt(
-            "personality/core.txt",
+        response_engine_config = load_response_configuration(
+            settings,
+            fetish_triggers=fetish_triggers,
+            fetish_names=fetish_names,
+            loader=load_prompt,
         )
-        core_prompt += "\n\n" + load_prompt("initiative_system").format(
-            minimum_hours=settings.proactive_idle_seconds / 3600,
-            maximum_hours=settings.proactive_idle_max_seconds / 3600,
-            followup_hours=settings.proactive_cooldown_seconds / 3600,
-        )
-        core_prompt += "\n\n" + load_prompt("emotional_system")
-        protogen_lore_prompt = load_prompt(
-            "personality/protogen_lore.txt",
-        )
-        body_prompt = load_prompt(
-            "personality/body.txt",
-        )
-        rp_modifier_prompt = load_prompt(
-            "personality/rp.txt",
-        )
+        core_prompt = response_engine_config.system_prompt
 
         github_reader = PublicGithubReader(
             settings.data_dir, proxy_url=settings.telegram_proxy_url
@@ -417,28 +407,6 @@ async def main() -> None:
         release_journal = ReleaseJournal(
             settings.data_dir, settings.recognized_creator_ids, health=health
         )
-        response_engine_config = ResponseEngineConfig(
-            fetish_triggers=fetish_triggers,
-            fetish_names=fetish_names,
-            system_prompt=core_prompt,
-            rp_prompt=rp_modifier_prompt,
-            protogen_lore_prompt=protogen_lore_prompt,
-            body_prompt=body_prompt,
-            species_prompt=load_prompt("furry_species_reference"),
-            adult_conversation_prompt=load_prompt("adult_conversation_style"),
-            female_body_prompt=load_prompt("personality/body_female"),
-            adult_body_male_prompt=load_prompt("personality/adult_body_male"),
-            adult_body_female_prompt=load_prompt("personality/adult_body_female"),
-            adult_rp_prompt=load_prompt("personality/adult_rp"),
-            technical_prompt=load_prompt("conversation_technical"),
-            visual_prompt=load_prompt("conversation_visual"),
-            voice_prompt=load_prompt("voice_examples"),
-            scene_voice_prompt=load_prompt("scene_examples"),
-            capabilities_context=capabilities.summary,
-            implementation_context=capabilities.implementation,
-            capabilities_overview_context=capabilities.overview,
-        )
-
         sticker_service = ContextualStickerService(
             bot,
             stickers_repository,
