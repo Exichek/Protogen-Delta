@@ -132,6 +132,7 @@ def test_screenshot_followup_sends_directly_or_reports_actual_failure(
     engine = AsyncMock(spec=ResponseEngine)
     message = SimpleNamespace(
         text="скинь какой-то",
+        forward_origin=None,
         from_user=SimpleNamespace(id=42),
         chat=SimpleNamespace(id=7, type="private"),
         answer=AsyncMock(),
@@ -223,6 +224,7 @@ def test_text_handler_delivers_requested_sticker_without_llm(
     engine = AsyncMock(spec=ResponseEngine)
     message = SimpleNamespace(
         text="а у тебя стикеры есть?",
+        forward_origin=None,
         caption=None,
         sticker=None,
         chat=SimpleNamespace(id=7, type="private"),
@@ -251,6 +253,7 @@ def test_text_request_reports_unavailable_or_cooldown(
     engine = AsyncMock(spec=ResponseEngine)
     message = SimpleNamespace(
         text="Покажи стикер",
+        forward_origin=None,
         from_user=SimpleNamespace(id=42),
         chat=SimpleNamespace(id=7, type="private"),
         answer=AsyncMock(),
