@@ -55,6 +55,9 @@ def audit(
     if not isinstance(rows, list):
         raise ValueError("Неверный список парных результатов")
     reviewed = []
+    histories: dict[tuple[str | None, int | None, str], list[tuple[int, list[str]]]] = (
+        {}
+    )
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("result"), dict):
             raise ValueError("Неверная строка оценочного отчёта")
@@ -65,6 +68,11 @@ def audit(
             or result["step"] < 1
         ):
             raise ValueError("Нужны ID сценария и положительный номер хода")
+        contract, repeat = row.get("contract"), row.get("repeat")
+        if (contract is not None and not isinstance(contract, str)) or (
+            repeat is not None and (type(repeat) is not int or repeat < 1)
+        ):
+            raise ValueError("Неверные вариант или номер повтора")
         record = {
             "case": result.get("case"),
             "step": result.get("step"),
@@ -74,8 +82,13 @@ def audit(
             "quality_review": result.get("quality_review"),
             "status": "preview_not_assessed",
             "matches": [],
+            "history_matches": [],
         }
         if report["mode"] == "preview":
+            reviewed.append(record)
+            continue
+        if result.get("generation_error") is True:
+            record["status"] = "generation_not_assessed"
             reviewed.append(record)
             continue
         prompts = row.get("prompts")
@@ -112,9 +125,38 @@ def audit(
                     "also_in_current_message": in_message,
                 }
             )
+        key = (contract, repeat, result["case"])
+        history_matches = []
+        for prior_step, prior_words in histories.get(key, [])[-8:]:
+            if prior_step >= result["step"]:
+                continue
+            match = SequenceMatcher(
+                None, reply_words, prior_words, autojunk=False
+            ).find_longest_match()
+            if match.size < minimum_words:
+                continue
+            start, end = match.a, match.a + match.size
+            in_message = (
+                SequenceMatcher(
+                    None, reply_words[start:end], message_words, autojunk=False
+                )
+                .find_longest_match()
+                .size
+                == match.size
+            )
+            history_matches.append(
+                {
+                    "step": prior_step,
+                    "words": match.size,
+                    "reply_tokens": [start, end],
+                    "also_in_current_message": in_message,
+                }
+            )
+        histories.setdefault(key, []).append((result["step"], reply_words))
         record.update(
             status="signals_only",
             matches=matches,
+            history_matches=history_matches,
             reply_sha256=hashlib.sha256(reply.encode()).hexdigest(),
         )
         reviewed.append(record)
@@ -128,6 +170,8 @@ def audit(
         "limitations": [
             "Совпадение с каталогом не доказывает копирование или ошибку: нужный модуль мог не входить в запрос.",
             "Отмечается совпадение и в текущем сообщении; цитирование образца может быть уместным.",
+            "Повтор прошлой реплики ищется внутри того же сценария, варианта и повтора; "
+            "это не оценка всего диалога.",
             "Отсутствие совпадения не доказывает достоверность, разнообразие или сохранение характера.",
             "Прежние проверки и ручные оценки не меняются; автоматического выбора варианта нет.",
         ],
@@ -135,6 +179,12 @@ def audit(
         "summary": {
             "responses": sum(r["status"] == "signals_only" for r in reviewed),
             "responses_with_matches": sum(bool(r["matches"]) for r in reviewed),
+            "responses_with_history_matches": sum(
+                bool(r["history_matches"]) for r in reviewed
+            ),
+            "generation_skipped": sum(
+                r["status"] == "generation_not_assessed" for r in reviewed
+            ),
             "preview_skipped": sum(
                 r["status"] == "preview_not_assessed" for r in reviewed
             ),

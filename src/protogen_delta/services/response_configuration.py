@@ -6,6 +6,7 @@ from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import Settings
 from protogen_delta.services.capabilities import build_capabilities
 from protogen_delta.services.fetishes import FetishTriggers
+from protogen_delta.services.prompt_composer import ExampleGuidance
 from protogen_delta.services.response_engine import ResponseEngineConfig
 
 
@@ -45,4 +46,14 @@ def load_response_configuration(
         capabilities_context=capabilities.summary,
         implementation_context=capabilities.implementation,
         capabilities_overview_context=capabilities.overview,
+    )
+
+
+def load_example_guidance(
+    *,
+    loader: Callable[[str], str] = load_prompt,
+) -> ExampleGuidance:
+    """Загрузить отдельный кандидат только по явному выбору оценочного стенда."""
+    return ExampleGuidance(
+        voice=loader("voice_guidance"), scene=loader("scene_guidance")
     )

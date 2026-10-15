@@ -12,6 +12,7 @@ from dotenv import dotenv_values
 
 from protogen_delta.config.settings import Settings
 from protogen_delta.services.evaluation import EvaluationService
+from protogen_delta.services.prompt_composer import ExampleContract
 
 _SPEC = importlib.util.spec_from_file_location(
     "example_behavior_evaluation", Path(__file__).with_name("evaluate_behavior.py")
@@ -47,20 +48,25 @@ async def compare(
     *,
     output: Path,
     repeats: int = 2,
+    candidate: ExampleContract = "isolated",
 ) -> dict[str, Any]:
     """Чередовать порядок вариантов и сохранять каждую завершённую пару частями."""
-    if not cases or any(len(case["steps"]) != 1 for case in cases):
-        raise ValueError("Нужны непустые одноходовые сценарии")
+    if not cases or any(not case["steps"] for case in cases):
+        raise ValueError("Нужны непустые сценарии")
+    if candidate not in {"isolated", "guidance"}:
+        raise ValueError("Нужен отдельный кандидат isolated или guidance")
     if not 1 <= repeats <= 3:
         raise ValueError("Допустимо от одного до трёх повторов")
-    expected = len(cases) * repeats * 2
-    if expected > service.trace["max_calls"]:
+    expected = sum(len(case["steps"]) for case in cases) * repeats * 2
+    if expected > service.trace["max_calls"] - len(service.trace["requests"]):
         raise ValueError("Общий бюджет меньше запланированного числа ответов")
     report: dict[str, Any] = {
         "mode": "model" if service.trace["run_model"] else "preview",
         "complete": False,
         "planned_reply_requests": expected,
+        "contracts": ["legacy", candidate],
         "classification_source": "fixed_neutral_and_unknown_role",
+        "history_scope": "synthetic_scenario_ram",
         "limitations": [
             "Это сравнение сборки примеров, не оценка классификаторов и полного рабочего диалога.",
             "Часы и метки фиксированы; различается контракт стилевых примеров.",
@@ -81,9 +87,9 @@ async def compare(
         for repeat in range(repeats):
             for index, case in enumerate(cases):
                 contracts = (
-                    ("legacy", "isolated")
+                    ("legacy", candidate)
                     if (index + repeat) % 2 == 0
-                    else ("isolated", "legacy")
+                    else (candidate, "legacy")
                 )
                 for contract in contracts:
                     before = len(service.trace["requests"])
@@ -93,24 +99,27 @@ async def compare(
                         settings,
                         output=output.with_suffix(".partial.json"),
                         example_contract=contract,
+                        stop_on_error=True,
                     )
-                    report["rows"].append(
-                        {
-                            "case": case["id"],
-                            "repeat": repeat + 1,
-                            "contract": contract,
-                            "result": result["results"][0],
-                            "prompts": result["prompts"],
-                            "cases_sha256": result["cases_sha256"],
-                            "state_clock": result["state_clock"],
-                        }
-                    )
+                    for item in result["results"]:
+                        report["rows"].append(
+                            {
+                                "case": case["id"],
+                                "repeat": repeat + 1,
+                                "contract": contract,
+                                "result": item,
+                                "prompts": result["prompts"],
+                                "cases_sha256": result["cases_sha256"],
+                                "state_clock": result["state_clock"],
+                            }
+                        )
                     save()
                     requests = service.trace["requests"][before:]
                     if (
-                        len(requests) != 1
-                        or requests[0]["kind"] != "reply"
+                        len(requests) != len(case["steps"])
+                        or any(item["kind"] != "reply" for item in requests)
                         or any("error" in item for item in requests)
+                        or any(item["generation_error"] for item in result["results"])
                     ):
                         return report
         report["complete"] = True
@@ -130,6 +139,9 @@ async def main() -> None:
     parser.add_argument("--run-model", action="store_true")
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--max-calls", type=int, default=48)
+    parser.add_argument(
+        "--candidate", choices=("isolated", "guidance"), default="isolated"
+    )
     credentials = parser.add_mutually_exclusive_group()
     credentials.add_argument("--env-file", type=Path)
     credentials.add_argument("--use-environment", action="store_true")
@@ -138,9 +150,10 @@ async def main() -> None:
         cases = behavior.load_cases(args.cases)
         if not 1 <= args.repeats <= 3 or not 1 <= args.max_calls <= 1000:
             raise ValueError("Неверное число повторов или общий бюджет")
-        if any(len(case["steps"]) != 1 for case in cases):
-            raise ValueError("Сравнение поддерживает только одноходовые сценарии")
-        if len(cases) * args.repeats * 2 > args.max_calls:
+        if (
+            sum(len(case["steps"]) for case in cases) * args.repeats * 2
+            > args.max_calls
+        ):
             raise ValueError("Бюджет меньше запланированного числа ответов")
     except (ValueError, OSError) as error:
         parser.error(str(error))
@@ -172,7 +185,12 @@ async def main() -> None:
     )
     try:
         report = await compare(
-            cases, service, settings, output=args.output, repeats=args.repeats
+            cases,
+            service,
+            settings,
+            output=args.output,
+            repeats=args.repeats,
+            candidate=args.candidate,
         )
     finally:
         await service.close()

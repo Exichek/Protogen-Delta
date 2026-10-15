@@ -14,6 +14,7 @@ from dotenv import dotenv_values
 
 from protogen_delta.config.prompt_loader import PROMPTS_DIR, load_prompt
 from protogen_delta.config.settings import Settings
+from protogen_delta.core.reply_outcome import reply_error
 from protogen_delta.core.sender import Sender, current_sender
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import ConversationTurn, UserState, UserStateStore
@@ -24,7 +25,10 @@ from protogen_delta.services.interaction_classification import InteractionClassi
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.prompt_assembly import BlockMeasure
 from protogen_delta.services.prompt_composer import ExampleContract
-from protogen_delta.services.response_configuration import load_response_configuration
+from protogen_delta.services.response_configuration import (
+    load_example_guidance,
+    load_response_configuration,
+)
 from protogen_delta.services.response_engine import ResponseEngine
 
 CASES_PATH = Path(__file__).with_name("behavior_cases.json")
@@ -199,6 +203,7 @@ async def evaluate(
     output: Path,
     prompt_contract: Literal["legacy", "single"] = "single",
     example_contract: ExampleContract = "legacy",
+    stop_on_error: bool = False,
 ) -> dict[str, Any]:
     """Прогнать общую сборку без Telegram, рабочих баз и внешних инструментов."""
     config = load_response_configuration(settings, fetish_triggers={}, fetish_names={})
@@ -219,6 +224,7 @@ async def evaluate(
         "model": settings.llm_model,
         "prompt_contract": prompt_contract,
         "example_contract": example_contract,
+        "history_scope": "synthetic_scenario_ram",
         "state_clock": {"kind": "synthetic", "epoch": _STATE_EPOCH, "step_seconds": 60},
         "prompts": prompt_inventory(),
         "cases_sha256": hashlib.sha256(
@@ -260,6 +266,9 @@ async def evaluate(
                 states,
                 config,
                 example_contract=example_contract,
+                example_guidance=(
+                    load_example_guidance() if example_contract == "guidance" else None
+                ),
                 interaction_classifier=InteractionClassifier(
                     service,
                     load_prompt("mood_classification"),
@@ -271,6 +280,12 @@ async def evaluate(
             for index, step in enumerate(case["steps"], 1):
                 elapsed[0] = (index - 1) * 60.0
                 engine.assemblies.clear()
+                generation_failed = [False]
+
+                async def capture_delivery(text: str) -> None:
+                    """Подтвердить синтетический ответ и прочитать признак сбоя без Telegram."""
+                    generation_failed[0] = reply_error.get()
+
                 before = len(service.trace["requests"])
                 token = current_sender.set(
                     Sender(1, forwarded=step.get("forwarded", False))
@@ -279,16 +294,21 @@ async def evaluate(
                     reply = await engine.respond(
                         1,
                         step["message"],
+                        deliver=capture_delivery,
                         attachment_text=step.get("attachment_text"),
                         attachment_name=(
                             "example.txt" if "attachment_text" in step else None
                         ),
-                        use_personal_facts=False,
+                        # Хранилище фактов не подключено; обычный режим нужен
+                        # для сохранения синтетических ходов в RAM-истории.
+                        use_personal_facts=True,
                     )
                 finally:
                     current_sender.reset(token)
                 requests = service.trace["requests"][before:]
                 errors = []
+                if generation_failed[0]:
+                    errors.append("Ответ модели не был сформирован")
                 if any("error" in request for request in requests):
                     errors.append("Ошибка запроса API")
                 if (
@@ -338,11 +358,18 @@ async def evaluate(
                         "category": case["category"],
                         "step": index,
                         "message": step["message"],
-                        "reply": reply if report["mode"] == "model" else None,
+                        "reply": (
+                            reply
+                            if report["mode"] == "model" and not generation_failed[0]
+                            else None
+                        ),
+                        "generation_error": generation_failed[0],
                         "checks": "passed" if not errors else "failed",
                         "errors": errors,
                         "quality_review": (
-                            "pending" if report["mode"] == "model" else "not_run"
+                            "pending"
+                            if report["mode"] == "model" and not generation_failed[0]
+                            else "not_run"
                         ),
                         "criteria": case["criteria"],
                         "prompt_assemblies": list(engine.assemblies),
@@ -359,13 +386,19 @@ async def evaluate(
                                     re.findall(r"(?<!\*)\*[^*\n]+\*(?!\*)", reply)
                                 ),
                             }
-                            if report["mode"] == "model"
+                            if report["mode"] == "model" and not generation_failed[0]
                             else None
                         ),
                     }
                 )
                 save()
-                if service.trace["budget_exceeded"]:
+                if service.trace["budget_exceeded"] or (
+                    stop_on_error
+                    and (
+                        generation_failed[0]
+                        or any("error" in request for request in requests)
+                    )
+                ):
                     return report
     finally:
         save()
@@ -387,7 +420,9 @@ async def main() -> None:
     )
     parser.add_argument("--max-calls", type=int, default=200)
     parser.add_argument(
-        "--example-contract", choices=("legacy", "isolated"), default="legacy"
+        "--example-contract",
+        choices=("legacy", "isolated", "guidance"),
+        default="legacy",
     )
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 1000:

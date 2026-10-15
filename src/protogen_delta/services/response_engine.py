@@ -96,6 +96,7 @@ from protogen_delta.services.mood import MoodClassifier, MoodType
 from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.prompt_composer import (
     ExampleContract,
+    ExampleGuidance,
     HistorySelection,
     PromptComposer,
     PromptSections,
@@ -290,6 +291,7 @@ class ResponseEngine:
         github_reader: PublicGithubReader | None = None,
         code_reviews: CodeReviewService | None = None,
         example_contract: ExampleContract = "legacy",
+        example_guidance: ExampleGuidance | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -325,6 +327,7 @@ class ResponseEngine:
                 scene_voice=config.scene_voice_prompt,
             ),
             example_contract=example_contract,
+            guidance=example_guidance,
         )
         self._memory = memory
         self._creator_id = creator_id
@@ -2133,7 +2136,10 @@ class ResponseEngine:
                 "не повторяй её и не выдавай ограничение языковой модели за "
                 "ограничение всего приложения.",
             )
-        if examples and self._prompt_composer.example_contract == "legacy":
+        if examples and self._prompt_composer.example_contract in {
+            "legacy",
+            "guidance",
+        }:
             prompt = prompt.append("examples", "\n\n" + examples)
         if capability_overview:
             prompt = prompt.append(
