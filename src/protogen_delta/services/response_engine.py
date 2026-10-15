@@ -21,7 +21,11 @@ from protogen_delta.core.conversation_safety import (
 from protogen_delta.core.favorite_messages import FAVORITE_LABELS, FavoriteReason
 from protogen_delta.core.llm_budget import LlmBudgetError, user_scoped
 from protogen_delta.core.log_context import bind_log_context
-from protogen_delta.core.reply_capture import current_reply_capture
+from protogen_delta.core.reply_capture import (
+    ReplySource,
+    current_reply_capture,
+    current_reply_sources,
+)
 from protogen_delta.core.reply_outcome import error_reply
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -136,6 +140,26 @@ RP_SAVED_PROFILE_REPLY = (
 )
 
 
+def _reply_sources(
+    user_id: int,
+    text: str,
+    model_text: str | None = None,
+    *,
+    allow_facts: bool = False,
+) -> tuple[ReplySource, ...]:
+    """Взять доверенное происхождение частей, сохранив прямые вызовы движка."""
+    sources = current_reply_sources.get()
+    if sources is not None:
+        return sources
+    sender = current_sender.get()
+    forwarded = sender is not None and sender.user_id == user_id and sender.forwarded
+    return (
+        ReplySource(
+            text, model_text or text, not forwarded, allow_facts and not forwarded
+        ),
+    )
+
+
 class ResponseBusyError(Exception):
     """Предыдущий ответ пользователя ещё обрабатывается или отправляется."""
 
@@ -197,6 +221,17 @@ class _ReplyInput:
     trusted_input_context: str | None
     use_personal_facts: bool
     remember_history: bool
+    sources: tuple[ReplySource, ...]
+
+    @property
+    def controls(self) -> tuple[str, ...]:
+        """Разбирать команды только в собственных исходных репликах."""
+        return tuple(source.text for source in self.sources if source.allow_controls)
+
+    @property
+    def fact_messages(self) -> tuple[str, ...]:
+        """Сохранять и забывать факты по текстам владельца, без цитат и вложений."""
+        return tuple(source.text for source in self.sources if source.allow_facts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,10 +405,19 @@ class ResponseEngine:
             )
             return
         key: StateKey = user_id if chat_id is None else (chat_id, user_id)
-        control_text = model_message_override or user_message
-        if self.is_safety_signal(user_id, control_text, chat_id=chat_id):
+        sources = _reply_sources(user_id, user_message, model_message_override)
+        if any(
+            source.allow_controls
+            and self.is_safety_signal(user_id, source.model_text, chat_id=chat_id)
+            for source in sources
+        ):
             await self._interrupt_reply(
-                user_id, chat_id, all_chats=declares_minor(control_text)
+                user_id,
+                chat_id,
+                all_chats=any(
+                    source.allow_controls and declares_minor(source.model_text)
+                    for source in sources
+                ),
             )
         if key in self._delivering_users:
             raise ResponseBusyError
@@ -415,7 +459,12 @@ class ResponseEngine:
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
         with bind_log_context(user_id=user_id):
-            minor_declared = declares_minor(model_message_override or user_message)
+            minor_declared = any(
+                source.allow_controls and declares_minor(source.model_text)
+                for source in _reply_sources(
+                    user_id, user_message, model_message_override
+                )
+            )
             if minor_declared:
                 await self.restrict_minor(user_id)
             async with self._user_states.use_conversation(
@@ -564,6 +613,17 @@ class ResponseEngine:
             trusted_input_context,
             use_personal_facts,
             remember_history,
+            _reply_sources(
+                user_id,
+                user_message,
+                model_message_override,
+                allow_facts=(
+                    use_personal_facts
+                    and not images
+                    and attachment_text is None
+                    and model_message_override is None
+                ),
+            ),
         )
         gates = await self._apply_reply_gates(request)
         if isinstance(gates, PreparedReply):
@@ -586,10 +646,11 @@ class ResponseEngine:
         model_message_override = request.model_message_override
         use_personal_facts = request.use_personal_facts
         user_message = request.user_message
-        remaining = split_roleplay_stop(user_message)
+        controls = request.controls
+        remaining = split_roleplay_stop(controls[0]) if len(controls) == 1 else None
 
-        if user_state.roleplay_active and is_scene_stop(
-            user_message, user_state.roleplay_stopword
+        if user_state.roleplay_active and any(
+            is_scene_stop(text, user_state.roleplay_stopword) for text in controls
         ):
             user_state.stop_roleplay()
             return PreparedReply(
@@ -622,31 +683,32 @@ class ResponseEngine:
             )
             return PreparedReply(reply, user_message, remember_history=False)
 
-        configuration = scene_configuration(user_message) if not stopped else None
+        configuration = character = None
+        for text in controls if not stopped else ():
+            selected_configuration = scene_configuration(text)
+            selected_character = scene_character(text)
+            if selected_configuration is not None:
+                configuration = selected_configuration
+                user_state.roleplay_active = True
+                user_state.roleplay_configuration = configuration
+            if selected_character is not None:
+                character = selected_character
+                if reference_is_child(character):
+                    user_state.stop_roleplay()
+                user_state.roleplay_active = True
+                user_state.roleplay_character = character
+                user_state.roleplay_character_thumbnail = ""
+                user_state.roleplay_character_restricted = reference_is_child(character)
 
-        character = scene_character(user_message) if not stopped else None
-
-        if configuration is not None:
-            user_state.roleplay_active = True
-            user_state.roleplay_configuration = configuration
-
-        if character is not None:
-            if reference_is_child(character):
-                user_state.stop_roleplay()
-            user_state.roleplay_active = True
-            user_state.roleplay_character = character
-            user_state.roleplay_character_thumbnail = ""
-            user_state.roleplay_character_restricted = reference_is_child(character)
-
-        appearance_change = await self._update_delta_appearance(
-            user_message,
-            user_state,
-            images,
+        appearance_change = (
+            await self._update_delta_appearance("\n".join(controls), user_state, images)
+            if controls
+            else None
         )
 
-        contains_rp_action = has_roleplay_action(user_message)
+        contains_rp_action = any(has_roleplay_action(text) for text in controls)
 
-        contains_rp_intent = has_roleplay_intent(user_message)
+        contains_rp_intent = any(has_roleplay_intent(text) for text in controls)
 
         if (contains_rp_action or contains_rp_intent) and not stopped:
             user_state.roleplay_active = True
@@ -681,7 +743,7 @@ class ResponseEngine:
             return PreparedReply(
                 (
                     "Хорошо, начинай. Подхвачу твой первый ход."
-                    if user_will_start_scene(user_message)
+                    if any(user_will_start_scene(text) for text in controls)
                     else (
                         RP_SAVED_PROFILE_REPLY
                         if user_state.roleplay_character
@@ -705,9 +767,6 @@ class ResponseEngine:
     ) -> _MessageAnalysis:
         user_id = request.user_id
         user_state = request.user_state
-        images = request.images
-        attachment_text = request.attachment_text
-        model_message_override = request.model_message_override
         use_personal_facts = request.use_personal_facts
         user_message = gates.user_message
         capability_overview = gates.capability_overview
@@ -767,23 +826,28 @@ class ResponseEngine:
 
         fact_update = FactsUpdate()
 
-        if self._memory is not None and use_personal_facts and not capability_overview:
+        if self._memory is not None and not capability_overview:
             try:
-                if (
-                    not is_rp
-                    and not images
-                    and attachment_text is None
-                    and model_message_override is None
-                ):
-                    observed = await self._memory.observe_facts(user_id, user_message)
+                for text in request.fact_messages if not is_rp else ():
+                    observed = await self._memory.observe_facts(user_id, text)
                     if isinstance(observed, FactsUpdate):
-                        fact_update = observed
+                        fact_update = FactsUpdate(
+                            changed=fact_update.changed + observed.changed,
+                            removed_sources=fact_update.removed_sources
+                            + observed.removed_sources,
+                            attempted=fact_update.attempted or observed.attempted,
+                            failed=fact_update.failed or observed.failed,
+                            forgotten=fact_update.forgotten or observed.forgotten,
+                            removed_values=fact_update.removed_values
+                            + observed.removed_values,
+                        )
                     if fact_update.removed_sources or fact_update.forgotten:
                         user_state.history.clear()
                         user_state.emotions.memory.events.clear()
-                profile = await self._memory.fact_context(user_id)
-                if isinstance(profile, list):
-                    fact_context = profile
+                if use_personal_facts:
+                    profile = await self._memory.fact_context(user_id)
+                    if isinstance(profile, list):
+                        fact_context = profile
             except Exception:
                 logger.warning("User fact profile unavailable")
 
@@ -1411,13 +1475,13 @@ class ResponseEngine:
             and not fact_update.attempted
             and not request.images
             and request.attachment_text is None
-            and request.model_message_override is None
+            and all(source.allow_facts for source in request.sources)
             and not gates.is_rp
             and bool(reply.strip())
         ):
             try:
                 stored = await self._memory.favorites.observe(
-                    user_id, user_message, analysis.favorite
+                    user_id, "\n".join(request.fact_messages), analysis.favorite
                 )
                 if stored and analysis.favorite is not None:
                     reply += (

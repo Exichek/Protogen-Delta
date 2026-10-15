@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -375,7 +376,7 @@ def test_selection_expiry_and_no_activation(tmp_path: Path) -> None:
             assert await reader.context() == ""
             await reader.get_repo({"url": URL})
             assert await reader.context()
-            with sqlite3.connect(tmp_path / "memories.db") as db:
+            with closing(sqlite3.connect(tmp_path / "memories.db")) as db, db:
                 db.execute("UPDATE github_contexts SET updated=0")
             assert await reader.context() == ""
         assert await reader.context() == ""

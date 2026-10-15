@@ -4,7 +4,7 @@ import asyncio
 import io
 import sqlite3
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from contextvars import copy_context
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,7 +149,7 @@ def test_five_forwarded_messages_are_one_ordered_turn(
             positions = [call.index(f"MARKER_{index}") for index in range(1, 6)]
             assert positions == sorted(positions) and "пересланная цитата" in call
             assert not h.inputs._users and h.batch.snapshot()["queued_messages"] == 0
-            with sqlite3.connect(tmp_path / "delivery_ledger.db") as db:
+            with closing(sqlite3.connect(tmp_path / "delivery_ledger.db")) as db:
                 assert (
                     db.execute(
                         "SELECT COUNT(*) FROM delivery_ledger WHERE state='answered'"
@@ -256,7 +256,7 @@ def test_flood_is_silently_dropped_before_preparation(
             )
             await h.drain()
             assert h.model.chat.await_count == 1 and h.answer.await_count == 1
-            with sqlite3.connect(tmp_path / "delivery_ledger.db") as db:
+            with closing(sqlite3.connect(tmp_path / "delivery_ledger.db")) as db:
                 counts = dict(
                     db.execute(
                         "SELECT state,COUNT(*) FROM delivery_ledger GROUP BY state"
@@ -455,7 +455,7 @@ def test_bad_part_does_not_discard_other_messages(
             await h.feed(message(2, "GOOD_MARKER"))
             await h.drain()
             assert h.model.chat.await_count == 1 and h.answer.await_count == 1
-            with sqlite3.connect(tmp_path / "delivery_ledger.db") as db:
+            with closing(sqlite3.connect(tmp_path / "delivery_ledger.db")) as db:
                 assert dict(
                     db.execute("SELECT source_key,state FROM delivery_ledger")
                 ) == {
@@ -525,7 +525,7 @@ def test_unknown_delivery_applies_to_each_part_and_is_not_replayed(
             await h.feed(message(1, "FIRST"))
             await h.feed(message(2, "SECOND"))
             await h.drain()
-            with sqlite3.connect(tmp_path / "delivery_ledger.db") as db:
+            with closing(sqlite3.connect(tmp_path / "delivery_ledger.db")) as db:
                 assert (
                     db.execute(
                         "SELECT COUNT(*) FROM delivery_ledger WHERE state='delivery_unknown'"

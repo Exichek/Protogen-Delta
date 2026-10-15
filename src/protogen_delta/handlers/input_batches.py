@@ -21,7 +21,11 @@ from protogen_delta.core.input_operations import (
 )
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.rate_limiter import MessageTokenBucket
-from protogen_delta.core.reply_capture import current_reply_capture
+from protogen_delta.core.reply_capture import (
+    ReplySource,
+    current_reply_capture,
+    current_reply_sources,
+)
 from protogen_delta.handlers.delivery import show_typing
 from protogen_delta.handlers.rp import is_roleplay_stop_message
 from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
@@ -121,7 +125,7 @@ class InputBatchMiddleware(BaseMiddleware):
             return await handler(event, data)
         owner = event.from_user.id
         scope = chat_scope_options(event.chat.id, event.chat.type)
-        if (
+        if event.forward_origin is None and (
             is_roleplay_stop_message(text)
             or self._engine.is_safety_signal(owner, text, **scope) is True
         ):
@@ -349,6 +353,25 @@ class InputBatchMiddleware(BaseMiddleware):
         token = current_delivery.set(primary)
         archive_token = current_archive_message.set(primary.key if primary else None)
         capture_token = current_reply_capture.set(None)
+        sources_token = current_reply_sources.set(
+            tuple(
+                ReplySource(
+                    text=part.text,
+                    model_text=part.options.get("model_message_override") or part.text,
+                    allow_controls=item.message.forward_origin is None,
+                    allow_facts=(
+                        item.message.forward_origin is None
+                        and item.message.text is not None
+                        and item.message.chat.type == "private"
+                        and part.options.get("use_personal_facts", True)
+                        and not part.options.get("images")
+                        and part.options.get("attachment_text") is None
+                        and part.options.get("model_message_override") is None
+                    ),
+                )
+                for item, part in parts
+            )
+        )
         try:
             async with asyncio.timeout(180):
                 while True:
@@ -360,6 +383,7 @@ class InputBatchMiddleware(BaseMiddleware):
                     except ResponseBusyError:
                         await asyncio.sleep(0.1)
         finally:
+            current_reply_sources.reset(sources_token)
             current_reply_capture.reset(capture_token)
             current_archive_message.reset(archive_token)
             current_delivery.reset(token)

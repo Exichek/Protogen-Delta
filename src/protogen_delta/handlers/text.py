@@ -53,7 +53,7 @@ def create_text_router(
         user_id = message.from_user.id
         scope = chat_scope_options(message.chat.id, message.chat.type)
 
-        if is_roleplay_stop_message(message.text):
+        if message.forward_origin is None and is_roleplay_stop_message(message.text):
             was_active = await response_engine.disable_roleplay(
                 user_id,
                 **scope,
@@ -67,7 +67,8 @@ def create_text_router(
             return
 
         safety_signal = (
-            response_engine.is_safety_signal(user_id, message.text, **scope) is True
+            message.forward_origin is None
+            and response_engine.is_safety_signal(user_id, message.text, **scope) is True
         )
         if (
             not safety_signal
