@@ -21,6 +21,7 @@ class ReplySource:
     model_text: str
     allow_controls: bool
     allow_facts: bool
+    reply_target_present: bool = False
 
 
 current_reply_sources: ContextVar[tuple[ReplySource, ...] | None] = ContextVar(
