@@ -1,0 +1,15 @@
+{
+  "source_revision": "7e95ee7c8a0203131ae02a214396a56602ba0c8a",
+  "cases": [
+    {
+      "favorites": false,
+      "chars": 9125,
+      "sha256": "d4a3bec709ff072764b5f31467b3e7d69bafdf0f4558ff570adade47006bb4fc"
+    },
+    {
+      "favorites": true,
+      "chars": 10149,
+      "sha256": "8a3fa0643feb44a94401345fee892d717e1809963c94227d97825187ef6ffc27"
+    }
+  ]
+}

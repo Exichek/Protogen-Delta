@@ -194,6 +194,65 @@ def test_mocked_model_keeps_human_review_pending_and_records_failures(
     asyncio.run(scenario())
 
 
+def test_frozen_state_makes_identical_labels_produce_identical_reply_prompts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Задержка API не должна менять затухание настроения и время событий стенда."""
+
+    async def complete(**kwargs: Any) -> ChatCompletion:
+        await asyncio.sleep(0.001)
+        content = (
+            '{"mood":"neutral","insult":"none","favorite":"none","reasoning":false}'
+            if "response_format" in kwargs
+            else "Одинаковый синтетический ответ."
+        )
+        return ChatCompletion.model_validate(
+            {
+                "id": "test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": content},
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(DeepSeekService, "_complete", AsyncMock(side_effect=complete))
+
+    async def scenario() -> None:
+        signatures = []
+        for contract in ("legacy", "single"):
+            service = _service(run_model=True)
+            try:
+                report = await evaluation.evaluate(
+                    evaluation.load_cases(),
+                    service,
+                    _settings(),
+                    output=tmp_path / (contract + ".json"),
+                    prompt_contract=contract,
+                )
+            finally:
+                await service.close()
+            signatures.append(
+                [
+                    request["system_sha256"]
+                    for row in report["results"]
+                    for request in row["requests"]
+                    if request["kind"] == "reply"
+                ]
+            )
+            assert report["state_clock"]["kind"] == "synthetic"
+        assert signatures[0] and signatures[0] == signatures[1]
+
+    asyncio.run(scenario())
+
+
 def test_preview_failure_and_exhausted_budget_are_not_success(
     tmp_path: Path,
 ) -> None:
