@@ -5,6 +5,7 @@ from aiogram.types import Message
 
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.rp import (
     RP_ALREADY_DISABLED_REPLY,
@@ -68,8 +69,11 @@ def create_text_router(
         safety_signal = (
             response_engine.is_safety_signal(user_id, message.text, **scope) is True
         )
-        if not safety_signal and not limiter.allow(user_id):
-            await message.answer(RATE_LIMIT_REPLY)
+        if (
+            not safety_signal
+            and current_reply_capture.get() is None
+            and not limiter.allow(user_id)
+        ):
             return
 
         if sticker_service is not None and sticker_service.is_request(

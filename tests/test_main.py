@@ -524,10 +524,13 @@ def test_main_builds_application_and_starts_polling(
     assert isinstance(outer[3].args[0], main_module.UserStatisticsMiddleware)
     assert outer[3].args[0]._input_operations is inputs
     for router in (text_router, media_router, document_router, voice_router):
-        router.message.middleware.assert_called_once()
-        inner = router.message.middleware.call_args.args[0]
+        assert router.message.middleware.call_count == 2
+        inner = router.message.middleware.call_args_list[0].args[0]
         assert isinstance(inner, main_module.MemoryInputsMiddleware)
         assert inner._operations is inputs
+        batcher = router.message.middleware.call_args_list[1].args[0]
+        assert isinstance(batcher, main_module.InputBatchMiddleware)
+        assert batcher._operations is inputs
     for router in (start_router, art_router, adult_router, reset_router, rp_router):
         router.message.middleware.assert_not_called()
 

@@ -18,6 +18,7 @@ from protogen_delta.core.message_utils import (
     split_message,
     split_reply,
 )
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.services.response_engine import ReplyDelivery
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -34,7 +35,7 @@ async def show_typing(
     """Показывать статус набора, пока бот формирует содержательный ответ."""
     if initial_delay_seconds < 0:
         raise ValueError("Задержка статуса набора не может быть отрицательной")
-    if bot is None:
+    if bot is None or current_reply_capture.get() is not None:
         yield
         return
 

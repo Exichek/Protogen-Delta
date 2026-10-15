@@ -11,9 +11,10 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.failure_reply import send_failure_reply
-from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.deepseek import ImageInput
@@ -190,8 +191,7 @@ def create_media_router(
         if message.from_user is None:
             return
         user_id = message.from_user.id
-        if not limiter.allow(user_id):
-            await message.answer(RATE_LIMIT_REPLY)
+        if current_reply_capture.get() is None and not limiter.allow(user_id):
             return
         try:
             async with show_typing(message, bot):
