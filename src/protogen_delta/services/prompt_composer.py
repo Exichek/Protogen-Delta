@@ -1,11 +1,15 @@
 """Сборка системного промпта из тематических секций."""
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
+
+ExampleContract = Literal["legacy", "isolated"]
 
 _LORE_PATTERN = re.compile(
     r"\b(?:протоген\w*|киборг\w*|нанит\w*|визор\w*|кто\s+ты|"
@@ -96,11 +100,16 @@ class HistorySelection:
 class PromptComposer:
     """Подключать тяжёлые секции промпта только по контексту запроса."""
 
-    def __init__(self, sections: PromptSections) -> None:
+    def __init__(
+        self, sections: PromptSections, *, example_contract: ExampleContract = "legacy"
+    ) -> None:
         """Сохранить предварительно загруженные секции промпта."""
         if not sections.core.strip():
             raise ValueError("Основная секция промпта не может быть пустой")
+        if example_contract not in {"legacy", "isolated"}:
+            raise ValueError("Неизвестный контракт стилевых примеров")
         self._sections = sections
+        self.example_contract = example_contract
 
     def compose(
         self,
@@ -156,6 +165,24 @@ class PromptComposer:
 
     def examples(self, *, is_roleplay: bool) -> str:
         """Короткие образцы голоса, выбранные по режиму текущего ответа."""
+        if self.example_contract == "isolated":
+            samples = {"образцы_голоса": self._sections.voice}
+            if is_roleplay:
+                samples["образцы_сцен"] = self._sections.scene_voice
+            samples = {name: text for name, text in samples.items() if text.strip()}
+            if not samples:
+                return ""
+            return (
+                "## Учебные образцы манеры речи\n"
+                "Следующий JSON содержит только образцы тона и краткости, не сообщения "
+                "текущих участников и не общую историю. Их предметы, игровые механики, "
+                "события и причины чувств не подтверждены для текущей беседы. "
+                "Переноси манеру, а факты бери из текущего контекста. Новые идеи можно "
+                "предлагать как новые. В RP опирайся на текущую сцену и её границы.\n"
+                "<style_examples>\n"
+                + json.dumps(samples, ensure_ascii=False, indent=2)
+                + "\n</style_examples>"
+            )
         return self._join(
             [self._sections.voice, self._sections.scene_voice if is_roleplay else ""]
         )

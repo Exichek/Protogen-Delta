@@ -22,6 +22,7 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.mood import MoodClassifier
+from protogen_delta.services.prompt_composer import ExampleContract
 from protogen_delta.services.response_configuration import load_response_configuration
 from protogen_delta.services.response_engine import ResponseEngine
 
@@ -181,6 +182,7 @@ async def evaluate(
     *,
     output: Path,
     prompt_contract: Literal["legacy", "single"] = "single",
+    example_contract: ExampleContract = "legacy",
 ) -> dict[str, Any]:
     """Прогнать общую сборку без Telegram, рабочих баз и внешних инструментов."""
     config = load_response_configuration(settings, fetish_triggers={}, fetish_names={})
@@ -200,6 +202,7 @@ async def evaluate(
         "mode": "model" if service.trace["run_model"] else "preview",
         "model": settings.llm_model,
         "prompt_contract": prompt_contract,
+        "example_contract": example_contract,
         "state_clock": {"kind": "synthetic", "epoch": _STATE_EPOCH, "step_seconds": 60},
         "prompts": prompt_inventory(),
         "cases_sha256": hashlib.sha256(
@@ -240,6 +243,7 @@ async def evaluate(
                 BotState(),
                 states,
                 config,
+                example_contract=example_contract,
                 interaction_classifier=InteractionClassifier(
                     service,
                     load_prompt("mood_classification"),
@@ -364,6 +368,9 @@ async def main() -> None:
         "--prompt-contract", choices=("legacy", "single"), default="single"
     )
     parser.add_argument("--max-calls", type=int, default=200)
+    parser.add_argument(
+        "--example-contract", choices=("legacy", "isolated"), default="legacy"
+    )
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 1000:
         parser.error("--max-calls должен быть от 1 до 1000")
@@ -413,6 +420,7 @@ async def main() -> None:
             settings,
             output=args.output,
             prompt_contract=args.prompt_contract,
+            example_contract=args.example_contract,
         )
     finally:
         await service.close()
