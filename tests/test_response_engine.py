@@ -930,7 +930,8 @@ def test_response_engine_handles_empty_deepseek_reply() -> None:
     )
 
     assert result == "Пустой ответ от DeepSeek"
-    assert state.reply_count == 1
+    assert state.reply_count == 0
+    assert not engine._user_states.get(TEST_USER_ID).history
 
 
 def test_response_engine_handles_whitespace_deepseek_reply() -> None:
@@ -951,7 +952,8 @@ def test_response_engine_handles_whitespace_deepseek_reply() -> None:
     )
 
     assert result == "DeepSeek промолчал..."
-    assert state.reply_count == 1
+    assert state.reply_count == 0
+    assert not engine._user_states.get(TEST_USER_ID).history
 
 
 def test_response_engine_rejects_empty_system_prompt() -> None:
