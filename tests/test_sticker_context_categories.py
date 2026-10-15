@@ -89,8 +89,10 @@ def test_reaction_intent_does_not_confuse_quote_with_own_refusal(
     assert reaction_context(tags, reply) == expected
 
 
+@pytest.mark.parametrize("failure", ["timeout", "empty", "whitespace"])
 def test_true_model_error_always_uses_404_but_error_discussion_does_not(
     tmp_path: Path,
+    failure: str,
 ) -> None:
     async def run() -> None:
         engine, _, model, *_ = _create_engine()
@@ -113,7 +115,10 @@ def test_true_model_error_always_uses_404_but_error_discussion_does_not(
         event.caption = None
         event.sticker = None
         event.answer = AsyncMock()
-        model.chat.side_effect = DeepSeekTimeoutError("synthetic")
+        if failure == "timeout":
+            model.chat.side_effect = DeepSeekTimeoutError("synthetic")
+        else:
+            model.chat.return_value = "" if failure == "empty" else "   "
         for text in ("Первый вопрос", "Другой вопрос"):
             await engine.respond_and_deliver(
                 TEST_USER_ID,
@@ -129,6 +134,8 @@ def test_true_model_error_always_uses_404_but_error_discussion_does_not(
             for call in bot.send_sticker.await_args_list
         )
         assert not reply_error.get()
+        assert not engine._user_states.get(TEST_USER_ID).history
+        assert engine._user_states.get(TEST_USER_ID).reply_count == 0
         assert not await service.maybe_send(
             chat_id=TEST_USER_ID,
             user_id=TEST_USER_ID,

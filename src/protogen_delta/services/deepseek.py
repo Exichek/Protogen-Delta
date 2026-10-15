@@ -52,6 +52,13 @@ def _chat_reply(response: ChatCompletion) -> str:
     return text
 
 
+def _final_chat_reply(response: ChatCompletion) -> str:
+    """Проверять готовый разговорный ответ независимо от наличия схем инструментов."""
+    if contains_unquoted_tool_markup(response.choices[0].message.content or ""):
+        raise DeepSeekAPIError("Вместо ответа получена служебная разметка")
+    return _chat_reply(response)
+
+
 _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
 _WEB_REQUEST_RE = re.compile(
@@ -562,7 +569,7 @@ class DeepSeekService:
             history_turns=len(history),
         )
 
-        return _chat_reply(response)
+        return _chat_reply(response) if json_response else _final_chat_reply(response)
 
     async def translate_text(
         self, system_prompt: str, user_message: str, images: Sequence[ImageInput] = ()
@@ -712,7 +719,7 @@ class DeepSeekService:
                 user_message=user_message,
                 history_turns=history_turns,
             )
-            return _chat_reply(response)
+            return _final_chat_reply(response)
         calls_used = 0
         links = (
             review_links(user_message) if "fetch_web_page" in available_tools else ()
@@ -834,9 +841,7 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
-                if contains_unquoted_tool_markup(message.content or ""):
-                    raise DeepSeekAPIError("Вместо ответа получена служебная разметка")
-                return _chat_reply(response) + footer
+                return _final_chat_reply(response) + footer
             if step == 3:
                 break
             if len(message.tool_calls) > 6:
@@ -941,10 +946,8 @@ class DeepSeekService:
             user_message=user_message,
             history_turns=history_turns,
         )
-        if contains_unquoted_tool_markup(final.choices[0].message.content or ""):
-            raise DeepSeekAPIError("Вместо ответа получена служебная разметка")
         return (
-            _chat_reply(final)
+            _final_chat_reply(final)
             or "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
         ) + footer
 

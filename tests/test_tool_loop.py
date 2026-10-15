@@ -92,6 +92,54 @@ def test_tool_markup_can_be_explained_as_quoted_data(
     )
 
 
+@pytest.mark.parametrize("route", ["no_executor", "disabled", "empty_schema"])
+@pytest.mark.parametrize("quoted", [False, True])
+def test_chat_without_tools_checks_final_markup(
+    monkeypatch: pytest.MonkeyPatch, route: str, quoted: bool
+) -> None:
+    """Неподключённые схемы не должны обходить защиту готового ответа."""
+    markup = '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="test">'
+    text = f"Разберём цитату: `{markup}`" if quoted else markup
+    result = response()
+    result.choices[0].message.content = text
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock()
+    executor = ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)]))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=None if route == "no_executor" else executor,
+    )
+    selected = {"not_registered"} if route == "empty_schema" else set()
+    if quoted:
+        assert (
+            asyncio.run(service.chat("system", "question", tool_names=selected)) == text
+        )
+    else:
+        with pytest.raises(DeepSeekAPIError, match="служебная разметка"):
+            asyncio.run(service.chat("system", "question", tool_names=selected))
+    assert client.chat.completions.create.await_count == 1
+    handler.assert_not_awaited()
+
+
+def test_json_chat_can_extract_tool_markup_as_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Структурированное извлечение цитаты не является готовым вызовом инструмента."""
+    text = json.dumps({"observed_text": "<｜DSML｜calls>"})
+    result = response()
+    result.choices[0].message.content = text
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService("key", "https://test.local", "test")
+    assert asyncio.run(service.chat("system", "question", json_response=True)) == text
+    assert client.chat.completions.create.await_count == 1
+
+
 def test_model_cannot_execute_registered_tool_outside_selected_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

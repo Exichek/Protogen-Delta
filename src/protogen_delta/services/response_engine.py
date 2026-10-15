@@ -1503,6 +1503,11 @@ class ResponseEngine:
         analysis: _MessageAnalysis,
         reply: str,
     ) -> PreparedReply:
+        if not reply.strip():
+            return PreparedReply(
+                "Пустой ответ от DeepSeek" if not reply else "DeepSeek промолчал...",
+                error=True,
+            )
         user_id = request.user_id
         use_personal_facts = request.use_personal_facts
         remember_history = request.remember_history
@@ -1533,11 +1538,6 @@ class ResponseEngine:
                     )
             except Exception:
                 logger.warning("Не удалось сохранить избранное сообщение")
-        if not reply:
-            reply = "Пустой ответ от DeepSeek"
-        elif not reply.strip():
-            reply = "DeepSeek промолчал..."
-
         if (
             self._memory is not None
             and use_personal_facts
