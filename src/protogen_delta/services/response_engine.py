@@ -94,6 +94,7 @@ from protogen_delta.services.interaction_state import (
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier, MoodType
 from protogen_delta.services.prompt_composer import (
+    ExampleContract,
     HistorySelection,
     PromptComposer,
     PromptSections,
@@ -286,6 +287,7 @@ class ResponseEngine:
         release_journal: ReleaseJournal | None = None,
         github_reader: PublicGithubReader | None = None,
         code_reviews: CodeReviewService | None = None,
+        example_contract: ExampleContract = "legacy",
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -319,7 +321,8 @@ class ResponseEngine:
                 visual=config.visual_prompt,
                 voice=config.voice_prompt,
                 scene_voice=config.scene_voice_prompt,
-            )
+            ),
+            example_contract=example_contract,
         )
         self._memory = memory
         self._creator_id = creator_id
@@ -1921,6 +1924,10 @@ class ResponseEngine:
                 "\n\n## Разговорный стиль\n" + self._config.adult_conversation_prompt
             )
 
+        examples = self._prompt_composer.examples(is_roleplay=is_rp)
+        if examples and self._prompt_composer.example_contract == "isolated":
+            prompt += "\n\n" + examples
+
         context_lines = self._limit_context(
             state_context,
             self._config.dynamic_state_chars,
@@ -2059,8 +2066,7 @@ class ResponseEngine:
                 "не повторяй её и не выдавай ограничение языковой модели за "
                 "ограничение всего приложения."
             )
-        examples = self._prompt_composer.examples(is_roleplay=is_rp)
-        if examples:
+        if examples and self._prompt_composer.example_contract == "legacy":
             prompt += "\n\n" + examples
         if capability_overview:
             prompt += (
