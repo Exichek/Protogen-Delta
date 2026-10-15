@@ -63,6 +63,7 @@ def test_main_builds_application_and_starts_polling(
         llm_provider=provider,
         log_level="INFO",
         data_dir=tmp_path,
+        llm_daily_request_limit_overrides={123: 1000},
         admin_ids=frozenset({123}),
         brave_search_api_key="brave-key",
         conversation_history_limit=12,
@@ -415,6 +416,11 @@ def test_main_builds_application_and_starts_polling(
         assert main_module.StickersRepository(tmp_path).get_all() == []
 
     load_settings_mock.assert_called_once_with()
+    usage = deepseek_constructor_mock.return_value.set_usage_repository.call_args.args[
+        0
+    ]
+    assert usage.limit_for(123) == 1000
+    assert usage.limit_for(456) == 300
 
     assert load_prompt_mock.call_args_list == [
         call("insult_classification.txt"),

@@ -191,7 +191,9 @@ async def main() -> None:
 
     try:
         usage_repository = LlmUsageRepository(
-            settings.data_dir, settings.llm_daily_request_limit
+            settings.data_dir,
+            settings.llm_daily_request_limit,
+            limit_overrides=settings.llm_daily_request_limit_overrides,
         )
         if settings.audio_understanding_enabled:
             audio_understanding = AudioUnderstandingService(
