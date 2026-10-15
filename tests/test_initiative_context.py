@@ -98,6 +98,24 @@ def test_mixed_emotions_and_resentment_are_not_replaced_with_cheerfulness() -> N
     assert "недовольство: выраженный фон" in context
 
 
+def test_idea_followup_separates_voice_examples_from_confirmed_history() -> None:
+    """Игровая тема не подтверждает механику из образца или статус проекта."""
+    state = UserState()
+    state.history.append(
+        ConversationTurn(
+            "", "Йоу. Хочешь вернуться к нашей идее с игрой?", proactive=True
+        )
+    )
+    context = initiative_reply_context("Что хотел?", state)
+    assert "Примеры голоса и сцен" in context
+    assert "предложение сейчас" in context
+    assert "не приписывай" in context
+    assert "ограниченный инвентарь" not in context
+    assert "недоделан" not in context
+    assert "а не историю прожитого дня" in context
+    assert initiative_reply_context("Покажи код игры", state) == ""
+
+
 def test_neutral_state_does_not_invent_boredom_or_longing() -> None:
     context = initiative_mood_context(UserState())
     assert "ровный спокойный фон" in context

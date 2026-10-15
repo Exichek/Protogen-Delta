@@ -25,6 +25,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 
 from protogen_delta.core.llm_budget import current_llm_user
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
+from protogen_delta.core.tool_markup import contains_unquoted_tool_markup
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.link_review import compact_page_result, review_links
@@ -799,6 +800,17 @@ class DeepSeekService:
                     "function": {"name": forced_tool},
                 }
             started = perf_counter()
+            if tool_choice == "none":
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Предел шагов или инструментов достигнут. Дай итоговый ответ "
+                            "по уже полученным данным, явно укажи ограничения проверки. "
+                            "Не запрашивай новые инструменты и не выводи разметку их вызовов."
+                        ),
+                    }
+                )
             options = self._provider_options
             if self._thinking_enabled and isinstance(tool_choice, dict):
                 # DeepSeek запрещает именованный tool_choice с thinking=enabled.
@@ -822,6 +834,8 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
+                if contains_unquoted_tool_markup(message.content or ""):
+                    raise DeepSeekAPIError("Вместо ответа получена служебная разметка")
                 return _chat_reply(response) + footer
             if step == 3:
                 break
@@ -927,6 +941,8 @@ class DeepSeekService:
             user_message=user_message,
             history_turns=history_turns,
         )
+        if contains_unquoted_tool_markup(final.choices[0].message.content or ""):
+            raise DeepSeekAPIError("Вместо ответа получена служебная разметка")
         return (
             _chat_reply(final)
             or "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."

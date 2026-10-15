@@ -36,6 +36,60 @@ def response(count: int = 0, args: str = "{}") -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
 
 
+@pytest.mark.parametrize("rounds", [0, 3, 4])
+def test_serialized_tool_requests_are_never_returned_as_final_text(
+    monkeypatch: pytest.MonkeyPatch, rounds: int
+) -> None:
+    """Проверить утечку сразу, на последнем шаге и в резервном итоговом запросе."""
+    handler = AsyncMock(return_value={"ok": True})
+    malformed = response()
+    malformed.choices[0].message.content = '<｜DSML｜calls><｜DSML｜invoke name="test">'
+    client = Mock()
+    client.chat.completions.create = AsyncMock(
+        side_effect=[*(response(1) for _ in range(rounds)), malformed]
+    )
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)])),
+    )
+    with pytest.raises(DeepSeekAPIError, match="служебная разметка"):
+        asyncio.run(service.chat("system", "question"))
+    assert client.chat.completions.create.await_count == rounds + 1
+    assert handler.await_count == min(rounds, 3)
+    if rounds:
+        messages = client.chat.completions.create.await_args.kwargs["messages"]
+        assert any(
+            "Не запрашивай новые инструменты" in (m.get("content") or "")
+            for m in messages
+        )
+
+
+def test_tool_markup_can_be_explained_as_quoted_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Защита не должна мешать обсуждать уже отправленную служебную разметку."""
+    result = response()
+    result.choices[0].message.content = (
+        "Это некорректный автообзор. Например: ` <｜DSML｜invoke> `\n"
+        "```xml\n<｜DSML｜calls>\n```\nТекст не исполняется."
+    )
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), AsyncMock())])),
+    )
+    assert "некорректный автообзор" in asyncio.run(
+        service.chat("system", "Объясни разметку")
+    )
+
+
 def test_model_cannot_execute_registered_tool_outside_selected_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
