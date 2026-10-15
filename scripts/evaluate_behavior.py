@@ -4,22 +4,20 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
-from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import dotenv_values
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion
 
 from protogen_delta.config.prompt_loader import PROMPTS_DIR, load_prompt
 from protogen_delta.config.settings import Settings
 from protogen_delta.core.sender import Sender, current_sender
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import ConversationTurn, UserState, UserStateStore
-from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.evaluation import EvaluationService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
@@ -28,6 +26,7 @@ from protogen_delta.services.response_configuration import load_response_configu
 from protogen_delta.services.response_engine import ResponseEngine
 
 CASES_PATH = Path(__file__).with_name("behavior_cases.json")
+_STATE_EPOCH = 1792022400.0
 _INITIAL_FIELDS = {
     "content_mode",
     "roleplay_active",
@@ -156,88 +155,6 @@ def prompt_inventory() -> dict[str, Any]:
     return {"revision": revision, "files": files}
 
 
-class EvaluationService(DeepSeekService):
-    """Перехватывать транспорт: предпросмотр не выходит в сеть ни в одном режиме."""
-
-    def __init__(self, *, run_model: bool, max_calls: int, **kwargs: Any) -> None:
-        """Отключить повторы и разделять счётчик с копиями режима размышлений."""
-        super().__init__(max_retries=0, **kwargs)
-        self.trace: dict[str, Any] = {
-            "run_model": run_model,
-            "max_calls": max_calls,
-            "requests": [],
-            "budget_exceeded": False,
-        }
-
-    async def _complete(
-        self, *, client: AsyncOpenAI | None = None, **kwargs: Any
-    ) -> ChatCompletion:
-        """Записать объём запроса; ограничение действует также на классификаторы."""
-        trace = self.trace
-        if len(trace["requests"]) >= trace["max_calls"]:
-            trace["budget_exceeded"] = True
-            raise RuntimeError("Лимит запросов оценочного прогона исчерпан")
-        messages = kwargs["messages"]
-        system = "\n\n".join(
-            item["content"] for item in messages if item["role"] == "system"
-        )
-        kind = (
-            "json"
-            if "response_format" in kwargs
-            else "classification" if kwargs["max_tokens"] == 5 else "reply"
-        )
-        request = {
-            "kind": kind,
-            "system_chars": len(system),
-            "system_sha256": hashlib.sha256(system.encode()).hexdigest(),
-            "input_chars": sum(len(item["content"]) for item in messages),
-            "history_messages": max(0, len(messages) - 2),
-        }
-        trace["requests"].append(request)
-        if not trace["run_model"]:
-            content = (
-                '{"mood":"neutral","insult":"none","favorite":"none","reasoning":false}'
-                if kind == "json"
-                else (
-                    "unknown"
-                    if kind == "classification"
-                    else "[Предпросмотр сборки: ответ модели не запрашивался.]"
-                )
-            )
-            # Текст нужен только проверке состава, в отчёт и stdout он не попадает.
-            request["preview_system"] = system
-            return ChatCompletion.model_validate(
-                {
-                    "id": "preview",
-                    "object": "chat.completion",
-                    "created": 0,
-                    "model": self._model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "finish_reason": "stop",
-                            "message": {
-                                "role": "assistant",
-                                "content": content,
-                            },
-                        }
-                    ],
-                }
-            )
-        started = perf_counter()
-        try:
-            response = await super()._complete(
-                client=(client or self._client).with_options(max_retries=0), **kwargs
-            )
-        except Exception as error:
-            request["error"] = type(error).__name__
-            raise
-        finally:
-            request["seconds"] = round(perf_counter() - started, 3)
-        request["usage"] = response.usage.model_dump() if response.usage else None
-        return response
-
-
 def check_patterns(text: str, required: list[str], forbidden: list[str]) -> list[str]:
     """Проверить узкие наблюдаемые требования, без оценки естественности речи."""
     return [
@@ -263,6 +180,7 @@ async def evaluate(
     settings: Settings,
     *,
     output: Path,
+    prompt_contract: Literal["legacy", "single"] = "single",
 ) -> dict[str, Any]:
     """Прогнать общую сборку без Telegram, рабочих баз и внешних инструментов."""
     config = load_response_configuration(settings, fetish_triggers={}, fetish_names={})
@@ -281,6 +199,8 @@ async def evaluate(
     report: dict[str, Any] = {
         "mode": "model" if service.trace["run_model"] else "preview",
         "model": settings.llm_model,
+        "prompt_contract": prompt_contract,
+        "state_clock": {"kind": "synthetic", "epoch": _STATE_EPOCH, "step_seconds": 60},
         "prompts": prompt_inventory(),
         "cases_sha256": hashlib.sha256(
             json.dumps(cases, ensure_ascii=False, sort_keys=True).encode()
@@ -304,7 +224,11 @@ async def evaluate(
 
     try:
         for case in cases:
-            states = UserStateStore()
+            elapsed = [0.0]
+            states = UserStateStore(
+                clock=lambda: elapsed[0],
+                wall_clock=lambda: _STATE_EPOCH + elapsed[0],
+            )
             prepare_state(states.get(1), case.get("initial", {}))
             engine = ResponseEngine(
                 service,
@@ -321,9 +245,11 @@ async def evaluate(
                     load_prompt("mood_classification"),
                     load_prompt("insult_classification"),
                     favorite_prompt=load_prompt("favorite_selection"),
+                    prompt_contract=prompt_contract,
                 ),
             )
             for index, step in enumerate(case["steps"], 1):
+                elapsed[0] = (index - 1) * 60.0
                 before = len(service.trace["requests"])
                 token = current_sender.set(
                     Sender(1, forwarded=step.get("forwarded", False))
@@ -431,7 +357,12 @@ async def main() -> None:
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-model", action="store_true")
-    parser.add_argument("--env-file", type=Path)
+    credentials = parser.add_mutually_exclusive_group()
+    credentials.add_argument("--env-file", type=Path)
+    credentials.add_argument("--use-environment", action="store_true")
+    parser.add_argument(
+        "--prompt-contract", choices=("legacy", "single"), default="single"
+    )
     parser.add_argument("--max-calls", type=int, default=200)
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 1000:
@@ -446,8 +377,19 @@ async def main() -> None:
     except (ValueError, OSError) as error:
         parser.error(str(error))
     env = dotenv_values(args.env_file) if args.run_model and args.env_file else {}
+    if args.run_model and args.use_environment:
+        env = {
+            name: os.environ.get(name)
+            for name in (
+                "DEEPSEEK_API_KEY",
+                "DEEPSEEK_MODEL",
+                "DEEPSEEK_BASE_URL",
+            )
+        }
     if args.run_model and not env.get("DEEPSEEK_API_KEY"):
-        parser.error("Для --run-model нужен --env-file с DEEPSEEK_API_KEY")
+        parser.error(
+            "Для --run-model нужен --env-file или --use-environment с DEEPSEEK_API_KEY"
+        )
     settings = Settings(
         telegram_token="",
         deepseek_api_key="",
@@ -465,7 +407,13 @@ async def main() -> None:
         disable_thinking=True,
     )
     try:
-        report = await evaluate(cases, service, settings, output=args.output)
+        report = await evaluate(
+            cases,
+            service,
+            settings,
+            output=args.output,
+            prompt_contract=args.prompt_contract,
+        )
     finally:
         await service.close()
     failed = sum(item["checks"] == "failed" for item in report["results"])
