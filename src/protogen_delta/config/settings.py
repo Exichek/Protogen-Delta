@@ -1,5 +1,6 @@
 """Настройки приложения и загрузка переменных окружения."""
 
+import json
 import os
 from dataclasses import dataclass, field
 from math import isfinite
@@ -57,6 +58,9 @@ class Settings:
     e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
     llm_daily_request_limit: int = 300
+    llm_daily_request_limit_overrides: dict[int, int] = field(
+        default_factory=dict, repr=False
+    )
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
     conversation_history_ttl_seconds: float = 604800.0
@@ -106,6 +110,43 @@ def _parse_admin_ids(value: str) -> frozenset[int]:
         raise ValueError(
             "ADMIN_IDS должен содержать Telegram ID через запятую"
         ) from error
+
+
+def _parse_llm_limit_overrides(value: str) -> dict[int, int]:
+    """Загрузить закрытую карту квот без раскрытия ID в сообщении об ошибке."""
+    name = "LLM_DAILY_REQUEST_LIMIT_OVERRIDES"
+
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        """Не принимать неоднозначное повторное значение одного ключа."""
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(name)
+            result[key] = item
+        return result
+
+    try:
+        raw = json.loads(value or "{}", object_pairs_hook=unique_pairs)
+        if not isinstance(raw, dict):
+            raise ValueError(name)
+        result: dict[int, int] = {}
+        for owner, limit in raw.items():
+            if (
+                not owner.isascii()
+                or not owner.isdecimal()
+                or owner.startswith("0")
+                or not 0 < int(owner) < 2**63
+                or type(limit) is not int
+                or not 0 < limit < 2**63
+            ):
+                raise ValueError(name)
+            result[int(owner)] = limit
+        return result
+    except ValueError, TypeError:
+        raise ValueError(
+            name
+            + " должен быть JSON-объектом с уникальными положительными ID и целыми квотами"
+        ) from None
 
 
 def _parse_positive_int(
@@ -465,6 +506,9 @@ def load_settings() -> Settings:
         rate_limit_seconds=rate_limit_seconds,
         llm_daily_request_limit=_parse_positive_int(
             os.getenv("LLM_DAILY_REQUEST_LIMIT", "300"), "LLM_DAILY_REQUEST_LIMIT"
+        ),
+        llm_daily_request_limit_overrides=_parse_llm_limit_overrides(
+            os.getenv("LLM_DAILY_REQUEST_LIMIT_OVERRIDES", "{}")
         ),
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
