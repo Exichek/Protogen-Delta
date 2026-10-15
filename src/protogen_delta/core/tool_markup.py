@@ -2,7 +2,7 @@
 
 import re
 
-_DSML = re.compile(r"<\s*/?\s*[|｜]\s*DSML\s*[|｜]", re.I)
+_DSML = re.compile(r"<\s*/?\s*(?:[|｜]\s*)+DSML\s*(?:[|｜]\s*)+", re.I)
 _CODE_QUOTE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*(?:`|$)", re.S)
 
 

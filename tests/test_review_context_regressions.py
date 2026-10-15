@@ -21,7 +21,14 @@ from protogen_delta.services.deepseek import DeepSeekService
 
 
 @pytest.mark.parametrize(
-    "text", ["<｜DSML｜calls>", "< | DSML | invoke>", "</｜DSML｜calls>"]
+    "text",
+    [
+        "<｜DSML｜calls>",
+        "< | DSML | invoke>",
+        "</｜DSML｜calls>",
+        "<｜｜DSML｜｜ calls>",
+        "< | | DSML | | invoke>",
+    ],
 )
 def test_serialized_tool_markup_is_recognized(text: str) -> None:
     """Учитывать оба вида вертикальных черт и пробелы из скриншота."""
@@ -30,7 +37,12 @@ def test_serialized_tool_markup_is_recognized(text: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["", '<｜DSML｜calls><｜DSML｜invoke name="read_source">']
+    "text",
+    [
+        "",
+        '<｜DSML｜calls><｜DSML｜invoke name="read_source">',
+        '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_source">',
+    ],
 )
 def test_unfinished_review_is_not_sent_cached_or_acknowledged(
     tmp_path: Path, text: str
