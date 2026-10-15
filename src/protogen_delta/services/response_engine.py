@@ -65,6 +65,7 @@ from protogen_delta.services.appearance_profile_context import (
     appearance_profile_context,
 )
 from protogen_delta.services.capabilities import is_capability_overview
+from protogen_delta.services.code_review import CodeReviewService
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
@@ -284,6 +285,7 @@ class ResponseEngine:
         appearance_model: VisualModel | None = None,
         release_journal: ReleaseJournal | None = None,
         github_reader: PublicGithubReader | None = None,
+        code_reviews: CodeReviewService | None = None,
     ) -> None:
         """Сохранить сервисы и статические данные движка."""
         if not config.system_prompt.strip():
@@ -328,6 +330,7 @@ class ResponseEngine:
         self._creator_messages = creator_messages
         self._release_journal = release_journal
         self._github_reader = github_reader
+        self._code_reviews = code_reviews
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
         self.cancel_pending_inputs: Callable[..., Awaitable[None]] | None = None
         self._delivering_users: set[StateKey] = set()
@@ -495,6 +498,22 @@ class ResponseEngine:
                         "\n\n".join(
                             part
                             for part in (trusted_input_context, delivery_context)
+                            if part
+                        )
+                        or None
+                    )
+                if (
+                    self._code_reviews is not None
+                    and use_personal_facts
+                    and chat_id is None
+                ):
+                    review_context = await self._code_reviews.context(
+                        user_id, user_message, user_state.history_updated_at
+                    )
+                    trusted_input_context = (
+                        "\n\n".join(
+                            part
+                            for part in (trusted_input_context, review_context)
                             if part
                         )
                         or None

@@ -397,10 +397,16 @@ async def main() -> None:
             else None
         )
 
+        code_reviews = CodeReviewService(
+            bot, deepseek, source_access, CodeReviewsRepository(settings.data_dir)
+        )
+
         async def clear_extra_memory(user_id: int) -> None:
             if market_advisor is not None:
                 await market_advisor.clear(user_id)
             await github_reader.clear_user(user_id)
+            if code_reviews is not None:
+                await code_reviews.repository.clear_delivery(user_id)
 
         memory.extra_cleanup = clear_extra_memory
         capabilities = build_capabilities(settings)
@@ -417,6 +423,7 @@ async def main() -> None:
         )
         dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
+            code_reviews=code_reviews,
             github_reader=github_reader,
             deepseek=deepseek,
             appearance_model=(
@@ -618,9 +625,6 @@ async def main() -> None:
         dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
         dispatcher.include_router(utilities_router)
-        code_reviews = CodeReviewService(
-            bot, deepseek, source_access, CodeReviewsRepository(settings.data_dir)
-        )
         dispatcher.include_router(create_code_review_router(code_reviews))
         actions_router = create_actions_router(reminders)
         actions_router.message.middleware(MemoryInputsMiddleware(input_operations))

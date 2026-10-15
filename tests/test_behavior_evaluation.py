@@ -51,6 +51,36 @@ def _service(*, run_model: bool = False, max_calls: int = 200) -> Any:
     )
 
 
+def test_grounding_cases_preview_does_not_call_model_or_claim_quality(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Новые сценарии не расходуют исчерпанный бюджет и не выдают сборку за качество."""
+    transport = AsyncMock(side_effect=AssertionError("Сеть запрещена"))
+    monkeypatch.setattr(DeepSeekService, "_complete", transport)
+    cases = evaluation.load_cases(
+        evaluation.CASES_PATH.with_name("behavior_grounding_cases.json")
+    )
+    assert len(cases) == 8
+
+    async def run() -> None:
+        service = _service()
+        try:
+            report = await evaluation.evaluate(
+                cases, service, _settings(), output=tmp_path / "grounding.json"
+            )
+        finally:
+            await service.close()
+        assert report["mode"] == "preview" and report["calls"] == 16
+        assert len(report["results"]) == 8
+        assert all(
+            row["checks"] == "passed" and row["quality_review"] == "not_run"
+            for row in report["results"]
+        )
+
+    asyncio.run(run())
+    transport.assert_not_awaited()
+
+
 def test_preview_runs_every_case_without_network_or_quality_claims(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

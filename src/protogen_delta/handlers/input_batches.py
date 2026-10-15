@@ -27,6 +27,7 @@ from protogen_delta.core.reply_capture import (
     current_reply_sources,
 )
 from protogen_delta.handlers.delivery import show_typing
+from protogen_delta.handlers.reply_context import telegram_reply_context
 from protogen_delta.handlers.rp import is_roleplay_stop_message
 from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
 from protogen_delta.services.delivery_ledger import DeliveryOperation, current_delivery
@@ -215,6 +216,17 @@ class InputBatchMiddleware(BaseMiddleware):
         ) -> None:
             if item.message.from_user is None or owner != item.message.from_user.id:
                 raise ValueError("Подготовленный ответ принадлежит другому отправителю")
+            bot = item.data.get("bot")
+            quoted = telegram_reply_context(
+                item.message, bot if isinstance(bot, Bot) else None
+            )
+            if quoted:
+                options = dict(options)
+                options["trusted_input_context"] = "\n\n".join(
+                    part
+                    for part in (options.get("trusted_input_context"), quoted)
+                    if part
+                )
             item.parts.append(_Part(text, deliver, options))
 
         token = current_reply_capture.set(capture)
