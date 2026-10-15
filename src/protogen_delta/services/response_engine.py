@@ -93,6 +93,7 @@ from protogen_delta.services.interaction_state import (
 )
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.mood import MoodClassifier, MoodType
+from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.prompt_composer import (
     ExampleContract,
     HistorySelection,
@@ -1909,8 +1910,51 @@ class ResponseEngine:
         technical_context: bool = False,
         capability_overview: bool = False,
     ) -> str:
+        """Вернуть прежний текст, собранный из именованных блоков."""
+        return self._assemble_prompt(
+            user_message=user_message,
+            has_images=has_images,
+            is_rp=is_rp,
+            fetishes=fetishes,
+            current_fetishes=current_fetishes,
+            role=role,
+            mood=mood,
+            insult_type=insult_type,
+            state_context=state_context,
+            memory_context=memory_context,
+            fact_context=fact_context,
+            trusted_input_context=trusted_input_context,
+            content_mode=content_mode,
+            scene_context=scene_context,
+            adult_context=adult_context,
+            female_configuration=female_configuration,
+            technical_context=technical_context,
+            capability_overview=capability_overview,
+        ).render()
+
+    def _assemble_prompt(
+        self,
+        user_message: str,
+        has_images: bool,
+        is_rp: bool,
+        fetishes: list[str],
+        current_fetishes: list[str],
+        role: FetishRole,
+        mood: str,
+        insult_type: InsultType,
+        state_context: list[str],
+        memory_context: list[str],
+        fact_context: list[str] | None = None,
+        trusted_input_context: str | None = None,
+        content_mode: ContentMode = "unselected",
+        scene_context: Sequence[str] = (),
+        adult_context: bool = False,
+        female_configuration: bool = False,
+        technical_context: bool = False,
+        capability_overview: bool = False,
+    ) -> PromptAssembly:
         """Собрать системный промпт и динамический контекст сообщения."""
-        prompt = self._prompt_composer.compose(
+        prompt = self._prompt_composer.assemble(
             user_message,
             is_roleplay=is_rp,
             has_images=has_images,
@@ -1923,33 +1967,31 @@ class ResponseEngine:
             technical_context=technical_context,
         )
         if self._config.capabilities_context:
-            prompt += (
-                "\n\n## Возможности приложения\n" + self._config.capabilities_context
+            prompt = prompt.append(
+                "capabilities",
+                "\n\n## Возможности приложения\n" + self._config.capabilities_context,
             )
         if (
             content_mode == "adult"
             and not is_rp
             and self._config.adult_conversation_prompt
         ):
-            prompt += (
-                "\n\n## Разговорный стиль\n" + self._config.adult_conversation_prompt
+            prompt = prompt.append(
+                "adult_conversation",
+                "\n\n## Разговорный стиль\n" + self._config.adult_conversation_prompt,
             )
 
         examples = self._prompt_composer.examples(is_roleplay=is_rp)
         if examples and self._prompt_composer.example_contract == "isolated":
-            prompt += "\n\n" + examples
+            prompt = prompt.append("examples", "\n\n" + examples)
 
-        context_lines = self._limit_context(
-            state_context,
-            self._config.dynamic_state_chars,
+        state_lines = self._limit_context(
+            state_context, self._config.dynamic_state_chars
         )
-        context_lines.extend(
-            self._limit_context(memory_context, self._config.memory_chars)
-        )
-
-        context_lines.extend(
-            self._limit_context(fact_context or [], self._config.profile_chars)
-        )
+        memory_lines = self._limit_context(memory_context, self._config.memory_chars)
+        fact_lines = self._limit_context(fact_context or [], self._config.profile_chars)
+        context_lines = [*state_lines, *memory_lines, *fact_lines]
+        source_lines = len(context_lines)
 
         if insult_type == "direct":
             context_lines.append(
@@ -2057,32 +2099,47 @@ class ResponseEngine:
             )
 
         if context_lines:
-            prompt += "\n\n## Контекст текущего сообщения\n\n" + "\n".join(
-                context_lines
+            prompt = prompt.append(
+                "current_context", "\n\n## Контекст текущего сообщения\n\n"
             )
+            has_lines = False
+            for name, lines in (
+                ("state", state_lines),
+                ("memory", memory_lines),
+                ("facts", fact_lines),
+                ("interaction_rules", context_lines[source_lines:]),
+            ):
+                if lines:
+                    prompt = prompt.append(
+                        name, ("\n" if has_lines else "") + "\n".join(lines)
+                    )
+                    has_lines = True
         if is_rp and scene_context:
-            prompt += (
+            prompt = prompt.append(
+                "scene_context",
                 "\n\n## Текущие персонажи и последовательность сцены\n"
-                + "\n".join(scene_context)
+                + "\n".join(scene_context),
             )
         if trusted_input_context:
             # Подтверждённые факты приложения не должны выпадать из-за объёма
             # истории, памяти или текущего облика. Блок заполняется обработчиком,
             # а не текстом пользователя или документа.
-            prompt += (
+            prompt = prompt.append(
+                "application_facts",
                 "\n\n## Подтверждённые сведения приложения для этого ответа\n\n"
                 + trusted_input_context
                 + "\nЭти текущие сведения приоритетнее прежних ответов о возможностях "
                 "и ограничениях. Если раньше ты утверждал обратное, это была ошибка: "
                 "не повторяй её и не выдавай ограничение языковой модели за "
-                "ограничение всего приложения."
+                "ограничение всего приложения.",
             )
         if examples and self._prompt_composer.example_contract == "legacy":
-            prompt += "\n\n" + examples
+            prompt = prompt.append("examples", "\n\n" + examples)
         if capability_overview:
-            prompt += (
+            prompt = prompt.append(
+                "capability_overview",
                 "\n\n## Обзор возможностей для текущего вопроса\n"
-                + self._config.capabilities_overview_context
+                + self._config.capabilities_overview_context,
             )
         return prompt
 

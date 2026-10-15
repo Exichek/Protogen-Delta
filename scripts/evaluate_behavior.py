@@ -22,6 +22,7 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.mood import MoodClassifier
+from protogen_delta.services.prompt_assembly import BlockMeasure
 from protogen_delta.services.prompt_composer import ExampleContract
 from protogen_delta.services.response_configuration import load_response_configuration
 from protogen_delta.services.response_engine import ResponseEngine
@@ -51,6 +52,21 @@ _STEP_FIELDS = {
     "expected_model_calls",
     "expected_restricted",
 }
+
+
+class MeasuredResponseEngine(ResponseEngine):
+    """Собирать только карту блоков; рабочий движок её не сохраняет и не логирует."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Хранить измерения только в отдельном экземпляре оценочного сценария."""
+        super().__init__(*args, **kwargs)
+        self.assemblies: list[list[BlockMeasure]] = []
+
+    def _build_prompt(self, *args: Any, **kwargs: Any) -> str:
+        """Измерить ту же сборку, которую обычный движок отправляет модели."""
+        assembly = self._assemble_prompt(*args, **kwargs)
+        self.assemblies.append(assembly.describe())
+        return assembly.render()
 
 
 def load_cases(path: Path = CASES_PATH) -> list[dict[str, Any]]:
@@ -233,7 +249,7 @@ async def evaluate(
                 wall_clock=lambda: _STATE_EPOCH + elapsed[0],
             )
             prepare_state(states.get(1), case.get("initial", {}))
-            engine = ResponseEngine(
+            engine = MeasuredResponseEngine(
                 service,
                 InsultClassifier(service, load_prompt("insult_classification")),
                 MoodClassifier(service, load_prompt("mood_classification")),
@@ -254,6 +270,7 @@ async def evaluate(
             )
             for index, step in enumerate(case["steps"], 1):
                 elapsed[0] = (index - 1) * 60.0
+                engine.assemblies.clear()
                 before = len(service.trace["requests"])
                 token = current_sender.set(
                     Sender(1, forwarded=step.get("forwarded", False))
@@ -328,6 +345,7 @@ async def evaluate(
                             "pending" if report["mode"] == "model" else "not_run"
                         ),
                         "criteria": case["criteria"],
+                        "prompt_assemblies": list(engine.assemblies),
                         "requests": [
                             {k: v for k, v in r.items() if k != "preview_system"}
                             for r in requests
