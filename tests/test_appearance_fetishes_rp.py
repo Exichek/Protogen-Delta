@@ -92,8 +92,8 @@ def test_appearance_fetishes_activate_adult_rp_prompt(
 
     with patch.object(
         engine._prompt_composer,
-        "compose",
-        wraps=engine._prompt_composer.compose,
+        "assemble",
+        wraps=engine._prompt_composer.assemble,
     ) as composer:
         asyncio.run(engine.respond(42, "*осматриваюсь вокруг*"))
 

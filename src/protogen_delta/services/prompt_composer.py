@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
 
 ExampleContract = Literal["legacy", "isolated"]
@@ -122,46 +123,80 @@ class PromptComposer:
         female_configuration: bool = False,
         technical_context: bool = False,
     ) -> str:
+        """Собрать прежнюю строку из именованных тематических блоков."""
+        return self.assemble(
+            user_message,
+            is_roleplay=is_roleplay,
+            has_images=has_images,
+            has_custom_appearance=has_custom_appearance,
+            adult_context=adult_context,
+            female_configuration=female_configuration,
+            technical_context=technical_context,
+        ).render()
+
+    def assemble(
+        self,
+        user_message: str,
+        *,
+        is_roleplay: bool,
+        has_images: bool = False,
+        has_custom_appearance: bool = False,
+        adult_context: bool = False,
+        female_configuration: bool = False,
+        technical_context: bool = False,
+    ) -> PromptAssembly:
         """Собрать минимальный набор секций для текущего сообщения."""
-        parts = [self._sections.core]
+        parts = PromptAssembly()
+
+        def add(name: str) -> None:
+            """Применить прежнее удаление пробелов и разделитель секций."""
+            nonlocal parts
+            text: str = getattr(self._sections, name)
+            if text.strip():
+                parts = parts.append(
+                    name, ("\n\n" if parts.blocks else "") + text.strip()
+                )
+
+        add("core")
         if technical_context or _TECHNICAL_PATTERN.search(user_message):
-            parts.append(self._sections.technical)
+            add("technical")
         if has_images:
-            parts.append(self._sections.visual)
+            add("visual")
         if has_images or re.search(
             r"\b(?:фурр\w*|фурсон\w*|сергал\w*|sergal\w*|протоген\w*|protogen\w*|"
             r"примаген\w*|primagen\w*|синт(?:ы|а|ов)?|synth\w*|акул\w*|shark\w*|дракон\w*|dragon\w*)\b",
             user_message,
             re.I,
         ):
-            parts.append(self._sections.species)
+            add("species")
         if is_roleplay:
             if not has_custom_appearance:
-                parts.extend((self._sections.lore, self._sections.body))
+                add("lore")
+                add("body")
                 if female_configuration:
-                    parts.append(self._sections.female_body)
+                    add("female_body")
                 if adult_context:
-                    parts.append(
-                        self._sections.adult_body_female
+                    add(
+                        "adult_body_female"
                         if female_configuration
-                        else self._sections.adult_body_male
+                        else "adult_body_male"
                     )
-            parts.append(self._sections.roleplay)
+            add("roleplay")
             if adult_context:
-                parts.append(self._sections.adult_roleplay)
-            return self._join(parts)
+                add("adult_roleplay")
+            return parts
 
         if _LORE_PATTERN.search(user_message):
-            parts.append(self._sections.lore)
+            add("lore")
         if (
             _BODY_PATTERN.search(user_message)
             and not has_images
             and not has_custom_appearance
         ):
-            parts.append(self._sections.body)
+            add("body")
             if adult_context:
-                parts.append(self._sections.adult_body_male)
-        return self._join(parts)
+                add("adult_body_male")
+        return parts
 
     def examples(self, *, is_roleplay: bool) -> str:
         """Короткие образцы голоса, выбранные по режиму текущего ответа."""
