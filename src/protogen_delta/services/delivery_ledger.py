@@ -20,6 +20,7 @@ class DeliveryOperation:
     failed: bool = False
     completed: bool = False
     reply_started: bool = False
+    deferred: bool = False
 
     def result_state(self, *, command: bool) -> str:
         if self.uncertain:

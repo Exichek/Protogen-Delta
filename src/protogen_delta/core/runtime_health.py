@@ -40,6 +40,7 @@ class RuntimeHealth:
             "converter",
             "reminders",
             "archives",
+            "inputs",
         }:
             raise ValueError("Неизвестная подсистема диагностики")
         self._diagnostics[name] = snapshot

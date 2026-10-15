@@ -58,7 +58,8 @@ class DeliveryLedgerMiddleware(BaseMiddleware):
                 command=isinstance(event.text, str) and event.text.startswith("/")
             )
             try:
-                await self.repository.mark(key, state, operation.confirmed)
+                if not operation.deferred:
+                    await self.repository.mark(key, state, operation.confirmed)
             except asyncio.CancelledError:
                 raise
             except Exception:

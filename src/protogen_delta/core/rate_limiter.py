@@ -6,6 +6,55 @@ from math import isfinite
 from time import monotonic
 
 
+class MessageTokenBucket:
+    """Пропускать короткие пачки, молча ограничивая непрерывный поток сообщений."""
+
+    def __init__(
+        self,
+        refill_seconds: float = 2.5,
+        *,
+        capacity: int = 8,
+        privileged: frozenset[int] = frozenset(),
+        privileged_capacity: int = 16,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if (
+            not isfinite(refill_seconds)
+            or refill_seconds < 0
+            or type(capacity) is not int
+            or capacity < 1
+            or type(privileged_capacity) is not int
+            or privileged_capacity < capacity
+        ):
+            raise ValueError("Некорректные параметры ведра сообщений")
+        self._refill, self._capacity = refill_seconds, capacity
+        self._privileged, self._privileged_capacity = privileged, privileged_capacity
+        self._clock = clock
+        self._buckets: OrderedDict[int, tuple[float, float]] = OrderedDict()
+
+    def allow(self, user_id: int) -> bool:
+        """Израсходовать один жетон; отклонённые сообщения не продлевают запрет."""
+        if self._refill == 0:
+            return True
+        now = self._clock()
+        capacity = (
+            self._privileged_capacity if user_id in self._privileged else self._capacity
+        )
+        while self._buckets:
+            _, (_, updated) = next(iter(self._buckets.items()))
+            if now - updated < 300:
+                break
+            self._buckets.popitem(last=False)
+        tokens, updated = self._buckets.get(user_id, (float(capacity), now))
+        tokens = min(float(capacity), tokens + max(0, now - updated) / self._refill)
+        allowed = tokens >= 1
+        self._buckets[user_id] = (tokens - 1 if allowed else tokens, now)
+        self._buckets.move_to_end(user_id)
+        while len(self._buckets) > 8192:
+            self._buckets.popitem(last=False)
+        return allowed
+
+
 class UserRateLimiter:
     """Ограничивать частоту запросов отдельно для каждого пользователя."""
 

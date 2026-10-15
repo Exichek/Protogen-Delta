@@ -21,6 +21,7 @@ from protogen_delta.core.conversation_safety import (
 from protogen_delta.core.favorite_messages import FAVORITE_LABELS, FavoriteReason
 from protogen_delta.core.llm_budget import LlmBudgetError, user_scoped
 from protogen_delta.core.log_context import bind_log_context
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.core.reply_outcome import error_reply
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -292,6 +293,7 @@ class ResponseEngine:
         self._release_journal = release_journal
         self._github_reader = github_reader
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
+        self.cancel_pending_inputs: Callable[..., Awaitable[None]] | None = None
         self._delivering_users: set[StateKey] = set()
 
     def is_safety_signal(
@@ -307,6 +309,8 @@ class ResponseEngine:
     ) -> None:
         key: StateKey = user_id if chat_id is None else (chat_id, user_id)
         current = asyncio.current_task()
+        if self.cancel_pending_inputs is not None:
+            await self.cancel_pending_inputs(user_id, chat_id, all_chats=all_chats)
         tasks = [
             task
             for scope, task in tuple(self._reply_tasks.items())
@@ -347,7 +351,24 @@ class ResponseEngine:
         use_personal_facts: bool = True,
         chat_id: int | None = None,
     ) -> None:
-        """Отклонить повторный запрос и удержать lock до конца доставки."""
+        """Собрать часть пачки либо удержать блокировку до конца доставки."""
+        capture = current_reply_capture.get()
+        if capture is not None:
+            capture(
+                user_id,
+                user_message,
+                deliver,
+                {
+                    "images": images,
+                    "attachment_text": attachment_text,
+                    "attachment_name": attachment_name,
+                    "model_message_override": model_message_override,
+                    "trusted_input_context": trusted_input_context,
+                    "use_personal_facts": use_personal_facts,
+                    "chat_id": chat_id,
+                },
+            )
+            return
         key: StateKey = user_id if chat_id is None else (chat_id, user_id)
         control_text = model_message_override or user_message
         if self.is_safety_signal(user_id, control_text, chat_id=chat_id):

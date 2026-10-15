@@ -19,7 +19,6 @@ from protogen_delta.handlers.rp import (
 )
 from protogen_delta.handlers.text import (
     BUSY_REPLY,
-    RATE_LIMIT_REPLY,
     create_text_router,
 )
 from protogen_delta.handlers.unknown_command import (
@@ -339,8 +338,7 @@ def test_text_handler_rate_limits_repeated_messages() -> None:
         ANY,
     )
 
-    assert answer_mock.await_count == 2
-    assert answer_mock.await_args_list[1].args == (RATE_LIMIT_REPLY,)
+    assert answer_mock.await_count == 1
 
 
 def test_text_handler_rate_limit_is_per_user() -> None:

@@ -19,7 +19,7 @@ from protogen_delta.core.input_operations import (
     ReceiveInputsMiddleware,
 )
 from protogen_delta.core.logging_config import setup_logging
-from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.rate_limiter import MessageTokenBucket, UserRateLimiter
 from protogen_delta.core.runtime_health import PollingHealthMiddleware, RuntimeHealth
 from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 from protogen_delta.core.state import BotState
@@ -45,6 +45,7 @@ from protogen_delta.handlers.errors import register_error_handler
 from protogen_delta.handlers.favorites import create_favorites_router
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.image_source import create_image_source_router
+from protogen_delta.handlers.input_batches import InputBatchMiddleware
 from protogen_delta.handlers.llm_budget import LlmUserMiddleware
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.memory import create_memory_router
@@ -185,6 +186,7 @@ async def main() -> None:
     reminders: ReminderService | None = None
     dialogue_archive: DialogueArchiveService | None = None
     code_reviews: CodeReviewService | None = None
+    input_batches: InputBatchMiddleware | None = None
 
     try:
         usage_repository = LlmUsageRepository(
@@ -625,8 +627,24 @@ async def main() -> None:
             ),
         )
 
+        input_batches = InputBatchMiddleware(
+            response_engine,
+            input_operations,
+            delivery_ledger,
+            bucket=MessageTokenBucket(
+                refill_seconds=(
+                    max(2.5, settings.rate_limit_seconds)
+                    if settings.rate_limit_seconds
+                    else 0
+                ),
+                privileged=settings.recognized_creator_ids,
+            ),
+        )
+        response_engine.cancel_pending_inputs = input_batches.cancel
+        health.add_diagnostics("inputs", input_batches.snapshot)
         for router in (text_router, media_router, document_router, voice_router):
             router.message.middleware(MemoryInputsMiddleware(input_operations))
+            router.message.middleware(input_batches)
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(menu_router)
@@ -727,6 +745,8 @@ async def main() -> None:
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if input_batches is not None:
+            await input_batches.close()
         if code_reviews is not None:
             await code_reviews.close()
         if reminders is not None:
