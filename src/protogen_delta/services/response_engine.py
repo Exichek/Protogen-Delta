@@ -225,6 +225,7 @@ class _ReplyInput:
     use_personal_facts: bool
     remember_history: bool
     sources: tuple[ReplySource, ...]
+    delivery_context_present: bool = False
 
     @property
     def controls(self) -> tuple[str, ...]:
@@ -489,6 +490,7 @@ class ResponseEngine:
                             operation.completed = True
                             operation.answering = False
                     return reply
+                delivery_context_present = False
                 if self._creator_messages is not None and (
                     use_personal_facts or chat_id is not None
                 ):
@@ -497,6 +499,7 @@ class ResponseEngine:
                         user_message,
                         user_state.history_updated_at,
                     )
+                    delivery_context_present = bool(delivery_context)
                     trusted_input_context = (
                         "\n\n".join(
                             part
@@ -513,6 +516,7 @@ class ResponseEngine:
                     review_context = await self._code_reviews.context(
                         user_id, user_message, user_state.history_updated_at
                     )
+                    delivery_context_present |= bool(review_context)
                     trusted_input_context = (
                         "\n\n".join(
                             part
@@ -532,6 +536,7 @@ class ResponseEngine:
                     trusted_input_context=trusted_input_context,
                     use_personal_facts=use_personal_facts and chat_id is None,
                     remember_history=use_personal_facts or chat_id is not None,
+                    delivery_context_present=delivery_context_present,
                 )
                 reply = (
                     self._reply_transform(user_id, prepared.text)
@@ -623,6 +628,7 @@ class ResponseEngine:
         trusted_input_context: str | None = None,
         use_personal_facts: bool = True,
         remember_history: bool = True,
+        delivery_context_present: bool = False,
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         request = _ReplyInput(
@@ -647,6 +653,7 @@ class ResponseEngine:
                     and model_message_override is None
                 ),
             ),
+            delivery_context_present,
         )
         gates = await self._apply_reply_gates(request)
         if isinstance(gates, PreparedReply):
@@ -1161,8 +1168,12 @@ class ResponseEngine:
             if remember_history and not is_rp and not images and attachment_text is None
             else ""
         )
-        initiative_context = initiative_reply_context(
-            "\n".join(request.controls), user_state
+        initiative_context = (
+            initiative_reply_context("\n".join(request.controls), user_state)
+            if not is_rp
+            and not request.delivery_context_present
+            and not any(source.reply_target_present for source in request.sources)
+            else ""
         )
 
         trusted_input_context = (

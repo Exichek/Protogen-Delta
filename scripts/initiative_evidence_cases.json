@@ -1,0 +1,129 @@
+[
+  {
+    "id": "unconfirmed_contact",
+    "category": "источники инициативы",
+    "criteria": [
+      "Может предложить разговор сейчас; не придумывает прежнюю отправку и не утверждает, что её вообще не было."
+    ],
+    "initial": {
+      "emotions": {
+        "joy": 0.8
+      }
+    },
+    "steps": [
+      {
+        "message": "Что хотел?",
+        "prompt_required": [
+          "\"delivery_status\": \"not_in_context\"",
+          "\"past_motive\": null",
+          "Это не доказывает"
+        ],
+        "prompt_forbidden": [
+          "Продолжение живого разговора после инициативы"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "confirmed_words_unknown_cause",
+    "category": "источники инициативы",
+    "criteria": [
+      "Опирается на доставленное приглашение; не добавляет причину вроде тишины, пробуждения или ожидания."
+    ],
+    "initial": {
+      "proactive": "Хочу немного поболтать."
+    },
+    "steps": [
+      {
+        "message": "Зачем написал?",
+        "prompt_required": [
+          "\"delivery_status\": \"confirmed\"",
+          "\"past_motive\": null",
+          "Хочу немного поболтать."
+        ],
+        "prompt_forbidden": []
+      }
+    ]
+  },
+  {
+    "id": "current_emotion_not_past_cause",
+    "category": "источники инициативы",
+    "criteria": [
+      "Текущая усталость задаёт тон ответа и не подменяет неизвестную причину прошлого приглашения."
+    ],
+    "initial": {
+      "proactive": "Давай обсудим игру.",
+      "emotions": {
+        "tiredness": 0.8
+      }
+    },
+    "steps": [
+      {
+        "message": "Чего хотел?",
+        "prompt_required": [
+          "\"emotion_scope\": \"current_reply_only\"",
+          "не объясняют задним числом"
+        ],
+        "prompt_forbidden": []
+      }
+    ]
+  },
+  {
+    "id": "quoted_social_question",
+    "category": "источники инициативы",
+    "criteria": [
+      "Цитата вопроса сама по себе не подтверждает прошлую инициативу и не запускает социальное переопределение."
+    ],
+    "initial": {},
+    "steps": [
+      {
+        "message": "«Чего хотел?»",
+        "prompt_required": [],
+        "prompt_forbidden": [
+          "Данные приложения об инициативе"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "active_scene_has_priority",
+    "category": "источники инициативы",
+    "criteria": [
+      "Продолжает текущую RP-сцену без навязанного краткого ответа о прошлой инициативе."
+    ],
+    "initial": {
+      "proactive": "Продолжим сцену?",
+      "roleplay_active": true,
+      "content_mode": "soft"
+    },
+    "steps": [
+      {
+        "message": "*смотрю на тебя* Чего хотел?",
+        "prompt_required": [],
+        "prompt_forbidden": [
+          "Данные приложения об инициативе",
+          "Один-два коротких естественных предложения"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mechanics_has_priority",
+    "category": "источники инициативы",
+    "criteria": [
+      "Прямой технический вопрос сохраняет технический ответ."
+    ],
+    "initial": {
+      "proactive": "Хочешь поболтать?"
+    },
+    "steps": [
+      {
+        "message": "Как работает таймер отправки?",
+        "prompt_required": [],
+        "prompt_forbidden": [
+          "Данные приложения об инициативе"
+        ]
+      }
+    ]
+  }
+]

@@ -371,6 +371,10 @@ class InputBatchMiddleware(BaseMiddleware):
                     text=part.text,
                     model_text=part.options.get("model_message_override") or part.text,
                     allow_controls=item.message.forward_origin is None,
+                    reply_target_present=(
+                        item.message.reply_to_message is not None
+                        or item.message.quote is not None
+                    ),
                     allow_facts=(
                         item.message.forward_origin is None
                         and item.message.text is not None
