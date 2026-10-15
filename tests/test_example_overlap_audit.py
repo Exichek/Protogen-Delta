@@ -29,7 +29,7 @@ COPIED = "Ладно, этот заход был так себе. Считай, 
 
 
 def report(
-    reply: str = COPIED, message: str = "Ахах, ну ты выдал xD"
+    reply: str | None = COPIED, message: str = "Ахах, ну ты выдал xD"
 ) -> dict[str, Any]:
     """Синтетический результат того же формата, что у стенда поведения."""
     return {
@@ -61,6 +61,8 @@ def test_long_overlap_reproduces_known_signal_without_regrading_or_echoing_text(
         "responses": 1,
         "responses_with_matches": 1,
         "preview_skipped": 0,
+        "responses_with_history_matches": 0,
+        "generation_skipped": 0,
     }
     row = result["rows"][0]
     assert row["quality_review"] == "pending" and row["automatic_checks"] == "passed"
@@ -133,6 +135,8 @@ def test_preview_stays_unassessed_even_if_a_text_field_contains_the_sample() -> 
         "responses": 0,
         "responses_with_matches": 0,
         "preview_skipped": 1,
+        "responses_with_history_matches": 0,
+        "generation_skipped": 0,
     }
     assert result["rows"][0]["quality_review"] == "not_run"
 
@@ -218,3 +222,58 @@ def test_cli_is_offline_and_will_not_overwrite_input(
     with pytest.raises(SystemExit):
         audit_module.main()
     assert source.read_bytes() == raw
+
+
+def test_history_matches_are_within_the_same_case_variant_and_repeat() -> None:
+    """Одинаковые фразы разных ветвей эксперимента не считаются соседними репликами."""
+    repeated = "Обсудим сначала небольшой план, потом спокойно выберем один полезный следующий шаг."
+    source = report(repeated, "Что предлагаешь?")
+    rows = []
+    for contract, repeat, case, step in [
+        ("legacy", 1, "a", 1),
+        ("guidance", 1, "a", 2),
+        ("legacy", 2, "a", 2),
+        ("legacy", 1, "b", 2),
+        ("legacy", 1, "a", 2),
+    ]:
+        item = deepcopy(source["results"][0])
+        item.update(case=case, step=step)
+        rows.append(
+            {
+                "contract": contract,
+                "repeat": repeat,
+                "result": item,
+                "prompts": source["prompts"],
+            }
+        )
+    result = audit_module.audit({"mode": "model", "rows": rows}, EXAMPLES)
+    assert all(not row["history_matches"] for row in result["rows"][:-1])
+    assert result["rows"][-1]["history_matches"][0]["step"] == 1
+    assert result["summary"]["responses_with_history_matches"] == 1
+    assert repeated not in json.dumps(result, ensure_ascii=False)
+
+
+def test_quoted_earlier_reply_remains_a_signal_for_manual_reading() -> None:
+    source = report(
+        "Один длинный ответ с восемью словами можно процитировать по явной просьбе."
+    )
+    later = deepcopy(source["results"][0])
+    later.update(step=2, message=later["reply"])
+    source["results"].append(later)
+    result = audit_module.audit(source, EXAMPLES)
+    assert result["rows"][1]["history_matches"][0]["also_in_current_message"] is True
+    assert result["rows"][1]["quality_review"] == "pending"
+
+
+def test_application_failure_is_not_a_repeated_model_reply() -> None:
+    source = report(None)
+    source["results"][0].update(
+        generation_error=True, checks="failed", quality_review="not_run"
+    )
+    result = audit_module.audit(source, EXAMPLES)
+    assert result["rows"][0]["status"] == "generation_not_assessed"
+    assert (
+        result["summary"]["responses"] == 0
+        and result["summary"]["generation_skipped"] == 1
+    )
+    assert not result["rows"][0]["matches"] and not result["rows"][0]["history_matches"]

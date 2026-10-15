@@ -311,7 +311,8 @@ def test_preview_failure_and_exhausted_budget_are_not_success(
             await service.close()
         assert report["budget_exceeded"]
         assert report["results"][0]["checks"] == "failed"
-        assert len(report["results"][0]["errors"]) == 4
+        assert len(report["results"][0]["errors"]) == 5
+        assert report["results"][0]["generation_error"]
 
     asyncio.run(scenario())
 
@@ -336,7 +337,10 @@ def test_api_failure_cannot_pass_as_a_regular_reply(
             await service.close()
         assert report["results"][0]["checks"] == "failed"
         assert "Ошибка запроса API" in report["results"][0]["errors"]
-        assert report["results"][0]["quality_review"] == "pending"
+        assert report["results"][0]["quality_review"] == "not_run"
+        assert report["results"][0]["reply"] is None
+        assert report["results"][0]["style"] is None
+        assert report["results"][0]["generation_error"]
 
     asyncio.run(scenario())
 

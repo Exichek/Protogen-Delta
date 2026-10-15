@@ -10,7 +10,7 @@ from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
 
-ExampleContract = Literal["legacy", "isolated"]
+ExampleContract = Literal["legacy", "isolated", "guidance"]
 
 _LORE_PATTERN = re.compile(
     r"\b(?:протоген\w*|киборг\w*|нанит\w*|визор\w*|кто\s+ты|"
@@ -91,6 +91,14 @@ class PromptSections:
 
 
 @dataclass(frozen=True, slots=True)
+class ExampleGuidance:
+    """Оценочный кандидат: ориентиры манеры без готовых реплик и сюжетов."""
+
+    voice: str
+    scene: str
+
+
+@dataclass(frozen=True, slots=True)
 class HistorySelection:
     """Краткое резюме старых ходов и последние живые ходы."""
 
@@ -102,13 +110,22 @@ class PromptComposer:
     """Подключать тяжёлые секции промпта только по контексту запроса."""
 
     def __init__(
-        self, sections: PromptSections, *, example_contract: ExampleContract = "legacy"
+        self,
+        sections: PromptSections,
+        *,
+        example_contract: ExampleContract = "legacy",
+        guidance: ExampleGuidance | None = None,
     ) -> None:
         """Сохранить предварительно загруженные секции промпта."""
         if not sections.core.strip():
             raise ValueError("Основная секция промпта не может быть пустой")
-        if example_contract not in {"legacy", "isolated"}:
+        if example_contract not in {"legacy", "isolated", "guidance"}:
             raise ValueError("Неизвестный контракт стилевых примеров")
+        if example_contract == "guidance" and (
+            guidance is None or not guidance.voice.strip() or not guidance.scene.strip()
+        ):
+            raise ValueError("Кандидату guidance нужны оба текста ориентиров манеры")
+        self._guidance = guidance
         self._sections = sections
         self.example_contract = example_contract
 
@@ -200,6 +217,11 @@ class PromptComposer:
 
     def examples(self, *, is_roleplay: bool) -> str:
         """Короткие образцы голоса, выбранные по режиму текущего ответа."""
+        if self.example_contract == "guidance":
+            assert self._guidance is not None
+            return self._join(
+                [self._guidance.voice, self._guidance.scene if is_roleplay else ""]
+            )
         if self.example_contract == "isolated":
             samples = {"образцы_голоса": self._sections.voice}
             if is_roleplay:
