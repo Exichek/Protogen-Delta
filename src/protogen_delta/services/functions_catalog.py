@@ -3,6 +3,7 @@
 from protogen_delta.config.settings import Settings
 from protogen_delta.core.telegram_commands import commands_for_mode
 from protogen_delta.core.user_state import ContentMode
+from protogen_delta.services.privacy_notice import DATA_NOTICE
 
 
 def functions_text(
@@ -31,6 +32,7 @@ def functions_text(
         "reminders": "личный список; /reminders cancel 12 — отменить своё напоминание",
         "reset": "полностью сбросить диалог и память (с подтверждением)",
         "help": "помощь и этот же список функций",
+        "privacy": "как передаются, сохраняются и удаляются данные",
     }
     if settings is not None and not settings.saucenao_api_key:
         descriptions["source"] = "поиск источника арта; сейчас сервис не подключён"
@@ -74,4 +76,4 @@ def functions_text(
                 "• «RP и функции» — облик по картинке или тексту, "
                 "исправление описания и вида, характер облика Дельты, свой персонаж по арту."
             )
-    return "\n".join(lines)
+    return "\n".join([*lines, "", DATA_NOTICE])

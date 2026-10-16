@@ -317,8 +317,7 @@ class UserState:
         self.delta_reference_restricted = False
         self.roleplay_stopword = "стоп"
         self.roleplay_allow_profanity = False
-        self.content_mode = "unselected"
-        self.age_restricted = False
+        self.content_mode = "soft" if self.age_restricted else "unselected"
 
 
 class UserStateStore:
@@ -356,6 +355,7 @@ class UserStateStore:
         self._clock = clock or monotonic
         self._wall_clock = wall_clock or time
         self._persistence = persistence
+        self._age_restrictions: set[int] = set()
 
     def get(self, user_id: StateKey) -> UserState:
         """Получить runtime-состояние пользователя или создать новое."""
@@ -382,6 +382,12 @@ class UserStateStore:
             state.last_accessed_at = now
             self._states.move_to_end(user_id)
 
+        owner = user_id if isinstance(user_id, int) else user_id[1]
+        if state.age_restricted:
+            self._age_restrictions.add(owner)
+        if owner in self._age_restrictions:
+            state.age_restricted = True
+            state.content_mode = "soft"
         return state
 
     @asynccontextmanager
@@ -481,6 +487,9 @@ class UserStateStore:
                 try:
                     yield state
                 finally:
+                    if state.age_restricted:
+                        owner = user_id if isinstance(user_id, int) else user_id[1]
+                        self._age_restrictions.add(owner)
                     if tuple(state.history) != original_history:
                         state.history_updated_at = (
                             self._wall_clock() if state.history else 0.0
@@ -609,6 +618,7 @@ class UserStateStore:
     ) -> None:
         """Завершить удаление и сброс RAM вместе, даже при отмене ожидающего запроса."""
         if self._persistence is not None:
+            await self._load_persistent_state(user_id, state)
             await self._persistence.delete(user_id)
         if isinstance(user_id, int):
             for key, conversation in self._states.items():
