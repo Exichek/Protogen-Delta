@@ -487,6 +487,7 @@ def test_main_builds_application_and_starts_polling(
         rate_limiter=ANY,
         bot=bot_mock,
         sticker_service=ANY,
+        reaction_service=ANY,
     )
 
     start_router_call = create_start_router_mock.call_args
@@ -622,6 +623,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         native_work=ANY,
     )
     create_document_router_mock.assert_called_once_with(
@@ -629,6 +631,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         ocr_enabled=False,
         native_work=ANY,
     )
@@ -644,6 +647,7 @@ def test_main_builds_application_and_starts_polling(
         speech_transcriber,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         audio_understanding=None,
         music_recognition=None,
         native_work=ANY,

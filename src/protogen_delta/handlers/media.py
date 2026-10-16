@@ -18,6 +18,7 @@ from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.animation_frames import extract_animation_frames
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.deepseek import ImageInput
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
     ResponseBusyError,
@@ -167,6 +168,7 @@ def create_media_router(
     album_delay_seconds: float = 1.2,
     sticker_service: ContextualStickerService | None = None,
     *,
+    reaction_service: MessageReactionService | None = None,
     native_work: WorkRunner | None = None,
 ) -> Router:
     """Создать роутер поддерживаемых изображений и стикеров."""
@@ -203,6 +205,7 @@ def create_media_router(
                         bot,
                         sticker_service,
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         context_tags=("media",),
                     ),
                     images=images,

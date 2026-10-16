@@ -23,6 +23,7 @@ from protogen_delta.services.documents import (
     UnsupportedDocumentError,
     extract_document,
 )
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.music import is_audio_file
 from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
@@ -61,6 +62,7 @@ def create_document_router(
     rate_limiter: UserRateLimiter | None = None,
     sticker_service: ContextualStickerService | None = None,
     *,
+    reaction_service: MessageReactionService | None = None,
     ocr_enabled: bool = False,
     native_work: WorkRunner | None = None,
 ) -> Router:
@@ -161,6 +163,7 @@ def create_document_router(
                         bot,
                         sticker_service,
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         context_tags=("document",),
                     ),
                     attachment_text=attachment_text,
