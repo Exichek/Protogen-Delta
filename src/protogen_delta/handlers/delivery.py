@@ -20,6 +20,7 @@ from protogen_delta.core.message_utils import (
 )
 from protogen_delta.core.reaction_receipt import reaction_receipt
 from protogen_delta.core.reply_capture import current_reply_capture
+from protogen_delta.core.reply_formatting import format_reply_parts
 from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.response_engine import ReplyDelivery
 from protogen_delta.services.stickers import ContextualStickerService
@@ -87,6 +88,7 @@ def create_reply_delivery(
 
     async def deliver(reply: str) -> None:
         chunks = split_message(reply) if format_capabilities else split_reply(reply)
+        formatted = format_reply_parts(chunks) if not format_capabilities else []
         started = perf_counter()
         sent = 0
         outcome = "failed"
@@ -108,7 +110,11 @@ def create_reply_delivery(
                     text, entities = format_capability_headings(chunk)
                     await message.answer(text, entities=entities, parse_mode=None)
                 else:
-                    await message.answer(chunk)
+                    text, entities = formatted[index]
+                    if entities:
+                        await message.answer(text, entities=entities, parse_mode=None)
+                    else:
+                        await message.answer(text)
                 sent += 1
             reacted = False
             if reaction_service is not None and user_id is not None and sent:

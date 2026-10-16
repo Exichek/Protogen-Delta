@@ -73,6 +73,7 @@ from protogen_delta.services.code_review import CodeReviewService
 from protogen_delta.services.conversation_grounding import (
     current_time_context,
     recall_grounding_context,
+    self_status_context,
 )
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import (
@@ -360,7 +361,11 @@ class ResponseEngine:
     ) -> bool:
         state = self._user_states.get_conversation(user_id, chat_id)
         return declares_minor(text) or (
-            state.roleplay_active and is_scene_stop(text, state.roleplay_stopword)
+            state.roleplay_active
+            and (
+                is_scene_stop(text, state.roleplay_stopword)
+                or split_roleplay_stop(text) is not None
+            )
         )
 
     async def _interrupt_reply(
@@ -701,7 +706,8 @@ class ResponseEngine:
         use_personal_facts = request.use_personal_facts
         user_message = request.user_message
         controls = request.controls
-        remaining = split_roleplay_stop(controls[0]) if len(controls) == 1 else None
+        stops = tuple(split_roleplay_stop(text) for text in controls)
+        remaining = stops[0] if len(stops) == 1 else None
 
         if user_state.roleplay_active and any(
             is_scene_stop(text, user_state.roleplay_stopword) for text in controls
@@ -711,15 +717,16 @@ class ResponseEngine:
                 "Остановился. Сцена завершена; можем просто поговорить."
             )
 
-        stopped = remaining is not None
+        stopped = any(stop is not None for stop in stops)
 
         was_roleplay_active = user_state.roleplay_active
 
         if stopped:
             user_state.stop_roleplay()
-            if not remaining:
+            if any(stop == "" for stop in stops):
                 return PreparedReply("RP-режим завершён.")
-            user_message = remaining
+            if remaining is not None:
+                user_message = remaining
 
         if (
             not images
@@ -1310,6 +1317,9 @@ class ResponseEngine:
                     recall_grounding_context(
                         request.controls,
                         tuple(user_state.history) if remember_history else (),
+                    ),
+                    self_status_context(
+                        request.controls, user_state, is_roleplay=is_rp
                     ),
                 )
                 if part

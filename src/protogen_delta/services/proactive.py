@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
+from protogen_delta.core.reply_formatting import format_reply_text
 from protogen_delta.core.roleplay import has_roleplay_action
 from protogen_delta.core.user_state import (
     ConversationTurn,
@@ -242,7 +243,13 @@ class ProactiveMessenger:
                     return False
                 text = label
             else:
-                await self._bot.send_message(user_id, text)
+                visible, entities = format_reply_text(text)
+                if entities:
+                    await self._bot.send_message(
+                        user_id, visible, entities=entities, parse_mode=None
+                    )
+                else:
+                    await self._bot.send_message(user_id, text)
             if self._user_states is not None:
                 state = self._user_states.get(user_id)
                 state.history.append(ConversationTurn("", text, proactive=True))
