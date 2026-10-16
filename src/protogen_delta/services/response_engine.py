@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from protogen_delta.core.appearance_profile import (
@@ -114,6 +114,10 @@ from protogen_delta.services.scene_continuity import scene_continuity_context
 from protogen_delta.services.source_access import SourceAccess, source_owner
 from protogen_delta.services.species_catalog import species_catalog
 from protogen_delta.services.state_context import build_state_context
+from protogen_delta.services.turn_contract import (
+    closes_technical_topic,
+    turn_contract_context,
+)
 from protogen_delta.services.visual_model import VisualModel
 from protogen_delta.services.visual_reply_context import append_visual_reply_context
 
@@ -759,6 +763,19 @@ class ResponseEngine:
             and model_message_override is None
         )
 
+        if any(closes_technical_topic(text) for text in controls):
+            closed = tuple(
+                (
+                    replace(turn, context_closed=True)
+                    if PromptComposer.is_technical(turn.user_message)
+                    or PromptComposer.is_technical(turn.assistant_message)
+                    else turn
+                )
+                for turn in user_state.history
+            )
+            user_state.history.clear()
+            user_state.history.extend(closed)
+
         technical_topic = capability_overview or (
             (
                 PromptComposer.is_technical(user_message)
@@ -1266,6 +1283,7 @@ class ResponseEngine:
                 )
             ),
             capability_overview=capability_overview,
+            turn_context=turn_contract_context(request.controls),
         )
 
         return _ReplyContext(prompt, history, bool(github_context))
@@ -1916,6 +1934,7 @@ class ResponseEngine:
         female_configuration: bool = False,
         technical_context: bool = False,
         capability_overview: bool = False,
+        turn_context: str = "",
     ) -> str:
         """Вернуть прежний текст, собранный из именованных блоков."""
         return self._assemble_prompt(
@@ -1937,6 +1956,7 @@ class ResponseEngine:
             female_configuration=female_configuration,
             technical_context=technical_context,
             capability_overview=capability_overview,
+            turn_context=turn_context,
         ).render()
 
     def _assemble_prompt(
@@ -1959,6 +1979,7 @@ class ResponseEngine:
         female_configuration: bool = False,
         technical_context: bool = False,
         capability_overview: bool = False,
+        turn_context: str = "",
     ) -> PromptAssembly:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._prompt_composer.assemble(
@@ -2151,6 +2172,8 @@ class ResponseEngine:
                 "\n\n## Обзор возможностей для текущего вопроса\n"
                 + self._config.capabilities_overview_context,
             )
+        if turn_context:
+            prompt = prompt.append("turn_contract", "\n\n" + turn_context)
         return prompt
 
     @staticmethod
