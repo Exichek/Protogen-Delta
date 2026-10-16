@@ -11,6 +11,7 @@ import pytest
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.maintenance import copy_snapshot, main
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
 from protogen_delta.repositories.dialogue_archive import (
     DialogueArchiveRepository,
     DialogueMessage,
@@ -50,6 +51,9 @@ def seed(path: Path) -> None:
 def test_backup_restore_and_restart(tmp_path: Path) -> None:
     source, backup, restored = (tmp_path / name for name in ("data", "backup", "new"))
     seed(source)
+    ledger = DeliveryLedgerRepository(source)
+    asyncio.run(ledger.claim(123, "telegram:private:1"))
+    asyncio.run(ledger.mark("telegram:private:1", "answered", 1))
     asyncio.run(
         UserFactsRepository(source).apply(
             123, [FactChange("name", "replace", "Exi", "Зови меня Exi")], 20.0
@@ -69,6 +73,9 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     UsersRepository(source).remove(123)
     asyncio.run(UserStateRepository(source).delete(123))
     copy_snapshot(backup, restored)
+    assert not asyncio.run(
+        DeliveryLedgerRepository(restored).claim(123, "telegram:private:1")
+    )
     assert UsersRepository(restored).get_all() == [123]
     assert asyncio.run(UserFactsRepository(restored).all(123))[0].value == "Exi"
     statistics = asyncio.run(UserStatisticsRepository(restored).get(123, 20.0))
