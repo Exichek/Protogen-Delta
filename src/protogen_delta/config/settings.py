@@ -30,6 +30,9 @@ class Settings:
     mini_app_host: str = "127.0.0.1"
     mini_app_port: int = 8080
     mini_app_auth_max_age_seconds: int = 3600
+    message_reactions_enabled: bool = True
+    message_reaction_chance: float = 0.35
+    message_reaction_cooldown_seconds: float = 120.0
     sticker_reaction_chance: float = 0.35
     sticker_cooldown_seconds: float = 180.0
     sticker_min_replies: int = 3
@@ -384,6 +387,18 @@ def load_settings() -> Settings:
         os.getenv("E621_REQUEST_INTERVAL_SECONDS", "1.0"),
         "E621_REQUEST_INTERVAL_SECONDS",
     )
+    message_reactions_enabled = _parse_bool(
+        os.getenv("MESSAGE_REACTIONS_ENABLED", "true"), "MESSAGE_REACTIONS_ENABLED"
+    )
+    message_reaction_chance = _parse_non_negative_float(
+        os.getenv("MESSAGE_REACTION_CHANCE", "0.35"), "MESSAGE_REACTION_CHANCE"
+    )
+    if message_reaction_chance > 1:
+        raise ValueError("MESSAGE_REACTION_CHANCE не может быть больше 1")
+    message_reaction_cooldown_seconds = _parse_non_negative_float(
+        os.getenv("MESSAGE_REACTION_COOLDOWN_SECONDS", "120"),
+        "MESSAGE_REACTION_COOLDOWN_SECONDS",
+    )
     sticker_reaction_chance = _parse_non_negative_float(
         os.getenv("STICKER_REACTION_CHANCE", "0.35"),
         "STICKER_REACTION_CHANCE",
@@ -444,6 +459,9 @@ def load_settings() -> Settings:
         mini_app_host=mini_app_host,
         mini_app_port=mini_app_port,
         mini_app_auth_max_age_seconds=mini_app_auth_max_age_seconds,
+        message_reactions_enabled=message_reactions_enabled,
+        message_reaction_chance=message_reaction_chance,
+        message_reaction_cooldown_seconds=message_reaction_cooldown_seconds,
         sticker_reaction_chance=sticker_reaction_chance,
         sticker_cooldown_seconds=sticker_cooldown_seconds,
         sticker_min_replies=sticker_min_replies,

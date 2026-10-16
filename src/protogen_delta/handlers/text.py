@@ -16,6 +16,7 @@ from protogen_delta.services.appearance_preferences_query import (
     is_appearance_preferences_query,
 )
 from protogen_delta.services.capabilities import is_capability_overview
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -33,6 +34,8 @@ def create_text_router(
     rate_limiter: UserRateLimiter | None = None,
     bot: Bot | None = None,
     sticker_service: ContextualStickerService | None = None,
+    *,
+    reaction_service: MessageReactionService | None = None,
 ) -> Router:
     """Создать роутер обычных текстовых сообщений."""
     router = Router(name=__name__)
@@ -120,6 +123,7 @@ def create_text_router(
                             else sticker_service
                         ),
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         format_capabilities=is_capability_overview(message.text),
                     ),
                     **input_context,

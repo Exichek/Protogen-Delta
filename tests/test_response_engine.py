@@ -50,6 +50,26 @@ from protogen_delta.services.response_engine import (
 TEST_USER_ID = 123456
 
 
+def test_confirmed_reaction_is_remembered_only_for_its_own_turn() -> None:
+    from protogen_delta.core.reaction_receipt import reaction_receipt
+
+    async def run() -> None:
+        engine, _, _, _, _, _ = _create_engine()
+
+        async def deliver(reply: str) -> None:
+            assert "Подтверждённое" not in reply
+            reaction_receipt.set("❤")
+
+        await engine.respond_and_deliver(TEST_USER_ID, "Обнимаю", deliver)
+        history = engine._user_states.get(TEST_USER_ID).history
+        assert "Подтверждённое действие Дельты" in history[-1].assistant_message
+        assert reaction_receipt.get() is None
+        await engine.respond(TEST_USER_ID, "Как дела?")
+        assert "Подтверждённое" not in history[-1].assistant_message
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize(
     "scope", ["private", "group", "no_facts", "restricted", "other_owner"]
 )

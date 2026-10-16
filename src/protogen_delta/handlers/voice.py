@@ -16,6 +16,7 @@ from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.audio_pipeline import AudioPipeline
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.music import (
     MusicRecognitionService,
 )
@@ -48,6 +49,7 @@ def create_voice_router(
     audio_understanding: AudioUnderstandingService | None = None,
     music_recognition: MusicRecognitionService | None = None,
     *,
+    reaction_service: MessageReactionService | None = None,
     native_work: WorkRunner | None = None,
 ) -> Router:
     """Создать роутер распознавания голосовых и обычного аудио."""
@@ -257,6 +259,7 @@ def create_voice_router(
                         bot,
                         sticker_service,
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         context_tags=("voice",),
                     ),
                     model_message_override=model_message,

@@ -101,6 +101,7 @@ from protogen_delta.services.market_http import MarketHTTP
 from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.menu_sync import synchronize_menus
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.mood import MoodClassifier
 from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
@@ -421,6 +422,16 @@ async def main() -> None:
         release_journal = ReleaseJournal(
             settings.data_dir, settings.recognized_creator_ids, health=health
         )
+        reaction_service = (
+            MessageReactionService(
+                bot,
+                user_states,
+                chance=settings.message_reaction_chance,
+                cooldown_seconds=settings.message_reaction_cooldown_seconds,
+            )
+            if settings.message_reactions_enabled
+            else None
+        )
         sticker_service = ContextualStickerService(
             bot,
             stickers_repository,
@@ -570,12 +581,14 @@ async def main() -> None:
             rate_limiter=rate_limiter,
             bot=bot,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
         )
         media_router = create_media_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
         )
         document_router = create_document_router(
@@ -583,6 +596,7 @@ async def main() -> None:
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
             ocr_enabled=settings.pdf_ocr_enabled,
         )
@@ -599,6 +613,7 @@ async def main() -> None:
             transcriber,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
             audio_understanding=audio_understanding,
             music_recognition=(

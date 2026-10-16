@@ -8,6 +8,46 @@ import protogen_delta.config.settings as settings_module
 from protogen_delta.config.settings import load_settings
 
 
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("MESSAGE_REACTIONS_ENABLED", "invalid"),
+        ("MESSAGE_REACTION_CHANCE", "1.1"),
+        ("MESSAGE_REACTION_CHANCE", "-1"),
+        ("MESSAGE_REACTION_CHANCE", "nan"),
+        ("MESSAGE_REACTION_COOLDOWN_SECONDS", "-1"),
+        ("MESSAGE_REACTION_COOLDOWN_SECONDS", "inf"),
+    ],
+)
+def test_message_reaction_configuration_validation(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        load_settings()
+
+
+def test_message_reactions_can_be_disabled_without_disabling_stickers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv("MESSAGE_REACTIONS_ENABLED", "false")
+    monkeypatch.setenv("MESSAGE_REACTION_CHANCE", "0.6")
+    monkeypatch.setenv("MESSAGE_REACTION_COOLDOWN_SECONDS", "90")
+    settings = load_settings()
+    assert not settings.message_reactions_enabled
+    assert settings.message_reaction_chance == 0.6
+    assert settings.message_reaction_cooldown_seconds == 90
+    assert settings.sticker_pack_enabled
+
+
 def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     """Не позволять тестам читать настоящий файл .env."""
     monkeypatch.setattr(

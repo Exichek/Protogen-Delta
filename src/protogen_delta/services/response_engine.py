@@ -21,6 +21,10 @@ from protogen_delta.core.conversation_safety import (
 from protogen_delta.core.favorite_messages import FAVORITE_LABELS, FavoriteReason
 from protogen_delta.core.llm_budget import LlmBudgetError, user_scoped
 from protogen_delta.core.log_context import bind_log_context
+from protogen_delta.core.reaction_receipt import (
+    reaction_receipt_scope,
+    with_reaction_receipt,
+)
 from protogen_delta.core.reply_capture import (
     ReplySource,
     current_reply_capture,
@@ -470,7 +474,7 @@ class ResponseEngine:
         chat_id: int | None = None,
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
-        with bind_log_context(user_id=user_id):
+        with bind_log_context(user_id=user_id), reaction_receipt_scope():
             minor_declared = any(
                 source.allow_controls and declares_minor(source.model_text)
                 for source in _reply_sources(
@@ -569,7 +573,7 @@ class ResponseEngine:
                             (
                                 "Просьба забыть сведения обработана."
                                 if prepared.forgotten
-                                else reply
+                                else with_reaction_receipt(reply)
                             ),
                             sender_id=(
                                 sender.user_id

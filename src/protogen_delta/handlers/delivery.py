@@ -18,7 +18,9 @@ from protogen_delta.core.message_utils import (
     split_message,
     split_reply,
 )
+from protogen_delta.core.reaction_receipt import reaction_receipt
 from protogen_delta.core.reply_capture import current_reply_capture
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.response_engine import ReplyDelivery
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -79,6 +81,7 @@ def create_reply_delivery(
     user_id: int | None = None,
     context_tags: Collection[str] = (),
     format_capabilities: bool = False,
+    reaction_service: MessageReactionService | None = None,
 ) -> ReplyDelivery:
     """Создать отправку ответа частями со статусом набора и паузами."""
 
@@ -107,7 +110,16 @@ def create_reply_delivery(
                 else:
                     await message.answer(chunk)
                 sent += 1
-            if sticker_service is not None and user_id is not None:
+            reacted = False
+            if reaction_service is not None and user_id is not None and sent:
+                try:
+                    emoji = await reaction_service.maybe_react(message, reply, user_id)
+                    if emoji is not None:
+                        reaction_receipt.set(emoji)
+                        reacted = True
+                except Exception:
+                    logger.warning("Не удалось обработать реакцию Telegram")
+            if not reacted and sticker_service is not None and user_id is not None:
                 try:
                     context_text = message.text or message.caption or ""
                     if message.sticker is not None:

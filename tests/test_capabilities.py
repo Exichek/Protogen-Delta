@@ -29,6 +29,15 @@ def _settings() -> Settings:
     return Settings(telegram_token="test", deepseek_api_key="test", art_chat_id=1)
 
 
+def test_reaction_capability_requires_enabled_nonzero_chance() -> None:
+    assert "эмодзи-реакции" in build_capabilities(_settings()).summary
+    for settings in (
+        replace(_settings(), message_reactions_enabled=False),
+        replace(_settings(), message_reaction_chance=0),
+    ):
+        assert "эмодзи-реакции" not in build_capabilities(settings).summary
+
+
 @pytest.mark.parametrize("provider", ["deepseek", "openai-compatible"])
 def test_implementation_facts_follow_settings_without_exposing_credentials(
     provider: str,
