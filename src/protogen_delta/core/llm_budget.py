@@ -28,6 +28,14 @@ class LlmUsageUnavailableError(LlmBudgetError):
         super().__init__("Учёт запросов к модели сейчас недоступен. Попробуй позже.")
 
 
+class LlmGlobalLimitError(LlmBudgetError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Общий дневной лимит запросов бота к модели исчерпан. "
+            "Он обновится в 00:00 по Москве. Профиль и память сохранены."
+        )
+
+
 @contextmanager
 def llm_user(user_id: int | None, chat_id: int | None = None) -> Iterator[None]:
     token = current_llm_user.set(user_id)

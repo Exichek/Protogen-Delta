@@ -40,12 +40,12 @@ async def accounted_completion(
     client: AsyncOpenAI, repository: LlmUsageRepository | None, **kwargs: Any
 ) -> tuple[Any, LlmReservation | None]:
     user_id = current_llm_user.get()
-    if repository is None or user_id is None:
+    if repository is None:
         return await client.chat.completions.create(**kwargs), None
     retries = client.max_retries
     single_attempt_client = client.with_options(max_retries=0)
     for attempt in range(retries + 1):
-        receipt = await repository.reserve(user_id)
+        receipt = await repository.reserve(user_id if user_id is not None else 0)
         try:
             return (
                 await single_attempt_client.chat.completions.create(**kwargs),

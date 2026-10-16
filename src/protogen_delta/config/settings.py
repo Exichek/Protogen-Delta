@@ -58,6 +58,8 @@ class Settings:
     e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
     llm_daily_request_limit: int = 300
+    llm_global_daily_request_limit: int = 3000
+    llm_budget_alert_user_id: int | None = field(default=None, repr=False)
     llm_daily_request_limit_overrides: dict[int, int] = field(
         default_factory=dict, repr=False
     )
@@ -506,6 +508,17 @@ def load_settings() -> Settings:
         rate_limit_seconds=rate_limit_seconds,
         llm_daily_request_limit=_parse_positive_int(
             os.getenv("LLM_DAILY_REQUEST_LIMIT", "300"), "LLM_DAILY_REQUEST_LIMIT"
+        ),
+        llm_global_daily_request_limit=_parse_positive_int(
+            os.getenv("LLM_GLOBAL_DAILY_REQUEST_LIMIT", "3000"),
+            "LLM_GLOBAL_DAILY_REQUEST_LIMIT",
+        ),
+        llm_budget_alert_user_id=(
+            _parse_positive_int(
+                os.environ["LLM_BUDGET_ALERT_USER_ID"], "LLM_BUDGET_ALERT_USER_ID"
+            )
+            if os.getenv("LLM_BUDGET_ALERT_USER_ID", "").strip()
+            else None
         ),
         llm_daily_request_limit_overrides=_parse_llm_limit_overrides(
             os.getenv("LLM_DAILY_REQUEST_LIMIT_OVERRIDES", "{}")
