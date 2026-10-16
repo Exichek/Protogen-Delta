@@ -33,6 +33,13 @@ _LINES = re.compile(
     r"(?P<count>одну|две|три|1|2|3)\s+строк[иу]?\b",
     re.I,
 )
+_SENTENCES = re.compile(
+    r"(?:(?P<request>\b(?:ответь|отвечай|скажи|напиши|расскажи|уложись)\s+"
+    r"(?:(?:мне|пожалуйста|в)\s+){0,3})|(?:^|[.!?;\n])\s*)"
+    r"(?P<count>одним|одном|одно|двумя|двух|два|тремя|тр[её]х|три|[123])\s+"
+    r"(?:(?:коротк\w*|небольш\w*)\s+){0,2}предложени\w*\b",
+    re.I,
+)
 
 
 def unquoted_control_text(message: str) -> str:
@@ -70,6 +77,28 @@ def turn_contract_context(
     # Последняя собственная реплика может изменить форму просьбы внутри пачки.
     for message in messages[-1:]:
         visible = unquoted_control_text(message)
+        sentence = _SENTENCES.search(visible)
+        sentence_end = sentence.end() if sentence else 0
+        if (
+            sentence
+            and (sentence["request"] or not visible[sentence_end:].strip(" .!?…\n"))
+            and not re.search(r"\bне\s*$", visible[: sentence.start()], re.I)
+        ):
+            word = sentence["count"].casefold()
+            count = (
+                "1"
+                if word.startswith("од")
+                else (
+                    "2"
+                    if word in {"двумя", "двух", "два"}
+                    else "3" if word.startswith("тр") else word
+                )
+            )
+            rules.append(
+                f"Ровно {count} предложений всего, включая ремарки действий, вступление и подпись. "
+                "Считай ремарки частью общего лимита; "
+                "не добавляй пояснение после запрошенного ответа."
+            )
         for item in _ONE_ITEM.finditer(visible):
             if re.search(r"\bне\s*$", visible[: item.start()], re.I):
                 continue

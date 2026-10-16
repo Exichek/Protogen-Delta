@@ -5,7 +5,8 @@ import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
-from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.core.user_state import ConversationTurn, UserState
+from protogen_delta.services.initiative_context import initiative_mood_context
 
 _MSK = timezone(timedelta(hours=3), "МСК")
 _QUOTED = re.compile(
@@ -19,6 +20,34 @@ _RECALL = re.compile(
     r"\b(?:тогда|прошл\w*|истори\w*|образц\w*|пример\w*|ячее\w*)\b",
     re.I | re.S,
 )
+_SELF_STATUS = re.compile(
+    r"\bкак\s+ты(?:\s+сам)?(?:\s+(?:сейчас|сегодня|там))?\s*(?:[?!.🙂😊]|$)|"
+    r"\bты(?:\s+сам)?(?:\s+(?:сейчас|сегодня|там))?\s+как\s*(?:[?!.🙂😊]|$)|"
+    r"\bкак\s+(?:дела|твой\s+день|тво[её]\s+настроение)\s*(?:[?!.🙂😊]|$)|"
+    r"\bкак\s+ты\s+себя\s+чувствуешь\b|"
+    r"\bкак\s+у\s+тебя\s+(?:дела|день|настроение)\b|"
+    r"\bкак\s+(?:прош[её]л|проходит)\s+(?:твой|у\s+тебя)\s*день\b",
+    re.I,
+)
+
+
+def self_status_context(
+    controls: Sequence[str], state: UserState, *, is_roleplay: bool
+) -> str:
+    """На вопрос о себе использовать текущие эмоции без придумывания биографии."""
+    if is_roleplay or not any(
+        _SELF_STATUS.search(_QUOTED.sub(" ", text)) for text in controls
+    ):
+        return ""
+    return (
+        "## Текущий ответ о себе\n"
+        + initiative_mood_context(state)
+        + " Не описывай целый день как спокойный или прошедший без происшествий "
+        "на основании текущего настроения. О прошлых событиях можно сказать только "
+        "по доступным репликам или подтверждённым сведениям; не достраивай занятия "
+        "между сообщениями. Отвечай живо от первого лица, без технических оговорок "
+        "о хранении эмоций и без обязательного встречного вопроса."
+    )
 
 
 def current_time_context(at: float, *, is_roleplay: bool) -> str:
