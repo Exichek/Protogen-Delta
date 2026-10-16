@@ -35,35 +35,41 @@ _LINES = re.compile(
 )
 
 
-def _visible(message: str) -> str:
+def unquoted_control_text(message: str) -> str:
     """Оставить координаты исходного текста, скрыв недоверенные цитаты и код."""
     return _QUOTED.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), message)
 
 
 def closes_technical_topic(message: str) -> bool:
-    return _TECHNICAL_CLOSURE.search(_visible(message)) is not None
+    return _TECHNICAL_CLOSURE.search(unquoted_control_text(message)) is not None
 
 
 def technical_request_text(message: str) -> str:
     """Закрытие кода не включает технический режим, новая просьба после него может."""
-    matches = list(_TECHNICAL_CLOSURE.finditer(_visible(message)))
+    matches = list(_TECHNICAL_CLOSURE.finditer(unquoted_control_text(message)))
     for match in reversed(matches):
         start, end = match.span()
         message = message[:start] + " " + message[end:]
     return message
 
 
-def turn_contract_context(messages: Sequence[str]) -> str:
+def turn_contract_context(
+    messages: Sequence[str], *, technical_topic_closed: bool = False
+) -> str:
     """Вызывающий код передаёт только собственные управляющие реплики, не вложения."""
     rules: list[str] = []
-    if any(closes_technical_topic(message) for message in messages):
+    if technical_topic_closed or any(
+        closes_technical_topic(message) for message in messages
+    ):
         rules.append(
-            "Тема кода закрыта пользователем. Не возвращай её сам, даже подколом "
-            "или предложением продолжить. Новую явную просьбу о коде можно выполнить."
+            "Тема кода закрыта пользователем. Не возвращай её сам, даже подколом, "
+            "подведением итогов «код закрыли» или предложением продолжить. "
+            "Не упоминай закрытую тему при обсуждении нового предмета. "
+            "Новую явную просьбу о коде можно выполнить."
         )
     # Последняя собственная реплика может изменить форму просьбы внутри пачки.
     for message in messages[-1:]:
-        visible = _visible(message)
+        visible = unquoted_control_text(message)
         for item in _ONE_ITEM.finditer(visible):
             if re.search(r"\bне\s*$", visible[: item.start()], re.I):
                 continue

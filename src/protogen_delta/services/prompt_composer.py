@@ -9,7 +9,11 @@ from typing import Literal
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
-from protogen_delta.services.turn_contract import technical_request_text
+from protogen_delta.services.turn_contract import (
+    closes_technical_topic,
+    technical_request_text,
+    unquoted_control_text,
+)
 
 ExampleContract = Literal["legacy", "isolated", "guidance"]
 
@@ -32,7 +36,10 @@ _WEB_PATTERN = re.compile(
     r"\b(?:интернет\w*|онлайн|загугл\w*|погугл\w*|web|internet|search)\b|"
     r"\b(?:найди|поищи|проверь|посмотри|глянь|глянуть)\b.{0,80}\b(?:сет[ьи]|сайт)|"
     r"\b(?:сколько|какие)\b.{0,80}\b(?:марки|бренд\w*|энергетик\w*|вкус\w*)\b|"
-    r"\b(?:актуальн\w*|последн\w*|свеж\w*|новост\w*|релиз\w*|цена\w*)\b",
+    r"\b(?:новост\w*|релиз\w*|цена\w*)\b|"
+    r"\b(?:актуальн\w*|последн\w*|свеж\w*)\s+(?:\w+\s+){0,3}"
+    r"(?:верси\w*|данн\w*|курс\w*|котиров\w*|цен\w*|событи\w*|"
+    r"сводк\w*|информац\w*|обновлен\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _CLARIFICATION_PATTERN = re.compile(
@@ -249,6 +256,39 @@ class PromptComposer:
     def is_technical(message: str) -> bool:
         message = technical_request_text(message)
         return bool(_TECHNICAL_PATTERN.search(message) or github_links(message))
+
+    @staticmethod
+    def technical_topic_closed(
+        history: Sequence[ConversationTurn], controls: Sequence[str]
+    ) -> bool:
+        """Переносить собственную границу темы, пока пользователь её не откроет."""
+        closed = next(
+            (
+                turn.technical_topic_closed
+                for turn in reversed(history)
+                if not turn.proactive
+            ),
+            False,
+        )
+        for message in controls:
+            visible = unquoted_control_text(message)
+            if closes_technical_topic(message):
+                closed = True
+            if (
+                message.lstrip().startswith("```")
+                or github_links(message)
+                or PromptComposer.is_technical(visible)
+                and re.search(
+                    r"\b(?:объясни|расскажи|покажи|посмотри|проверь|почини|"
+                    r"исправь|разбери|помоги|давай|как|почему|зачем|ошибк\w*|traceback|"
+                    r"верн[её]мся|продолжим|обсудим|разбер[её]м|можешь|можно|како[йея])\b|"
+                    r"(?:^|[.!?\n])\s*что\b",
+                    technical_request_text(visible),
+                    re.I,
+                )
+            ):
+                closed = False
+        return closed
 
     @staticmethod
     def select_tools(
