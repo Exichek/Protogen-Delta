@@ -94,6 +94,7 @@ from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
+from protogen_delta.services.llm_budget_alerts import LlmBudgetAlerts
 from protogen_delta.services.market_advisor import MarketAdvisor
 from protogen_delta.services.market_data import MarketDataService
 from protogen_delta.services.market_http import MarketHTTP
@@ -188,12 +189,17 @@ async def main() -> None:
     dialogue_archive: DialogueArchiveService | None = None
     code_reviews: CodeReviewService | None = None
     input_batches: InputBatchMiddleware | None = None
+    budget_alerts: LlmBudgetAlerts | None = None
 
     try:
         usage_repository = LlmUsageRepository(
             settings.data_dir,
             settings.llm_daily_request_limit,
             limit_overrides=settings.llm_daily_request_limit_overrides,
+            global_daily_limit=settings.llm_global_daily_request_limit,
+        )
+        budget_alerts = LlmBudgetAlerts(
+            bot, usage_repository, settings.llm_budget_alert_user_id
         )
         if settings.audio_understanding_enabled:
             audio_understanding = AudioUnderstandingService(
@@ -713,12 +719,15 @@ async def main() -> None:
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
         await reminders.start()
+        budget_alerts.start()
         dialogue_archive.start()
         code_reviews.start()
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if budget_alerts is not None:
+            await budget_alerts.close()
         if input_batches is not None:
             await input_batches.close()
         if code_reviews is not None:
