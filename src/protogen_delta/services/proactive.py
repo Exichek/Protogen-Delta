@@ -25,6 +25,7 @@ from protogen_delta.core.user_state import (
 )
 from protogen_delta.handlers.proactive_activity import proactive_delivery
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.services.conversation_grounding import current_time_context
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.initiative_context import initiative_mood_context
 from protogen_delta.services.prompt_composer import PromptComposer
@@ -32,6 +33,7 @@ from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
 from protogen_delta.services.state_context import build_state_context
 from protogen_delta.services.stickers import ContextualStickerService
+from protogen_delta.services.turn_contract import turn_contract_context
 
 logger = logging.getLogger(__name__)
 
@@ -438,6 +440,15 @@ class ProactiveMessenger:
                     )
                 emotional_context += "\n" + PromptComposer.recent_reply_style(
                     snapshot.history, is_roleplay=False
+                )
+                emotional_context += "\n" + current_time_context(
+                    now, is_roleplay=snapshot.roleplay_active
+                )
+                emotional_context += "\n" + turn_contract_context(
+                    (),
+                    technical_topic_closed=PromptComposer.technical_topic_closed(
+                        snapshot.history, ()
+                    ),
                 )
                 if candidate.user_id in self._creator_ids:
                     emotional_context += "\nПолучатель — подтверждённый создатель из настроек приложения."

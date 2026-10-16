@@ -362,6 +362,7 @@ class UserStateRepository:
                     "context_closed": turn.context_closed,
                     "proactive": turn.proactive,
                     "sender_id": turn.sender_id,
+                    "technical_topic_closed": turn.technical_topic_closed,
                 }
                 for turn in (history or ())
             ],
@@ -702,6 +703,7 @@ class UserStateRepository:
                 item["assistant"][:16000],
                 context_closed=item.get("context_closed") is True,
                 proactive=item.get("proactive") is True,
+                technical_topic_closed=item.get("technical_topic_closed") is True,
                 sender_id=(
                     item["sender_id"]
                     if type(item.get("sender_id")) is int

@@ -70,6 +70,10 @@ from protogen_delta.services.appearance_profile_context import (
 )
 from protogen_delta.services.capabilities import is_capability_overview
 from protogen_delta.services.code_review import CodeReviewService
+from protogen_delta.services.conversation_grounding import (
+    current_time_context,
+    recall_grounding_context,
+)
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
@@ -584,6 +588,14 @@ class ResponseEngine:
                                 if (sender := current_sender.get()) is not None
                                 and sender.user_id == user_id
                                 else None
+                            ),
+                            technical_topic_closed=self._prompt_composer.technical_topic_closed(
+                                tuple(user_state.history),
+                                tuple(
+                                    source.text
+                                    for source in _reply_sources(user_id, user_message)
+                                    if source.allow_controls
+                                ),
                             ),
                         )
                         self._user_states.mark_history_updated(user_state)
@@ -1283,7 +1295,25 @@ class ResponseEngine:
                 )
             ),
             capability_overview=capability_overview,
-            turn_context=turn_contract_context(request.controls),
+            turn_context=turn_contract_context(
+                request.controls,
+                technical_topic_closed=self._prompt_composer.technical_topic_closed(
+                    tuple(user_state.history), request.controls
+                ),
+            ),
+            grounding_context="\n\n".join(
+                part
+                for part in (
+                    current_time_context(
+                        self._user_states.wall_clock(), is_roleplay=is_rp
+                    ),
+                    recall_grounding_context(
+                        request.controls,
+                        tuple(user_state.history) if remember_history else (),
+                    ),
+                )
+                if part
+            ),
         )
 
         return _ReplyContext(prompt, history, bool(github_context))
@@ -1882,6 +1912,7 @@ class ResponseEngine:
         user_message: str,
         assistant_message: str,
         sender_id: int | None = None,
+        technical_topic_closed: bool = False,
     ) -> None:
         """Сохранить завершённый ход в истории пользователя."""
         user_state.history.append(
@@ -1889,6 +1920,7 @@ class ResponseEngine:
                 user_message=user_message,
                 assistant_message=assistant_message,
                 sender_id=sender_id,
+                technical_topic_closed=technical_topic_closed,
             )
         )
 
@@ -1935,6 +1967,7 @@ class ResponseEngine:
         technical_context: bool = False,
         capability_overview: bool = False,
         turn_context: str = "",
+        grounding_context: str = "",
     ) -> str:
         """Вернуть прежний текст, собранный из именованных блоков."""
         return self._assemble_prompt(
@@ -1957,6 +1990,7 @@ class ResponseEngine:
             technical_context=technical_context,
             capability_overview=capability_overview,
             turn_context=turn_context,
+            grounding_context=grounding_context,
         ).render()
 
     def _assemble_prompt(
@@ -1980,6 +2014,7 @@ class ResponseEngine:
         technical_context: bool = False,
         capability_overview: bool = False,
         turn_context: str = "",
+        grounding_context: str = "",
     ) -> PromptAssembly:
         """Собрать системный промпт и динамический контекст сообщения."""
         prompt = self._prompt_composer.assemble(
@@ -2174,6 +2209,8 @@ class ResponseEngine:
             )
         if turn_context:
             prompt = prompt.append("turn_contract", "\n\n" + turn_context)
+        if grounding_context:
+            prompt = prompt.append("conversation_grounding", "\n\n" + grounding_context)
         return prompt
 
     @staticmethod
