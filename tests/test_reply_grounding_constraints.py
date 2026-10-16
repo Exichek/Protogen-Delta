@@ -28,6 +28,8 @@ from protogen_delta.services.turn_contract import turn_contract_context
         "Как ты себя чувствуешь?",
         "Как прошёл твой день?",
         "Как проходит у тебя день?",
+        "А что ты сегодня делал до нашего разговора? Коротко.",
+        "Чем ты занимался вчера?",
     ],
 )
 def test_self_question_gets_current_emotions_without_invented_day(text: str) -> None:
@@ -48,6 +50,8 @@ def test_self_question_gets_current_emotions_without_invented_day(text: str) -> 
         "*Как ты сам?*",
         "«Как прошёл твой день?» — пример",
         "> Как ты сам?",
+        "«Что ты сегодня делал?» — реплика героя",
+        "Что ты сделал с этим кодом?",
         "Привет",
     ],
 )
