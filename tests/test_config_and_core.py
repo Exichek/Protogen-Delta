@@ -264,6 +264,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.command for command in commands] == [
         "start",
         "funcs",
+        "privacy",
         "menu",
         "e6",
         "rp",
@@ -283,6 +284,7 @@ def test_set_commands_configures_telegram_menu() -> None:
     assert [command.description for command in commands] == [
         "🚀 Познакомиться с Дельтой",
         "📋 Все функции и команды",
+        "🔐 Как используются данные",
         "⚙️ Панель возможностей",
         "🔎 Поиск артов e621 по тегам",
         "🎭 Управление RP — /rp off",

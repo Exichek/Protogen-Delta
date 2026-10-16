@@ -135,6 +135,10 @@ class UserStateRepository:
         def update() -> None:
             with closing(sqlite3.connect(self._path)) as db, db:
                 db.execute(
+                    "INSERT OR IGNORE INTO age_restrictions(user_id) VALUES (?)",
+                    (user_id,),
+                )
+                db.execute(
                     "UPDATE conversation_states SET roleplay_active=0, roleplay_fetishes='[]', "
                     "arousal=0, content_mode='soft', age_restricted=1, history='[]', "
                     "history_updated_at=0 WHERE user_id=?",
@@ -158,6 +162,12 @@ class UserStateRepository:
         table, where, key = self._scope(user_id)
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
+                restricted = (
+                    connection.execute(
+                        "SELECT 1 FROM age_restrictions WHERE user_id=?", (key[-1],)
+                    ).fetchone()
+                    is not None
+                )
                 row = connection.execute(
                     f"""
                     SELECT
@@ -202,7 +212,17 @@ class UserStateRepository:
             ) from error
 
         if row is None:
-            return None
+            return (
+                PersistentUserState(
+                    emotions=EmotionalState(),
+                    relationship=RelationshipState(),
+                    emotions_updated_at=0,
+                    content_mode="soft",
+                    age_restricted=True,
+                )
+                if restricted
+                else None
+            )
 
         (
             warmth,
@@ -237,6 +257,8 @@ class UserStateRepository:
             delta_default_profile,
         ) = row
 
+        age_restricted = bool(age_restricted) or restricted
+
         species = AppearanceSpecies.decode(delta_species)
         delta_species = species.encode() if species else ""
         profile = AppearanceProfile.decode(delta_appearance_profile)
@@ -248,7 +270,7 @@ class UserStateRepository:
                 warmth=warmth,
                 irritation=irritation,
                 playfulness=playfulness,
-                arousal=arousal,
+                arousal=0 if age_restricted else arousal,
                 memory=EmotionalMemory.decode(
                     emotional_memory,
                     legacy_joy=(warmth + playfulness) / 2,
@@ -262,7 +284,7 @@ class UserStateRepository:
                 resentment=resentment,
             ),
             emotions_updated_at=emotions_updated_at,
-            roleplay_active=bool(roleplay_active),
+            roleplay_active=bool(roleplay_active) and not age_restricted,
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
             roleplay_fetishes=self._decode_fetishes(roleplay_fetishes),
@@ -275,7 +297,9 @@ class UserStateRepository:
             delta_appearance_profile=delta_appearance_profile,
             roleplay_character_thumbnail=roleplay_character_thumbnail,
             roleplay_character_restricted=bool(roleplay_character_restricted),
-            content_mode=self._decode_content_mode(content_mode),
+            content_mode=(
+                "soft" if age_restricted else self._decode_content_mode(content_mode)
+            ),
             age_restricted=bool(age_restricted),
             delta_reference_restricted=bool(delta_reference_restricted),
             roleplay_stopword=roleplay_stopword,
@@ -345,6 +369,21 @@ class UserStateRepository:
         )
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if age_restricted:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO age_restrictions(user_id) VALUES (?)",
+                        (key[-1],),
+                    )
+                restricted = (
+                    connection.execute(
+                        "SELECT 1 FROM age_restrictions WHERE user_id=?", (key[-1],)
+                    ).fetchone()
+                    is not None
+                )
+                if restricted:
+                    age_restricted, content_mode, roleplay_active = True, "soft", False
+                    roleplay_fetishes = ()
                 connection.execute(
                     f"""
                     INSERT INTO {table} (
@@ -415,7 +454,7 @@ class UserStateRepository:
                         emotions.warmth,
                         emotions.irritation,
                         emotions.playfulness,
-                        emotions.arousal,
+                        0 if restricted else emotions.arousal,
                         relationship.familiarity,
                         relationship.trust,
                         relationship.affection,
@@ -616,6 +655,15 @@ class UserStateRepository:
                     ALTER TABLE user_states
                     ADD COLUMN delta_appearance TEXT NOT NULL DEFAULT ''
                     """)
+
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS age_restrictions (user_id INTEGER PRIMARY KEY)"
+            )
+            for table in ("user_states", "conversation_states"):
+                connection.execute(
+                    "INSERT OR IGNORE INTO age_restrictions(user_id) "
+                    f"SELECT user_id FROM {table} WHERE age_restricted != 0"
+                )
 
     @staticmethod
     def _decode_fetishes(value: str) -> tuple[str, ...]:

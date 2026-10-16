@@ -8,6 +8,7 @@ from protogen_delta.config.settings import Settings
 from protogen_delta.core.message_utils import split_message
 from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.services.functions_catalog import functions_text
+from protogen_delta.services.privacy_notice import PRIVACY_TEXT
 
 
 def create_help_router(
@@ -24,5 +25,9 @@ def create_help_router(
                 mode = "soft" if state.age_restricted else state.content_mode
         for chunk in split_message(functions_text(mode, settings=settings)):
             await message.answer(chunk, parse_mode=None)
+
+    @router.message(Command("privacy"))
+    async def privacy_command(message: Message) -> None:
+        await message.answer(PRIVACY_TEXT, parse_mode=None)
 
     return router
