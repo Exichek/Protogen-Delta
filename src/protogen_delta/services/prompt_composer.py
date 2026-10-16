@@ -9,6 +9,7 @@ from typing import Literal
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
+from protogen_delta.services.turn_contract import technical_request_text
 
 ExampleContract = Literal["legacy", "isolated", "guidance"]
 
@@ -175,7 +176,7 @@ class PromptComposer:
                 )
 
         add("core")
-        if technical_context or _TECHNICAL_PATTERN.search(user_message):
+        if technical_context or self.is_technical(user_message):
             add("technical")
         if has_images:
             add("visual")
@@ -246,6 +247,7 @@ class PromptComposer:
 
     @staticmethod
     def is_technical(message: str) -> bool:
+        message = technical_request_text(message)
         return bool(_TECHNICAL_PATTERN.search(message) or github_links(message))
 
     @staticmethod
