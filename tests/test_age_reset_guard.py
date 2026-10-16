@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -121,13 +122,13 @@ def test_existing_flags_are_migrated_without_dialogue_data(
             age_restricted=True,
         )
         # Моделируем прежнюю базу, где отдельной таблицы ещё не было.
-        with sqlite3.connect(tmp_path / "user_states.db") as db:
+        with closing(sqlite3.connect(tmp_path / "user_states.db")) as db, db:
             db.execute("DROP TABLE IF EXISTS age_restrictions")
         restored = UserStateRepository(tmp_path)
         await restored.delete(7)
         state = await UserStateRepository(tmp_path).load(7)
         assert state and state.age_restricted and state.content_mode == "soft"
-        with sqlite3.connect(tmp_path / "user_states.db") as db:
+        with closing(sqlite3.connect(tmp_path / "user_states.db")) as db:
             assert db.execute("SELECT user_id FROM age_restrictions").fetchall() == [
                 (7,)
             ]
