@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from random import random
 from time import time
@@ -117,9 +117,11 @@ class _ConversationSnapshot:
     history: tuple[ConversationTurn, ...]
     version: tuple[object, ...]
     allow_profanity: bool = False
-    emotion_context: tuple[str, ...] = ()
-    joy: float = 0.0
-    tiredness: float = 0.0
+    # Эти значения меняются при обычном затухании между двумя чтениями.
+    # Актуальность ответа определяют история, версия настроек и activity_version.
+    emotion_context: tuple[str, ...] = field(default=(), compare=False)
+    joy: float = field(default=0.0, compare=False)
+    tiredness: float = field(default=0.0, compare=False)
 
     @classmethod
     def from_state(cls, state: UserState) -> "_ConversationSnapshot":
