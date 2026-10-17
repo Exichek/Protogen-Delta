@@ -490,6 +490,7 @@ def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
         "Помнишь тот мем?",
         insult_type="none",
         mood="neutral",
+        followup_messages=("Помнишь тот мем?",),
     )
 
 

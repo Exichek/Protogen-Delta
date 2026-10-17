@@ -5,7 +5,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from protogen_delta.core.initiative_followup import (
+    closes_followups,
+    extract_followup_plan,
+    followup_preference,
+)
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.repositories.initiative_followups import DueFollowup
 from protogen_delta.repositories.memories import Memory
 from protogen_delta.services.prompt_composer import PromptComposer
 
@@ -59,6 +65,7 @@ def choose_initiative(
     memories: Sequence[Memory],
     history: Sequence[ConversationTurn],
     value: float,
+    followup: DueFollowup | None = None,
 ) -> InitiativePlan:
     """Чередовать поводы; сохранённая реплика подтверждает текст, а не его истинность."""
     if not 0 <= value < 1:
@@ -99,6 +106,9 @@ def choose_initiative(
             item.text[:350]
             for item in memories
             if item.kind == "funny"
+            and not closes_followups(item.text)
+            and followup_preference(item.text) is None
+            and extract_followup_plan(item.text, item.created_at) is None
             and not (technical_closed and PromptComposer.is_technical(item.text))
         ),
         "",
@@ -115,6 +125,21 @@ def choose_initiative(
                     "Новую выдумку обозначь как шутку сейчас, "
                     "не добавляй совместных событий и фактов.",
                     episode,
+                ),
+            )
+        )
+    if followup is not None:
+        choices.append(
+            (
+                1.2,
+                InitiativePlan(
+                    "followup",
+                    "Поинтересоваться рассказанным пользователем планом",
+                    f"Пользователь называл план на {followup.event_day}. Этот день уже прошёл. "
+                    "Один раз мягко спроси, состоялось ли задуманное или как получилось. "
+                    "Прошедший срок не доказывает, что событие состоялось или было успешным. "
+                    "Не проверяй выполнение, не оценивай результат и не требуй отчёта.",
+                    followup.source,
                 ),
             )
         )

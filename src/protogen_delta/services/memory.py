@@ -1,7 +1,7 @@
 """Запись значимых эпизодов и подготовка контекста долговременной памяти."""
 
 import re
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from time import time
 from typing import Callable
 
@@ -9,6 +9,9 @@ from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
 from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
+from protogen_delta.repositories.initiative_followups import (
+    InitiativeFollowupsRepository,
+)
 from protogen_delta.repositories.memories import MemoriesRepository, MemoryKind
 from protogen_delta.repositories.user_facts import FactsUpdate
 from protogen_delta.services.dialogue_archive import DialogueArchiveService
@@ -33,6 +36,7 @@ class MemoryService:
         states: UserStateStore | None = None,
         delivery_ledger: DeliveryLedgerRepository | None = None,
         inputs: InputOperations | None = None,
+        followups: InitiativeFollowupsRepository | None = None,
     ) -> None:
         self._repository = repository
         self._clock = clock
@@ -43,6 +47,7 @@ class MemoryService:
         self.states = states
         self.delivery_ledger = delivery_ledger
         self.inputs = inputs
+        self.followups = followups
         self.extra_cleanup: Callable[[int], Awaitable[None]] | None = None
 
     async def observe_facts(self, user_id: int, text: str) -> FactsUpdate:
@@ -87,6 +92,8 @@ class MemoryService:
         self, user_id: int, sources: tuple[str, ...]
     ) -> None:
         for owner in self.dialogue_members(user_id):
+            if self.followups is not None:
+                await self.followups.forget_sources(owner, sources)
             if self.favorites is not None:
                 await self.favorites.repository.forget_sources(owner, sources)
             await self._repository.forget_sources(owner, sources)
@@ -108,6 +115,7 @@ class MemoryService:
         *,
         insult_type: InsultType,
         mood: MoodType | None,
+        followup_messages: Sequence[str] = (),
     ) -> None:
         """Сохранить активность и один наиболее значимый тип эпизода."""
         now = self._clock()
@@ -122,6 +130,8 @@ class MemoryService:
         )
         importance = 3 if requested else 1
         await self._repository.remember(user_id, kind, text, now, importance=importance)
+        if self.followups is not None and followup_messages:
+            await self.followups.observe(user_id, followup_messages, now)
 
     async def context(
         self,
