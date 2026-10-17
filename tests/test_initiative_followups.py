@@ -13,7 +13,9 @@ from test_response_engine import TEST_USER_ID, _create_engine
 
 from protogen_delta.core.initiative_followup import extract_followup_plan
 from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
+from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.repositories.initiative_followups import (
+    DueFollowup,
     InitiativeFollowupsRepository,
 )
 from protogen_delta.repositories.memories import MemoriesRepository, Memory
@@ -348,3 +350,24 @@ def test_question_hypothesis_or_quote_does_not_cancel_plan(
         assert await repo.due(7, DUE) is not None
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("closed", [True, False])
+def test_followup_respects_closed_technical_topic(closed: bool) -> None:
+    followup = DueFollowup(1, "Завтра у меня релиз Python-пакета", "2026-10-18")
+    history = (
+        (ConversationTurn("С кодом пока всё", "Хорошо", technical_topic_closed=True),)
+        if closed
+        else ()
+    )
+    plan = choose_initiative(
+        joy=0.5,
+        warmth=0.5,
+        playfulness=0.5,
+        last_kind="",
+        memories=(),
+        history=history,
+        value=0.999,
+        followup=followup,
+    )
+    assert (plan.kind == "followup") is not closed

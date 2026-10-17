@@ -128,7 +128,9 @@ def choose_initiative(
                 ),
             )
         )
-    if followup is not None:
+    if followup is not None and not (
+        technical_closed and PromptComposer.is_technical(followup.source)
+    ):
         choices.append(
             (
                 1.2,
