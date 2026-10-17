@@ -154,6 +154,8 @@ def test_planner_has_variety_grounded_callbacks_and_no_immediate_kind_repeat() -
     memory = Memory("funny", "Смешная история про кота и ноутбук", 100)
     plan = choose(0.999, memories=[memory])
     assert plan.kind == "callback" and memory.text in plan.request()
+    assert "не проверенный факт" in plan.request()
+    assert "Подтверждённый прошлый эпизод" not in plan.request()
     assert SILENCE in plan.request()
     assert choose(0.999, memories=[memory], last_kind="callback").kind != "callback"
     closed = (ConversationTurn("Закроем код", "Хорошо", technical_topic_closed=True),)

@@ -195,7 +195,8 @@ class CodeReviewService:
             if not selected:
                 raise ValueError("Нет исходников для обзора")
             # Резервируем время до LLM: ошибка и перезапуск не вызывают шквал повторов.
-            reserved = replace(prior, attempted_at=now, report="", notified=True)
+            # Неудачная новая попытка не должна уничтожать последний отчёт.
+            reserved = replace(prior, attempted_at=now, notified=True)
             await self.repository.save(user_id, reserved)
             fragments = []
             for file in selected:
@@ -237,7 +238,7 @@ class CodeReviewService:
                 + f"Среда: Python {'.'.join(str(part) for part in sys.version_info[:3])}.\n"
                 + ", ".join(file.name for file in selected)
                 + "\n\n"
-                + annotate_source_diffs(text[:6500], files)
+                + annotate_source_diffs(text, files)
             )
             updated = {
                 name: digest
@@ -249,6 +250,15 @@ class CodeReviewService:
                 user_id, CodeReviewState(updated, now, report, not automatic)
             )
             return report
+
+    async def saved_report(self, user_id: int) -> str | None:
+        """Открыть последний успешный отчёт без снимка исходников и нового API-вызова."""
+        if not self.source.enabled_for(user_id):
+            raise ValueError("Обзор кода доступен только настроенному администратору")
+        state = await self.repository.load(user_id)
+        if state and state.report and not contains_tool_markup(state.report):
+            return state.report
+        return None
 
     async def run_once(self) -> None:
         for owner in sorted(self.source.owners):
@@ -303,10 +313,18 @@ async def answer_review(service: CodeReviewService, message: Message) -> None:
             "Обзор кода доступен только владельцу в его личном чате.", parse_mode=None
         )
         return
-    path = (message.text or "").partition(" ")[2].strip()
+    argument = (message.text or "").partition(" ")[2].strip()
+    refresh = argument == "new" or argument.startswith("new ")
+    path = argument.partition(" ")[2].strip() if refresh else argument
     completed = False
     try:
-        report = await service.review(message.from_user.id, path)
+        report = (
+            await service.saved_report(message.from_user.id) if not argument else None
+        )
+        if report is None:
+            report = await service.review(message.from_user.id, path)
+        else:
+            report = "Сохранённый отчёт; новая проверка не запускалась.\n\n" + report
         completed = bool(report and "Обзор выбранных исходников Дельты;" in report)
     except ValueError as error:
         report = str(error)

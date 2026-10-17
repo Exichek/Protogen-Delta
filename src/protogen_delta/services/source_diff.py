@@ -137,7 +137,15 @@ def short_review_notice(report: str) -> str:
     """Автоматическое короткое уведомление не содержит обрезанного diff."""
     if len(report) <= 3500:
         return report
-    excerpt = _FENCE.sub(
-        "[Предложение diff доступно в полном отчёте.]\n", report[:3200]
+    prose = _FENCE.sub("[Предложение diff доступно в полном отчёте.]\n", report)
+    excerpt = prose[:3200]
+    if len(prose) > len(excerpt):
+        boundary = excerpt.rfind(" ")
+        if boundary > 0:
+            excerpt = excerpt[:boundary]
+        excerpt = excerpt.rstrip() + "…"
+    return (
+        "Фрагмент сохранённого отчёта:\n\n"
+        + excerpt
+        + "\n\nПолный отчёт: /code_review\nНовый обзор: /code_review new"
     )
-    return excerpt + "\n\nПолный отчёт: /code_review"
