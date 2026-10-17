@@ -13,11 +13,14 @@ from test_response_engine import TEST_USER_ID, _create_engine
 
 from protogen_delta.core.initiative_followup import extract_followup_plan
 from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
+from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.repositories.initiative_followups import (
+    DueFollowup,
     InitiativeFollowupsRepository,
 )
 from protogen_delta.repositories.memories import MemoriesRepository, Memory
 from protogen_delta.repositories.user_facts import FactsUpdate
+from protogen_delta.services.deepseek import DeepSeekAPIError
 from protogen_delta.services.initiative_planner import SILENCE, choose_initiative
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.user_facts import UserFactsService
@@ -346,5 +349,73 @@ def test_question_hypothesis_or_quote_does_not_cancel_plan(
         repo = InitiativeFollowupsRepository(tmp_path)
         await repo.observe(7, (TEXT, message), NOW)
         assert await repo.due(7, DUE) is not None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("closed", [True, False])
+def test_followup_respects_closed_technical_topic(closed: bool) -> None:
+    followup = DueFollowup(1, "Завтра у меня релиз Python-пакета", "2026-10-18")
+    history = (
+        (ConversationTurn("С кодом пока всё", "Хорошо", technical_topic_closed=True),)
+        if closed
+        else ()
+    )
+    plan = choose_initiative(
+        joy=0.5,
+        warmth=0.5,
+        playfulness=0.5,
+        last_kind="",
+        memories=(),
+        history=history,
+        value=0.999,
+        followup=followup,
+    )
+    assert (plan.kind == "followup") is not closed
+
+
+def test_closed_plan_stays_closed_after_short_history_disappears(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        engine, _, _, *_ = _create_engine()
+        memories = MemoriesRepository(tmp_path)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        memory = MemoryService(memories, clock=lambda: NOW, followups=repo)
+        engine._memory = memory
+        await memory.observe_followups(
+            TEST_USER_ID, ("Завтра у меня релиз Python-пакета", TEXT)
+        )
+        await engine.respond(TEST_USER_ID, "С кодом пока всё")
+        engine._user_states.get(TEST_USER_ID).history.clear()
+        row = await repo.due(TEST_USER_ID, DUE)
+        assert (
+            row and row.source == TEXT
+        )  # Нейтральный план не закрывается вместе с кодом.
+        assert await repo.select(TEST_USER_ID, row.id, DUE)
+        assert await repo.due(TEST_USER_ID, DUE) is None
+
+    asyncio.run(run())
+
+
+def test_opt_out_is_saved_even_if_reply_model_fails(tmp_path: Path) -> None:
+    async def run() -> None:
+        engine, _, model, *_ = _create_engine()
+        memories = MemoriesRepository(tmp_path)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        memory = MemoryService(memories, clock=lambda: NOW, followups=repo)
+        engine._memory = memory
+        await memory.observe_followups(TEST_USER_ID, (TEXT,))
+        model.chat.side_effect = DeepSeekAPIError("synthetic")
+        await engine.respond(TEST_USER_ID, "Не спрашивай о моих планах")
+        assert await repo.due(TEST_USER_ID, DUE) is None
+        with closing(sqlite3.connect(tmp_path / "memories.db")) as db:
+            assert (
+                db.execute(
+                    "SELECT enabled FROM initiative_followup_preferences WHERE user_id=?",
+                    (TEST_USER_ID,),
+                ).fetchone()[0]
+                == 0
+            )
 
     asyncio.run(run())

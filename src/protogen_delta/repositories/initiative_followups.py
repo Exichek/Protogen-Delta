@@ -2,7 +2,7 @@
 
 import asyncio
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -150,6 +150,29 @@ class InitiativeFollowupsRepository:
         await finish_operation(
             asyncio.to_thread(self._forget_sources, user_id, sources)
         )
+
+    async def close_matching(
+        self, user_id: int, now: float, predicate: Callable[[str], bool]
+    ) -> None:
+        """Сохранить закрытие темы, даже когда её флаг уйдёт из короткой истории."""
+        await finish_operation(
+            asyncio.to_thread(self._close_matching, user_id, now, predicate)
+        )
+
+    def _close_matching(
+        self, user_id: int, now: float, predicate: Callable[[str], bool]
+    ) -> None:
+        with closing(self._connect()) as db, db:
+            rows = db.execute(
+                "SELECT id,source FROM initiative_followups WHERE user_id=? AND closed_at=0",
+                (user_id,),
+            ).fetchall()
+            for row_id, source in rows:
+                if predicate(source):
+                    db.execute(
+                        "UPDATE initiative_followups SET closed_at=? WHERE id=? AND user_id=?",
+                        (now, row_id, user_id),
+                    )
 
     def _forget_sources(self, user_id: int, sources: tuple[str, ...]) -> None:
         with closing(self._connect()) as db, db:
