@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
+from protogen_delta.services.shazam_music import ShazamMusicRecognitionService
 
 
 def test_require_string_lists_rejects_invalid_value() -> None:
@@ -649,8 +650,13 @@ def test_main_builds_application_and_starts_polling(
         sticker_service=ANY,
         reaction_service=ANY,
         audio_understanding=None,
-        music_recognition=None,
+        music_recognition=ANY,
         native_work=ANY,
+    )
+
+    assert isinstance(
+        create_voice_router_mock.call_args.kwargs["music_recognition"],
+        ShazamMusicRecognitionService,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(
