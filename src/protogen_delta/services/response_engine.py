@@ -1611,6 +1611,14 @@ class ResponseEngine:
                     user_message,
                     insult_type=insult_type,
                     mood=mood,
+                    followup_messages=(
+                        request.fact_messages
+                        if remember_history
+                        and not gates.is_rp
+                        and not request.images
+                        and request.attachment_text is None
+                        else ()
+                    ),
                 )
             except Exception:
                 logger.exception(

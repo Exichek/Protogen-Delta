@@ -26,6 +26,9 @@ from protogen_delta.core.user_state import (
 )
 from protogen_delta.handlers.proactive_activity import proactive_delivery
 from protogen_delta.repositories.initiative import InitiativeRepository
+from protogen_delta.repositories.initiative_followups import (
+    InitiativeFollowupsRepository,
+)
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.conversation_grounding import current_time_context
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
@@ -206,6 +209,7 @@ class ProactiveMessenger:
         random_value: Callable[[], float] = random,
         release_journal: ReleaseJournal | None = None,
         initiative: InitiativeRepository | None = None,
+        followups: InitiativeFollowupsRepository | None = None,
     ) -> None:
         self._bot = bot
         self._deepseek = deepseek
@@ -222,6 +226,7 @@ class ProactiveMessenger:
         self._random_value = random_value
         self._release_journal = release_journal
         self._initiative = initiative
+        self._followups = followups
 
     def _sticker_delay(self) -> tuple[float, float] | None:
         if (
@@ -429,6 +434,15 @@ class ProactiveMessenger:
                 and not _PERSONAL_TOPIC_PATTERN.search(item.text)
             ][:3]
             if self._initiative is not None and window is not None:
+                followup = (
+                    await self._followups.due(candidate.user_id, now)
+                    if self._followups is not None and not snapshot.roleplay_active
+                    else None
+                )
+                if followup is not None and _PERSONAL_TOPIC_PATTERN.search(
+                    followup.source
+                ):
+                    followup = None
                 plan = choose_initiative(
                     joy=snapshot.joy,
                     warmth=snapshot.warmth,
@@ -437,7 +451,14 @@ class ProactiveMessenger:
                     memories=memories,
                     history=snapshot.history,
                     value=self._random_value(),
+                    followup=followup,
                 )
+                if plan.kind == "followup" and followup is not None:
+                    assert self._followups is not None
+                    if not await self._followups.select(
+                        candidate.user_id, followup.id, now
+                    ):
+                        continue
             memory_lines = (
                 "\n".join(
                     f"- {item.kind}, {max(0, int((now - item.created_at) / 86400))} "

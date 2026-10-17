@@ -75,6 +75,9 @@ from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.favorites import FavoritesRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.initiative import InitiativeRepository
+from protogen_delta.repositories.initiative_followups import (
+    InitiativeFollowupsRepository,
+)
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.reminders import RemindersRepository
@@ -366,6 +369,11 @@ async def main() -> None:
         )
 
         health.add_diagnostics("llm", deepseek.snapshot)
+        initiative_followups = (
+            InitiativeFollowupsRepository(settings.data_dir)
+            if settings.proactive_lively_enabled
+            else None
+        )
         memory = MemoryService(
             memories_repository,
             facts=UserFactsService(facts_repository, deepseek),
@@ -375,6 +383,7 @@ async def main() -> None:
             states=user_states,
             delivery_ledger=delivery_ledger,
             inputs=input_operations,
+            followups=initiative_followups,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -727,6 +736,7 @@ async def main() -> None:
                 if settings.proactive_lively_enabled
                 else None
             ),
+            followups=initiative_followups,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,
