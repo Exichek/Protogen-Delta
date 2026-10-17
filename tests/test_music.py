@@ -174,8 +174,10 @@ def test_recognizer_network_and_invalid_audio_fail_cleanly(
         asyncio.run(service.recognize(wav_data()))
 
 
+@pytest.mark.parametrize("provider", ["AudD", "Shazam"])
 def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
     monkeypatch: pytest.MonkeyPatch,
+    provider: str,
 ) -> None:
     async def scenario() -> None:
         engine = AsyncMock(spec=ResponseEngine)
@@ -188,6 +190,7 @@ def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
         speech = AsyncMock(spec=SpeechTranscriber)
         speech.transcribe.side_effect = SpeechRecognitionError("none")
         recognizer = AsyncMock(spec=MusicRecognitionService)
+        recognizer.provider_name = provider
         recognizer.recognize.return_value = '{"title":"Recognized","artist":"Someone"}'
         monkeypatch.setattr(
             voice_module, "analyze_audio", Mock(side_effect=AudioAnalysisError("bad"))
@@ -215,6 +218,11 @@ def test_audio_metadata_and_recognition_are_data_and_preserved_in_history(
         assert "Track" in call.args[1] and "Recognized" in call.args[1]
         assert "данные, не подтверждённое" in call.kwargs["model_message_override"]
         assert "12 секундам" in call.kwargs["model_message_override"]
+        assert (
+            f"Результат распознавания {provider}"
+            in call.kwargs["model_message_override"]
+        )
+        assert f"[Распознавание {provider}:" in call.args[1]
         assert "не изображай прослушивание" in call.kwargs["trusted_input_context"]
         answer.assert_not_awaited()
         recognizer.recognize.side_effect = MusicRecognitionError("offline")

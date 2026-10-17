@@ -44,6 +44,7 @@ class Settings:
     audio_model: str | None = None
     audio_input_data_url: bool = False
     music_audd_api_token: str | None = None
+    music_recognition_provider: str = "shazam"
     saucenao_api_key: str | None = None
     telegram_proxy_url: str | None = None
     youtube_cookies_file: Path | None = None
@@ -250,6 +251,9 @@ def load_settings() -> Settings:
 
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     llm_provider = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
+    music_provider = os.getenv("MUSIC_RECOGNITION_PROVIDER", "shazam").strip().lower()
+    if music_provider not in {"shazam", "audd", "off"}:
+        raise ValueError("MUSIC_RECOGNITION_PROVIDER должен быть shazam, audd или off")
     if llm_provider not in {"deepseek", "openai-compatible"}:
         raise ValueError("LLM_PROVIDER должен быть deepseek или openai-compatible")
 
@@ -480,6 +484,7 @@ def load_settings() -> Settings:
             os.getenv("AUDIO_INPUT_DATA_URL", "false"), "AUDIO_INPUT_DATA_URL"
         ),
         music_audd_api_token=os.getenv("MUSIC_AUDD_API_TOKEN", "").strip() or None,
+        music_recognition_provider=music_provider,
         saucenao_api_key=os.getenv("SAUCENAO_API_KEY", "").strip() or None,
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,

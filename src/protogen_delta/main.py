@@ -104,7 +104,6 @@ from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.menu_sync import synchronize_menus
 from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.mood import MoodClassifier
-from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
 from protogen_delta.services.public_github import PublicGithubReader
@@ -112,6 +111,7 @@ from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_configuration import load_response_configuration
 from protogen_delta.services.response_engine import ResponseEngine
+from protogen_delta.services.shazam_music import create_music_recognizer
 from protogen_delta.services.source_access import SourceAccess
 from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
@@ -617,12 +617,10 @@ async def main() -> None:
             reaction_service=reaction_service,
             native_work=native_work,
             audio_understanding=audio_understanding,
-            music_recognition=(
-                MusicRecognitionService(
-                    settings.music_audd_api_token, native_work=native_work
-                )
-                if settings.music_audd_api_token
-                else None
+            music_recognition=create_music_recognizer(
+                settings.music_recognition_provider,
+                settings.music_audd_api_token,
+                native_work,
             ),
         )
 
