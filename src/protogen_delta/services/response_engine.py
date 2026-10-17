@@ -112,6 +112,7 @@ from protogen_delta.services.prompt_composer import (
 )
 from protogen_delta.services.public_github import GITHUB_TOOLS, PublicGithubReader
 from protogen_delta.services.reasoning_policy import needs_reasoning
+from protogen_delta.services.recent_visuals import RecentVisuals
 from protogen_delta.services.release_journal import ReleaseJournal, is_release_question
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
@@ -355,6 +356,7 @@ class ResponseEngine:
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
         self.cancel_pending_inputs: Callable[..., Awaitable[None]] | None = None
         self._delivering_users: set[StateKey] = set()
+        self._recent_visuals = RecentVisuals()
 
     def is_safety_signal(
         self, user_id: int, text: str, *, chat_id: int | None = None
@@ -399,6 +401,7 @@ class ResponseEngine:
     async def restrict_minor(self, user_id: int) -> None:
         """Применить прямое возрастное заявление до дальнейшего общения."""
         await self._interrupt_reply(user_id, all_chats=True)
+        self._recent_visuals.forget(user_id)
         await self._user_states.restrict_minor(user_id)
 
     async def respond_and_deliver(
@@ -499,6 +502,13 @@ class ResponseEngine:
             async with self._user_states.use_conversation(
                 user_id, chat_id
             ) as user_state:
+                if chat_id is None and (
+                    images
+                    or attachment_text is not None
+                    or model_message_override is not None
+                    or not use_personal_facts
+                ):
+                    self._recent_visuals.forget(user_id)
                 if minor_declared:
                     user_state.stop_roleplay()
                     reply = "Спасибо, что сказал. Остаёмся в обычном общении, взрослый режим выключен."
@@ -604,6 +614,19 @@ class ResponseEngine:
                             ),
                         )
                         self._user_states.mark_history_updated(user_state)
+                        if (
+                            images
+                            and use_personal_facts
+                            and chat_id is None
+                            and not user_state.roleplay_active
+                            and not prepared.error
+                            and not prepared.forgotten
+                        ):
+                            self._recent_visuals.remember(
+                                user_id, images, user_state.history[-1]
+                            )
+                    if prepared.forgotten:
+                        self._recent_visuals.forget(user_id)
                     if (
                         self._release_journal is not None
                         and use_personal_facts
@@ -624,6 +647,8 @@ class ResponseEngine:
         """Безопасно сбросить контекст конкретного пользователя."""
         async with self._user_states.use_conversation(user_id, chat_id) as user_state:
             user_state.reset_context()
+            if chat_id is None:
+                self._recent_visuals.forget(user_id)
 
     async def reset_user(
         self,
@@ -633,6 +658,7 @@ class ResponseEngine:
     ) -> None:
         """Полностью забыть состояние конкретного пользователя."""
         await self._user_states.reset_user(user_id, cleanup=cleanup)
+        self._recent_visuals.forget(user_id)
 
     async def disable_roleplay(
         self,
@@ -643,6 +669,8 @@ class ResponseEngine:
         """Выключить RP-режим пользователя, сохранив остальное состояние."""
         await self._interrupt_reply(user_id, chat_id)
         async with self._user_states.use_conversation(user_id, chat_id) as user_state:
+            if chat_id is None:
+                self._recent_visuals.forget(user_id)
             return user_state.stop_roleplay()
 
     async def _respond_for_user(
@@ -1447,6 +1475,39 @@ class ResponseEngine:
         model_message_override = request.model_message_override
         user_message = gates.user_message
         prompt, history = context.prompt, context.history
+        if (
+            not images
+            and attachment_text is None
+            and model_message_override is None
+            and request.use_personal_facts
+            and request.remember_history
+            and not gates.is_rp
+            and not gates.capability_overview
+            and all(
+                source.allow_controls and not source.reply_target_present
+                for source in request.sources
+            )
+        ):
+            images = self._recent_visuals.recall(
+                request.user_id, tuple(request.user_state.history), user_message
+            )
+            if images:
+                visual_context: list[str] = []
+                append_visual_reply_context(
+                    visual_context,
+                    user_message,
+                    images,
+                    gates.is_rp,
+                    request.user_state.content_mode == "adult"
+                    and not request.user_state.age_restricted
+                    and not request.user_state.delta_reference_restricted
+                    and not request.user_state.roleplay_character_restricted
+                    and not reference_is_child(request.user_state.roleplay_character),
+                    previous=True,
+                )
+                prompt += "\n\n" + "\n\n".join(visual_context)
+        elif not images and request.use_personal_facts:
+            self._recent_visuals.forget(request.user_id)
         reasoning_options: dict[str, Any] = {"thinking": True} if reasoning else {}
         if reasoning:
             prompt += (
