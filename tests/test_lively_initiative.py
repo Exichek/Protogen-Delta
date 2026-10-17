@@ -434,8 +434,12 @@ def test_text_and_sticker_are_one_initiative(tmp_path: Path) -> None:
 
 
 def test_lively_setting_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    import protogen_delta.config.settings as settings_module
+
+    monkeypatch.setattr(settings_module, "load_dotenv", lambda: False)
     monkeypatch.setenv("TELEGRAM_TOKEN", "test")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
     monkeypatch.setenv("PROACTIVE_LIVELY_ENABLED", "false")
     assert not load_settings().proactive_lively_enabled
     monkeypatch.setenv("PROACTIVE_LIVELY_ENABLED", "true")
