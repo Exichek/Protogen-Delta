@@ -687,6 +687,20 @@ class ResponseEngine:
         gates = await self._apply_reply_gates(request)
         if isinstance(gates, PreparedReply):
             return gates
+        if (
+            self._memory is not None
+            and request.use_personal_facts
+            and request.remember_history
+            and not gates.is_rp
+            and not request.images
+            and request.attachment_text is None
+        ):
+            try:
+                await self._memory.observe_followups(
+                    request.user_id, request.fact_messages
+                )
+            except Exception:
+                logger.warning("Не удалось обновить поводы инициативы")
         analysis = await self._classify_and_load_facts(request, gates)
         context = await self._collect_reply_context(request, gates, analysis)
         result = await self._call_reply_model(
@@ -1611,14 +1625,6 @@ class ResponseEngine:
                     user_message,
                     insult_type=insult_type,
                     mood=mood,
-                    followup_messages=(
-                        request.fact_messages
-                        if remember_history
-                        and not gates.is_rp
-                        and not request.images
-                        and request.attachment_text is None
-                        else ()
-                    ),
                 )
             except Exception:
                 logger.exception(

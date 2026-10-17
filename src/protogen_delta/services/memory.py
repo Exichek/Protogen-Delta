@@ -5,6 +5,13 @@ from collections.abc import Awaitable, Sequence
 from time import time
 from typing import Callable
 
+from protogen_delta.core.initiative_followup import (
+    closed_followup_topics,
+    closes_followups,
+    extract_followup_plan,
+    followup_preference,
+    visible_plan_text,
+)
 from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
@@ -18,6 +25,8 @@ from protogen_delta.services.dialogue_archive import DialogueArchiveService
 from protogen_delta.services.favorites import FavoritesService
 from protogen_delta.services.insults import InsultType
 from protogen_delta.services.mood import MoodType
+from protogen_delta.services.prompt_composer import PromptComposer
+from protogen_delta.services.turn_contract import closes_technical_topic
 from protogen_delta.services.user_facts import UserFactsService
 
 
@@ -115,7 +124,6 @@ class MemoryService:
         *,
         insult_type: InsultType,
         mood: MoodType | None,
-        followup_messages: Sequence[str] = (),
     ) -> None:
         """Сохранить активность и один наиболее значимый тип эпизода."""
         now = self._clock()
@@ -130,8 +138,38 @@ class MemoryService:
         )
         importance = 3 if requested else 1
         await self._repository.remember(user_id, kind, text, now, importance=importance)
-        if self.followups is not None and followup_messages:
-            await self.followups.observe(user_id, followup_messages, now)
+
+    async def observe_followups(self, user_id: int, messages: Sequence[str]) -> None:
+        """Обновлять детерминированные поводы до классификации и генерации ответа."""
+        if self.followups is None:
+            return
+        now = self._clock()
+        relevant = []
+        for message in messages[:8]:
+            visible = visible_plan_text(message)
+            if (
+                closes_technical_topic(message)
+                or closes_followups(visible)
+                or followup_preference(visible) is not None
+                or closed_followup_topics(visible)
+                or extract_followup_plan(message, now) is not None
+            ):
+                relevant.append(message)
+        if not relevant:
+            return
+        # Родитель нужен новому пользователю для внешнего ключа; это его реальная активность.
+        await self._repository.note_user_activity(user_id, now)
+        batch = []
+        for message in relevant:
+            batch.append(message)
+            if closes_technical_topic(message):
+                await self.followups.observe(user_id, batch, now)
+                batch.clear()
+                await self.followups.close_matching(
+                    user_id, now, PromptComposer.is_technical
+                )
+        if batch:
+            await self.followups.observe(user_id, batch, now)
 
     async def context(
         self,
