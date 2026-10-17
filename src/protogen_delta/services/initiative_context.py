@@ -33,13 +33,17 @@ class InitiativeEvidence:
     """Подтверждать текст доставки, оставляя незаписанный прошлый мотив неизвестным."""
 
     messages: tuple[str, ...]
+    motives: tuple[str, ...] = ()
 
     @classmethod
     def from_state(cls, state: UserState) -> "InitiativeEvidence":
         """Использовать только недавние незакрытые самостоятельные реплики этого чата."""
         history = [turn for turn in state.history if not turn.context_closed]
         recent = [turn for turn in history[-4:] if turn.proactive][-2:]
-        return cls(tuple(turn.assistant_message[:500] for turn in recent))
+        return cls(
+            tuple(turn.assistant_message[:500] for turn in recent),
+            tuple(turn.initiative_reason for turn in recent),
+        )
 
     def context(self) -> str:
         """Отделить отсутствие сведений от отрицания отправки и от догадки о причине."""
@@ -47,7 +51,7 @@ class InitiativeEvidence:
             {
                 "delivery_status": "confirmed" if self.messages else "not_in_context",
                 "messages": self.messages,
-                "past_motive": None,
+                "past_motive": self.motives if any(self.motives) else None,
                 "emotion_scope": "current_reply_only",
             },
             ensure_ascii=False,
@@ -120,8 +124,9 @@ def initiative_reply_context(message: str, state: UserState) -> str:
         "Один-два коротких естественных предложения в своей манере, без обязательного вопроса. "
         "Если пользователь уже задал новую конкретную задачу, помоги с ней, не возвращай его "
         "насильно к обсуждению своей инициативы. Техническое устройство объясняй по прямой просьбе. "
-        "Факт доставки подтверждает только отправленные слова. Её прошлый мотив отдельно "
-        "не записан; не придумывай паузу, пробуждение, ожидание или занятие между сообщениями. "
+        "Факт доставки подтверждает отправленные слова. Если в данных есть past_motive, "
+        "можно коротко объяснить этот сохранённый повод своими словами. Если его нет, "
+        "прошлый мотив не записан. Не придумывай паузу, пробуждение, ожидание или занятие между сообщениями. "
         "Текущие эмоции задают тон ответа сейчас, а не объясняют задним числом причину отправки. "
     )
     context += initiative_mood_context(state)
