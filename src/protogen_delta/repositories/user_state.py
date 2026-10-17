@@ -363,6 +363,9 @@ class UserStateRepository:
                     "proactive": turn.proactive,
                     "sender_id": turn.sender_id,
                     "technical_topic_closed": turn.technical_topic_closed,
+                    "initiative_reason": (
+                        turn.initiative_reason[:300] if turn.proactive else ""
+                    ),
                 }
                 for turn in (history or ())
             ],
@@ -703,6 +706,12 @@ class UserStateRepository:
                 item["assistant"][:16000],
                 context_closed=item.get("context_closed") is True,
                 proactive=item.get("proactive") is True,
+                initiative_reason=(
+                    item["initiative_reason"][:300]
+                    if item.get("proactive") is True
+                    and isinstance(item.get("initiative_reason"), str)
+                    else ""
+                ),
                 technical_topic_closed=item.get("technical_topic_closed") is True,
                 sender_id=(
                     item["sender_id"]

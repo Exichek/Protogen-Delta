@@ -25,10 +25,18 @@ from protogen_delta.core.user_state import (
     UserStateStore,
 )
 from protogen_delta.handlers.proactive_activity import proactive_delivery
+from protogen_delta.repositories.initiative import InitiativeRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.conversation_grounding import current_time_context
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.initiative_context import initiative_mood_context
+from protogen_delta.services.initiative_planner import (
+    SILENCE,
+    InitiativePlan,
+    choose_initiative,
+    initiative_drive,
+    repeats_initiative,
+)
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
@@ -122,6 +130,9 @@ class _ConversationSnapshot:
     emotion_context: tuple[str, ...] = field(default=(), compare=False)
     joy: float = field(default=0.0, compare=False)
     tiredness: float = field(default=0.0, compare=False)
+    curiosity: float = field(default=0.0, compare=False)
+    playfulness: float = field(default=0.0, compare=False)
+    warmth: float = field(default=0.0, compare=False)
 
     @classmethod
     def from_state(cls, state: UserState) -> "_ConversationSnapshot":
@@ -148,6 +159,9 @@ class _ConversationSnapshot:
             + (initiative_mood_context(state),),
             state.emotions.memory.joy,
             state.emotions.memory.tiredness,
+            state.emotions.memory.curiosity,
+            state.emotions.playfulness,
+            state.emotions.warmth,
         )
 
     def scene_excerpt(self) -> str:
@@ -191,6 +205,7 @@ class ProactiveMessenger:
         stickers: ContextualStickerService | None = None,
         random_value: Callable[[], float] = random,
         release_journal: ReleaseJournal | None = None,
+        initiative: InitiativeRepository | None = None,
     ) -> None:
         self._bot = bot
         self._deepseek = deepseek
@@ -206,6 +221,7 @@ class ProactiveMessenger:
         self._stickers = stickers
         self._random_value = random_value
         self._release_journal = release_journal
+        self._initiative = initiative
 
     def _sticker_delay(self) -> tuple[float, float] | None:
         if (
@@ -231,7 +247,12 @@ class ProactiveMessenger:
         )
 
     async def _deliver(
-        self, user_id: int, text: str, kind: str, activity_version: int
+        self,
+        user_id: int,
+        text: str,
+        kind: str,
+        activity_version: int,
+        plan: InitiativePlan | None = None,
     ) -> bool:
         token = proactive_delivery.set(True)
         try:
@@ -254,7 +275,14 @@ class ProactiveMessenger:
                     await self._bot.send_message(user_id, text)
             if self._user_states is not None:
                 state = self._user_states.get(user_id)
-                state.history.append(ConversationTurn("", text, proactive=True))
+                state.history.append(
+                    ConversationTurn(
+                        "",
+                        text,
+                        proactive=True,
+                        initiative_reason=plan.reason if plan else "",
+                    )
+                )
                 self._user_states.mark_history_updated(state)
             await self._repository.note_proactive_sent(
                 user_id,
@@ -263,7 +291,9 @@ class ProactiveMessenger:
                 activity_version=activity_version,
                 had_sticker=kind == "sticker",
             )
-            if kind != "sticker" and self._release_journal is not None:
+            if self._initiative is not None and plan is not None:
+                await self._initiative.note_sent(user_id, self._clock(), plan.kind)
+            if kind != "sticker" and self._release_journal is not None and plan is None:
                 try:
                     await self._release_journal.acknowledge(user_id)
                 except Exception:
@@ -276,7 +306,12 @@ class ProactiveMessenger:
                     if self._user_states is not None:
                         state = self._user_states.get(user_id)
                         state.history.append(
-                            ConversationTurn("", label, proactive=True)
+                            ConversationTurn(
+                                "",
+                                label,
+                                proactive=True,
+                                initiative_reason=plan.reason if plan else "",
+                            )
                         )
                         self._user_states.mark_history_updated(state)
             return True
@@ -307,11 +342,15 @@ class ProactiveMessenger:
             idle_max_seconds=self._config.idle_max_seconds,
             limit=self._config.batch_size,
             sticker_delay=self._sticker_delay(),
+            initiative_limits=self._initiative is not None,
         )
         sent = 0
         for candidate in candidates:
             if self._stop.is_set():
                 break
+            if self._initiative is not None and candidate.unanswered_count:
+                continue
+            plan: InitiativePlan | None = None
             try:
                 async with self._conversation(candidate.user_id) as snapshot:
                     if not await self._repository.is_due(
@@ -324,6 +363,20 @@ class ProactiveMessenger:
                         sticker_delay=self._sticker_delay(),
                     ):
                         continue
+                    window = None
+                    if self._initiative is not None:
+                        window = await self._initiative.assess(
+                            candidate.user_id,
+                            now,
+                            initiative_drive(
+                                snapshot.joy,
+                                snapshot.curiosity,
+                                snapshot.playfulness,
+                                snapshot.tiredness,
+                            ),
+                        )
+                        if not window.ready:
+                            continue
                     kind = candidate.kind
                     if kind == "undecided":
                         kind = (
@@ -350,9 +403,17 @@ class ProactiveMessenger:
                                 candidate.user_id, "text", candidate.activity_version
                             )
                             continue
+                        if self._initiative is not None:
+                            plan = InitiativePlan(
+                                "sticker", "Выразить текущее настроение стикером", ""
+                            )
                         delivered = await finish_operation(
                             self._deliver(
-                                candidate.user_id, "", kind, candidate.activity_version
+                                candidate.user_id,
+                                "",
+                                kind,
+                                candidate.activity_version,
+                                plan,
                             )
                         )
                         sent += int(delivered)
@@ -367,6 +428,16 @@ class ProactiveMessenger:
                 if item.kind != "grievance"
                 and not _PERSONAL_TOPIC_PATTERN.search(item.text)
             ][:3]
+            if self._initiative is not None and window is not None:
+                plan = choose_initiative(
+                    joy=snapshot.joy,
+                    warmth=snapshot.warmth,
+                    playfulness=snapshot.playfulness,
+                    last_kind=window.last_kind,
+                    memories=memories,
+                    history=snapshot.history,
+                    value=self._random_value(),
+                )
             memory_lines = (
                 "\n".join(
                     f"- {item.kind}, {max(0, int((now - item.created_at) / 86400))} "
@@ -411,7 +482,13 @@ class ProactiveMessenger:
                 request += "Не выдумывай дела и сроки пользователя; если повода нет, достаточно короткой реакции."
             rules = _PROACTIVE_RULES
             invitation = _NEUTRAL_INVITATION
+            if plan is not None:
+                request = plan.request()
             if snapshot.roleplay_active:
+                if plan is not None:
+                    plan = InitiativePlan(
+                        "roleplay", "Предложить вернуться к активной RP-сцене", ""
+                    )
                 rules = (
                     _ROLEPLAY_RULES
                     + "\n"
@@ -426,6 +503,10 @@ class ProactiveMessenger:
                     f"Последние реплики текущей личной сцены (JSON):\n"
                     f"{snapshot.scene_excerpt()}"
                 )
+                if self._initiative is not None:
+                    request += (
+                        f"\nЕсли сейчас неуместно писать, верни только {SILENCE}."
+                    )
             try:
                 if candidate.unanswered_count:
                     previous = next(
@@ -443,7 +524,11 @@ class ProactiveMessenger:
                             f"Прежнее приглашение (цитата данных): {previous[:240]!r}"
                         )
                 emotional_context = "\n".join(snapshot.emotion_context)
-                if self._release_journal is not None and not snapshot.roleplay_active:
+                if (
+                    self._release_journal is not None
+                    and not snapshot.roleplay_active
+                    and plan is None
+                ):
                     emotional_context += "\n" + await self._release_journal.context(
                         candidate.user_id, initiative=True
                     )
@@ -473,6 +558,18 @@ class ProactiveMessenger:
                             tool_names=(),
                         )
                     ).strip()
+                if self._initiative is not None and (
+                    not text
+                    or SILENCE in text
+                    or repeats_initiative(text, snapshot.history)
+                ):
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 3600,
+                        candidate.activity_version,
+                    )
+                    logger.info("Proactive generation outcome=silence")
+                    continue
                 if not text:
                     if not snapshot.roleplay_active:
                         continue
@@ -482,6 +579,14 @@ class ProactiveMessenger:
                 if _PRESSURE_PATTERN.search(text) or (
                     snapshot.roleplay_active and _OFF_SCENE_PATTERN.search(text)
                 ):
+                    if self._initiative is not None:
+                        await self._initiative.defer(
+                            candidate.user_id,
+                            self._clock() + 3600,
+                            candidate.activity_version,
+                        )
+                        logger.info("Proactive generation outcome=silence")
+                        continue
                     logger.info("Proactive generation outcome=pressure_fallback")
                     text = invitation
                 text = " ".join(text.split())
@@ -506,7 +611,11 @@ class ProactiveMessenger:
                         continue
                     await finish_operation(
                         self._deliver(
-                            candidate.user_id, text, kind, candidate.activity_version
+                            candidate.user_id,
+                            text,
+                            kind,
+                            candidate.activity_version,
+                            plan,
                         )
                     )
             except TelegramForbiddenError:
@@ -514,6 +623,12 @@ class ProactiveMessenger:
                 await self._repository.suspend_proactive_delivery(candidate.user_id)
                 continue
             except TelegramBadRequest as error:
+                if self._initiative is not None:
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 900,
+                        candidate.activity_version,
+                    )
                 if "chat not found" in error.message.casefold():
                     await self._repository.suspend_proactive_delivery(candidate.user_id)
                     logger.info(
@@ -523,14 +638,32 @@ class ProactiveMessenger:
                     logger.warning("Proactive delivery outcome=bad_request")
                 continue
             except LlmBudgetError:
+                if self._initiative is not None:
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 3600,
+                        candidate.activity_version,
+                    )
                 logger.info("Proactive generation outcome=daily_limit")
                 continue
             except DeepSeekError:
+                if self._initiative is not None:
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 900,
+                        candidate.activity_version,
+                    )
                 logger.warning(
                     "Не удалось создать проактивное сообщение", exc_info=True
                 )
                 continue
             except Exception:
+                if self._initiative is not None:
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 900,
+                        candidate.activity_version,
+                    )
                 logger.exception(
                     "Не удалось отправить проактивное сообщение пользователю %s",
                     candidate.user_id,

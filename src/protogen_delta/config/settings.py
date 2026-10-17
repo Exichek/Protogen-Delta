@@ -73,6 +73,7 @@ class Settings:
     dialogue_shared_groups: tuple[frozenset[int], ...] = ()
     user_state_retention_seconds: float = 86400.0
     proactive_check_seconds: float = 30.0
+    proactive_lively_enabled: bool = True
     proactive_idle_seconds: float = 5400.0
     proactive_idle_max_seconds: float = 10800.0
     proactive_cooldown_seconds: float = 72000.0
@@ -552,6 +553,9 @@ def load_settings() -> Settings:
         ),
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,
+        proactive_lively_enabled=_parse_bool(
+            os.getenv("PROACTIVE_LIVELY_ENABLED", "true"), "PROACTIVE_LIVELY_ENABLED"
+        ),
         proactive_idle_seconds=proactive_idle_seconds,
         proactive_idle_max_seconds=proactive_idle_max_seconds,
         proactive_cooldown_seconds=proactive_cooldown_seconds,

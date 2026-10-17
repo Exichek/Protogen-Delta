@@ -43,6 +43,7 @@ class ConversationTurn:
     proactive: bool = False
     sender_id: int | None = None
     technical_topic_closed: bool = False
+    initiative_reason: str = ""
 
 
 @dataclass(slots=True)

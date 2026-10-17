@@ -74,6 +74,7 @@ from protogen_delta.repositories.dialogue_archive import DialogueArchiveReposito
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.favorites import FavoritesRepository
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.initiative import InitiativeRepository
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.reminders import RemindersRepository
@@ -723,6 +724,11 @@ async def main() -> None:
             system_prompt=core_prompt,
             stickers=sticker_service,
             release_journal=release_journal,
+            initiative=(
+                InitiativeRepository(settings.data_dir)
+                if settings.proactive_lively_enabled
+                else None
+            ),
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,

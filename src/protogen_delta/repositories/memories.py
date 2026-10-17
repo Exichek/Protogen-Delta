@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import datetime
 from math import isfinite
 from pathlib import Path
 from random import uniform
@@ -15,6 +16,11 @@ from protogen_delta.core.memory_search import (
     SEARCH_VERSION,
     memory_index_text,
     memory_terms,
+)
+from protogen_delta.repositories.initiative import (
+    DAILY_LIMIT,
+    MIN_INTERVAL_SECONDS,
+    MSK,
 )
 
 MemoryKind = Literal["grievance", "funny", "topic"]
@@ -164,6 +170,7 @@ class MemoriesRepository:
         limit: int,
         idle_max_seconds: float | None = None,
         sticker_delay: tuple[float, float] | None = None,
+        initiative_limits: bool = False,
     ) -> list[ProactiveCandidate]:
         """Сохранить срок первого приглашения и найти готовые отправления."""
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
@@ -189,6 +196,7 @@ class MemoriesRepository:
             None,
             maximum,
             sticker_delay,
+            initiative_limits,
         )
 
     async def note_proactive_sent(
@@ -415,6 +423,7 @@ class MemoriesRepository:
         user_id: int | None = None,
         idle_max_seconds: float | None = None,
         sticker_delay: tuple[float, float] | None = None,
+        initiative_limits: bool = False,
     ) -> list[ProactiveCandidate]:
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
         with closing(self._connect()) as connection, connection:
@@ -463,14 +472,30 @@ class MemoriesRepository:
                         "UPDATE engagement SET next_sticker_at=?,proactive_kind='undecided' WHERE user_id=?",
                         (max(last_user, last_dialogue) + delay, owner),
                     )
+            gate = ""
+            gate_args: tuple[object, ...] = ()
+            if initiative_limits:
+                gate = (
+                    "AND unanswered_count=0 AND NOT EXISTS (SELECT 1 FROM initiative_state i "
+                    "WHERE i.user_id=engagement.user_id AND (i.deferred_until>? OR "
+                    "(i.last_sent_at>0 AND i.last_sent_at>?) OR "
+                    "(i.sent_day=? AND i.sent_today>=?)))"
+                )
+                gate_args = (
+                    now,
+                    now - MIN_INTERVAL_SECONDS,
+                    datetime.fromtimestamp(now, MSK).date().isoformat(),
+                    DAILY_LIMIT,
+                )
             rows = connection.execute(
-                """
+                f"""
                 SELECT user_id, unanswered_count, activity_version, proactive_kind, force_proactive_text FROM engagement
                 WHERE proactive_enabled = 1
                   AND delivery_suspended = 0
                   AND (? IS NULL OR user_id = ?)
                   AND last_user_message_at > 0
                   AND unanswered_count < 2
+                  {gate}
                   AND CASE
                       WHEN ? AND proactive_kind='sticker' THEN next_sticker_at
                       WHEN ? AND proactive_kind='undecided'
@@ -486,6 +511,7 @@ class MemoriesRepository:
                 (
                     user_id,
                     user_id,
+                    *gate_args,
                     sticker_delay is not None,
                     sticker_delay is not None,
                     now,
