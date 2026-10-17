@@ -243,6 +243,64 @@ def test_delivered_initiative_survives_restart_without_fake_user_reply(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("change", ["none", "message", "mode"])
+def test_emotion_decay_during_generation_does_not_cancel_initiative(
+    tmp_path: Path, change: str
+) -> None:
+    """Затухание эмоций не отменяет отправку; новый ввод и смена режима отменяют."""
+
+    async def run() -> None:
+        now = [5500.0]
+        repo = MemoriesRepository(tmp_path, random_delay=lambda *_: 5400)
+        persistence = UserStateRepository(tmp_path)
+        states = UserStateStore(persistence=persistence, wall_clock=lambda: now[0])
+        async with states.use_conversation(7) as state:
+            state.emotions.memory.joy = 0.8
+            state.emotions.memory.tiredness = 0.4
+            state.emotions.warmth = 0.7
+        bot = AsyncMock(spec=Bot)
+        model = AsyncMock(spec=DeepSeekService)
+
+        async def generate(**_: Any) -> str:
+            now[0] += 10
+            if change == "message":
+                await repo.note_user_activity(7, now[0])
+            elif change == "mode":
+                async with states.use_conversation(7) as current:
+                    current.content_mode = "adult"
+            return "Есть настроение поболтать :3"
+
+        model.chat.side_effect = generate
+        messenger = ProactiveMessenger(
+            bot=cast(Bot, bot),
+            deepseek=cast(DeepSeekService, model),
+            repository=repo,
+            user_states=states,
+            system_prompt="core",
+            config=ProactiveConfig(idle_seconds=5400, cooldown_seconds=72000),
+            clock=lambda: now[0],
+            local_datetime=lambda: datetime(2026, 10, 17, 12),
+        )
+        await repo.note_user_activity(7, 100)
+        sent = await messenger.run_once()
+        assert sent == (1 if change == "none" else 0)
+        model.chat.assert_awaited_once()
+        row = await persistence.load(7)
+        assert row is not None
+        assert row.emotions.memory.joy < 0.8
+        assert row.emotions.memory.tiredness < 0.4
+        if change == "none":
+            bot.send_message.assert_awaited_once_with(7, "Есть настроение поболтать :3")
+            assert len(row.history) == 1 and row.history[0].proactive
+            assert await messenger.run_once() == 0
+            model.chat.assert_awaited_once()
+        else:
+            bot.send_message.assert_not_awaited()
+            assert not row.history
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize(
     "group,bot_user", [(False, False), (True, False), (False, True)]
 )
