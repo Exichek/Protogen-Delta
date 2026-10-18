@@ -35,11 +35,13 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 _WEB_PATTERN = re.compile(
     r"\b(?:интернет\w*|онлайн|загугл\w*|погугл\w*|web|internet|search)\b|"
     r"\b(?:найди|поищи|проверь|посмотри|глянь|глянуть)\b.{0,80}\b(?:сет[ьи]|сайт)|"
+    r"\b(?:найди|поищи|отыщи)\b.{0,80}"
+    r"\b(?:инф(?:а|у|ы|е|ой|ою)|информац\w*|сведени\w*)\b|"
     r"\b(?:сколько|какие)\b.{0,80}\b(?:марки|бренд\w*|энергетик\w*|вкус\w*)\b|"
     r"\b(?:новост\w*|релиз\w*|цена\w*)\b|"
     r"\b(?:актуальн\w*|последн\w*|свеж\w*)\s+(?:\w+\s+){0,3}"
     r"(?:верси\w*|данн\w*|курс\w*|котиров\w*|цен\w*|событи\w*|"
-    r"сводк\w*|информац\w*|обновлен\w*)\b",
+    r"сводк\w*|инф(?:а|у|ы|е|ой|ою)|информац\w*|сведени\w*|обновлен\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _CLARIFICATION_PATTERN = re.compile(
@@ -338,6 +340,9 @@ class PromptComposer:
                 selected.update(PromptComposer.select_tools(turn.user_message))
                 if selected:
                     break
+        if "web_search" in selected:
+            # Найденные источники нужно разрешать читать в том же ходе.
+            selected.add("fetch_web_page")
         return frozenset(selected)
 
     @staticmethod
