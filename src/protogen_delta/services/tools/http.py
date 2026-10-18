@@ -20,6 +20,18 @@ _MAX_PUBLIC_BODY_BYTES = 3 * _MAX_BODY_BYTES
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
+class ProviderHTTPError(ValueError):
+    """Передать статус без тела ответа, URL или заголовков авторизации."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__("Источник вернул ошибку")
+        self.status = status
+
+
+class UnsafePublicURLError(ValueError):
+    """Не передавать отклонённую публичную ссылку резервному загрузчику."""
+
+
 def _session(proxy_url: str | None, *, public_only: bool = False) -> ClientSession:
     """Создать короткоживущую HTTP-сессию с необязательным прокси."""
     connector: TCPConnector | None
@@ -52,7 +64,7 @@ async def fetch_provider(
             allow_redirects=False,
         ) as response:
             if response.status != 200:
-                raise ValueError("Источник вернул ошибку")
+                raise ProviderHTTPError(response.status)
             return await _read_limited(response)
 
 
@@ -115,11 +127,11 @@ async def _validate_public_url(url: str) -> None:
         or parsed.password is not None
         or parsed.hostname.casefold() == "localhost"
     ):
-        raise ValueError("Разрешены только публичные HTTP(S)-адреса")
+        raise UnsafePublicURLError("Разрешены только публичные HTTP(S)-адреса")
     try:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError as error:
-        raise ValueError("Некорректный порт") from error
+        raise UnsafePublicURLError("Некорректный порт") from error
 
     def resolve() -> list[tuple[Any, ...]]:
         return socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
@@ -128,4 +140,4 @@ async def _validate_public_url(url: str) -> None:
     if not addresses or any(
         not ipaddress.ip_address(item[4][0]).is_global for item in addresses
     ):
-        raise ValueError("Локальные и служебные адреса запрещены")
+        raise UnsafePublicURLError("Локальные и служебные адреса запрещены")

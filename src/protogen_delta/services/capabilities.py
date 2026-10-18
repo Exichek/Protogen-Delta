@@ -36,9 +36,14 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
     """Описывать подключённые функции, а не возможности чужого продукта."""
     web = (
         "Поиск в интернете с источниками; чтение публичных ссылок; погода, время и курс ЦБ."
-        if settings.brave_search_api_key
+        if settings.web_search_available
         else "Чтение публичных ссылок; погода, время и курс ЦБ. Поисковый API не подключён."
     )
+    if settings.web_search_api_key:
+        web += " Основной поиск — DeepSeek Search."
+        if settings.brave_search_api_key:
+            web += " При недоступности основного источника используется Brave."
+        web += " Публичные страницы сначала читает приложение; DeepSeek Fetch — резерв."
     audio = (
         "Распознавание речи; отдельная аудиомодель для музыки и звуков."
         if settings.audio_understanding_enabled
@@ -169,6 +174,6 @@ def build_capabilities(settings: Settings) -> ApplicationCapabilities:
         "Команды и полный список функций собраны в /funcs. "
         "Выбери две-три возможности и вплети их в живую речь."
     )
-    if settings.brave_search_api_key:
+    if settings.web_search_available:
         greeting += " Можно упомянуть поиск информации с источниками."
     return ApplicationCapabilities(summary, overview, greeting, implementation)

@@ -86,6 +86,7 @@ from protogen_delta.repositories.user_facts import UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.repositories.web_api_usage import WebApiUsageRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.capabilities import build_capabilities
 from protogen_delta.services.code_review import CodeReviewService
@@ -122,6 +123,7 @@ from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 from protogen_delta.services.translation import TranslationService
 from protogen_delta.services.user_facts import UserFactsService
+from protogen_delta.services.web_search import WebSearchService
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +185,7 @@ async def main() -> None:
     menu_task: asyncio.Task[None] | None = None
     deepseek: DeepSeekService | None = None
     github_reader: PublicGithubReader | None = None
+    web_search_service: WebSearchService | None = None
     proactive_messenger: ProactiveMessenger | None = None
     native_work = NativeWorkPool(2)
     health.add_diagnostics("native", native_work.snapshot)
@@ -254,6 +257,7 @@ async def main() -> None:
                     settings.music_audd_api_token,
                     settings.saucenao_api_key,
                     settings.brave_search_api_key,
+                    settings.deepseek_search_api_key,
                     settings.alpaca_api_key,
                     settings.alpaca_secret_key,
                     settings.telegram_proxy_url,
@@ -346,6 +350,16 @@ async def main() -> None:
         github_reader = PublicGithubReader(
             settings.data_dir, proxy_url=settings.telegram_proxy_url
         )
+        web_search_service = WebSearchService(
+            WebApiUsageRepository(
+                settings.data_dir,
+                settings.web_api_daily_limit,
+                settings.brave_monthly_search_limit,
+            ),
+            deepseek_key=settings.web_search_api_key,
+            brave_key=settings.brave_search_api_key,
+            proxy_url=settings.telegram_proxy_url,
+        )
         deepseek = DeepSeekService(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
@@ -361,6 +375,7 @@ async def main() -> None:
                     favorites=favorites if settings.favorites_user_ids else None,
                     proxy_url=settings.telegram_proxy_url,
                     brave_search_api_key=settings.brave_search_api_key,
+                    web_search_service=web_search_service,
                     dialogue_archive=(
                         dialogue_archive if settings.dialogue_archive_user_ids else None
                     ),
@@ -408,6 +423,7 @@ async def main() -> None:
                         proxy_url=settings.telegram_proxy_url,
                     ),
                     brave_key=settings.brave_search_api_key,
+                    web_search_service=web_search_service,
                     proxy_url=settings.telegram_proxy_url,
                 ),
                 deepseek.for_consultant(),
@@ -785,6 +801,8 @@ async def main() -> None:
                 await deepseek.close()
             if github_reader is not None:
                 await github_reader.close()
+            if web_search_service is not None:
+                await web_search_service.close()
             if dialogue_archive is not None:
                 await dialogue_archive.close()
         finally:

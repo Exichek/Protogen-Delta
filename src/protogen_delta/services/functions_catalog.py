@@ -61,7 +61,7 @@ def functions_text(
         )
     )
     if settings is not None:
-        if settings.brave_search_api_key:
+        if settings.web_search_available:
             lines.append("• Поиск в интернете с источниками и чтение публичных ссылок.")
         else:
             lines.append(

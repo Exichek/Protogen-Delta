@@ -10,6 +10,7 @@ from protogen_delta.services.tools.base import Tool, ToolExecutor, ToolRegistry
 
 if TYPE_CHECKING:
     from protogen_delta.services.public_github import PublicGithubReader
+    from protogen_delta.services.web_search import WebSearchService
 from protogen_delta.services.tools.calculator import calculate_expression
 from protogen_delta.services.tools.live_data import (
     get_current_time,
@@ -35,6 +36,7 @@ def default_registry(
     *,
     proxy_url: str | None = None,
     brave_search_api_key: str | None = None,
+    web_search_service: WebSearchService | None = None,
     dialogue_archive: DialogueArchiveService | None = None,
     source_access: SourceAccess | None = None,
     favorites: FavoritesService | None = None,
@@ -195,22 +197,45 @@ def default_registry(
                 ),
             ]
         )
-    if brave_search_api_key:
+    if web_search_service is not None:
+        tools = [
+            (
+                Tool(
+                    tool.name,
+                    tool.description,
+                    tool.parameters,
+                    tool.required,
+                    web_search_service.read,
+                )
+                if tool.name == "fetch_web_page"
+                else tool
+            )
+            for tool in tools
+        ]
+    if (
+        web_search_service.enabled
+        if web_search_service is not None
+        else bool(brave_search_api_key)
+    ):
         tools.append(
             Tool(
                 "web_search",
                 "Найти актуальную информацию в интернете с URL и датами источников.",
                 {
-                    "query": "Краткий поисковый запрос",
+                    "query": "Краткий поисковый запрос до 100 символов",
                     "count": "Число результатов от 1 до 10, по умолчанию 5",
                     "language": "Язык результатов: ru или en",
                     "freshness": "Период: day, week, month, year или пусто",
                 },
                 ("query",),
-                partial(
-                    web_search,
-                    api_key=brave_search_api_key,
-                    proxy_url=proxy_url,
+                (
+                    web_search_service.search
+                    if web_search_service is not None
+                    else partial(
+                        web_search,
+                        api_key=brave_search_api_key or "",
+                        proxy_url=proxy_url,
+                    )
                 ),
             )
         )
