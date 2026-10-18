@@ -126,6 +126,7 @@ from protogen_delta.services.turn_contract import (
 )
 from protogen_delta.services.visual_model import VisualModel
 from protogen_delta.services.visual_reply_context import append_visual_reply_context
+from protogen_delta.services.web_followup import resolve_web_followup
 
 logger = logging.getLogger(__name__)
 
@@ -1516,6 +1517,21 @@ class ResponseEngine:
                 "и существенная неопределённость. Сложность задачи не требует длинной "
                 "лекции; не выдумывай проверок или действий."
             )
+        web_followup = (
+            resolve_web_followup(user_message, history.recent)
+            if not images
+            and attachment_text is None
+            and model_message_override is None
+            and not gates.is_rp
+            and not gates.capability_overview
+            and all(
+                source.allow_controls and not source.reply_target_present
+                for source in request.sources
+            )
+            else None
+        )
+        if web_followup is not None and web_followup.question:
+            return web_followup.question
         try:
             model_user_message = model_message_override or user_message
             if attachment_text is not None:
@@ -1528,6 +1544,9 @@ class ResponseEngine:
             tool_names = self._prompt_composer.select_tools(
                 user_message, history.recent
             )
+            if web_followup is not None:
+                model_user_message = web_followup.model_message(user_message)
+                tool_names = frozenset({"fetch_web_page"})
             if context.github_active and (
                 gates.technical_topic
                 or re.search(
