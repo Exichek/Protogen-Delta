@@ -9,7 +9,7 @@
     :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; --miniapp-safe-top:max(env(safe-area-inset-top),calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px))); }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; color: var(--tg-theme-text-color,#eef4ff); background: var(--tg-theme-bg-color,#0c1420); }
-    main { width: min(100%, 720px); margin: 0 auto; padding:max(20px,var(--miniapp-safe-top)) max(16px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))) max(32px,env(safe-area-inset-bottom),calc(var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))) max(16px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); }
+    main { width: min(100%, 720px); margin: 0 auto; padding:20px max(16px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))) max(32px,env(safe-area-inset-bottom),calc(var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))) max(16px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); }
     header { display:flex; gap:14px; align-items:center; margin-bottom:20px; }
     .visor { width:56px; height:56px; border-radius:18px; display:grid; place-items:center; font-size:28px; background:linear-gradient(145deg,#25234c,#00b6d6); box-shadow:0 10px 28px #00b6d633; }
     #appearance-same-character { width:auto; margin-right:6px; padding:0; }
@@ -45,7 +45,10 @@
     #appearance-status, #character-status { margin-top:12px; min-height:20px; font-size:14px; }
     #appearance-file-name, #character-file-name { overflow-wrap:anywhere; font-size:13px; }
     button.small-action { width:auto; padding:8px 12px; font-size:13px; margin-top:8px; }
-    .tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
+    .app-navigation { position:sticky; top:0; z-index:10; padding-top:var(--miniapp-safe-top); background:var(--tg-theme-bg-color,#0c1420); box-shadow:0 1px 0 #ffffff12; }
+    .tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; width:min(100%,720px); margin:0 auto; padding:12px max(16px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))) 12px max(16px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); }
+    body.translation-view .tabs { width:min(100%,1160px); }
+    body.markets-view .tabs { width:100%; }
     .tabs button { padding:11px 4px; font-size:13px; }
     .tabs button { margin-top:0; opacity:.65; }
     .tabs button[aria-selected="true"] { opacity:1; }
@@ -129,7 +132,6 @@
     .market-table small { display:block; max-width:130px; white-space:normal; margin-top:4px; font-size:11px; }
     body.markets-view { color-scheme:dark; --tg-theme-bg-color:#0b0e13; --tg-theme-secondary-bg-color:#13171f; --tg-theme-text-color:#edf1f7; --tg-theme-hint-color:#96a2b6; --tg-theme-button-color:#3979d8; background:#0b0e13; }
     body.markets-view main { width:100%; }
-    .tabs { top:var(--miniapp-safe-top); }
     .market-panel { --gain:#41d39d; --loss:#ff727e; color-scheme:dark; }
     .market-panel .market-card { background:#13171f; border-color:#252c39; box-shadow:0 14px 34px #0002; }
     .market-panel input,.market-panel select,.market-panel textarea { background:#0c1017; color:#edf1f7; outline-color:#2b3444; }
@@ -180,18 +182,21 @@
     #market-question { height:95px; min-height:95px; max-height:160px; resize:vertical; }
     #currency-result { font-size:23px; font-weight:700; margin:16px 0 8px; overflow-wrap:anywhere; }
     @media(max-width:700px) { .market-grid { grid-template-columns:minmax(0,1fr); } .market-card { padding:14px; } }
-    @media(min-width:1100px) { .market-grid { grid-template-columns:minmax(0,1fr) clamp(320px,27vw,480px); } body.markets-view main { padding-left:max(24px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); padding-right:max(24px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))); } }
+    @media(min-width:1100px) { .market-grid { grid-template-columns:minmax(0,1fr) clamp(320px,27vw,480px); } body.markets-view main,body.markets-view .tabs { padding-left:max(24px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); padding-right:max(24px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))); } }
   </style>
 </head>
 <body>
-<main>
-  <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted">ИИ-ассистент</p><p class="muted" id="hello">Профиль и настройки</p></div></header>
+<div class="app-navigation">
   <nav class="tabs" role="tablist" aria-label="Разделы Дельты">
     <button id="tab-rp" role="tab" aria-controls="rp-panel" aria-selected="true">RP и облик</button>
     <button id="tab-tools" role="tab" aria-controls="tools-panel" aria-selected="false">Полезное</button>
     <button id="tab-translate" role="tab" aria-controls="translate-panel" aria-selected="false">Перевод</button>
     <button id="tab-markets" role="tab" aria-controls="markets-panel" aria-selected="false">Рынки</button>
   </nav>
+</div>
+<main>
+  <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted">ИИ-ассистент</p><p class="muted" id="hello">Профиль и настройки</p></div></header>
+
   <div id="rp-panel" role="tabpanel" aria-labelledby="tab-rp">
   <section class="card">
     <p class="muted">RP и облик для личного чата. В группах сцены и персонажи отдельные. Возрастной режим общий.</p>
