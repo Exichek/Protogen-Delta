@@ -86,12 +86,15 @@ def test_prompt_composer_adds_all_physical_sections_for_roleplay() -> None:
         ("Какая погода в Москве?", frozenset({"get_weather"})),
         ("Курс доллара к рублю", frozenset({"get_exchange_rate"})),
         ("Сколько времени в Москве?", frozenset({"get_current_time"})),
-        ("Найди последнюю версию Python", frozenset({"web_search"})),
+        ("Найди последнюю версию Python", frozenset({"web_search", "fetch_web_page"})),
         (
             "А можешь глянуть в интернете в каком году вышел крепкий орешек 2",
-            frozenset({"web_search"}),
+            frozenset({"web_search", "fetch_web_page"}),
         ),
-        ("А сколько цветов энергетиков у марки Burn?", frozenset({"web_search"})),
+        (
+            "А сколько цветов энергетиков у марки Burn?",
+            frozenset({"web_search", "fetch_web_page"}),
+        ),
         ("Прочитай https://example.com/page", frozenset({"fetch_web_page"})),
     ],
 )
@@ -99,6 +102,35 @@ def test_prompt_composer_selects_only_relevant_tools(
     message: str, tools: frozenset[str]
 ) -> None:
     assert _composer().select_tools(message) == tools
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Так, поиск тебе новый добавили, а ну ка найди мне последнюю инфу "
+        "о Call of duty modern warfare 4",
+        "Найди последнюю инфу о MW4",
+        "Свежая инфа про игру есть?",
+        "Актуальную инфу о релизе, пожалуйста",
+        "Поищи мне информацию о Call of Duty",
+        "Найди сведения о новой игре",
+    ],
+)
+def test_information_requests_allow_search_and_reading_sources(message: str) -> None:
+    """Разговорная просьба даёт поиск и чтение результатов, без иных полномочий."""
+    assert _composer().select_tools(message) == {"web_search", "fetch_web_page"}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "*передаю последнюю записку*",
+        "Мне прислали инфу о нашей встрече",
+        "У меня свежий кофе и новая игра",
+    ],
+)
+def test_ordinary_information_mentions_do_not_enable_search(message: str) -> None:
+    assert not _composer().select_tools(message)
 
 
 def test_prompt_composer_summarizes_old_history_and_keeps_recent_turns() -> None:
