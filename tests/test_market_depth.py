@@ -288,6 +288,55 @@ def test_public_crypto_quotes_work_without_stock_credentials() -> None:
     assert "crypto/us/snapshots" in http.calls[0][0]
 
 
+def test_crypto_hour_month_reads_fifth_page_and_sorts_newest_first_input() -> None:
+    async def run() -> None:
+        http = FakeHTTP()
+        pages = [
+            json.dumps(
+                {
+                    "bars": {
+                        "BTC/USD": [{**BAR, "t": f"2026-10-{18-i:02d}T08:00:00Z"}]
+                    },
+                    "next_page_token": f"page-{i+1}" if i < 4 else None,
+                }
+            ).encode()
+            for i in range(5)
+        ]
+        http.get = AsyncMock(side_effect=pages)  # type: ignore[method-assign]
+        result = await MarketDataService(http).chart("crypto", "BTC/USD", "1m", "1h")
+        assert http.get.await_count == 5
+        assert http.get.await_args_list[0].args[1]["sort"] == "desc"
+        assert len(result["candles"]) == 5 and not result["truncated"]
+        assert result["candles"][-1]["date"] == "2026-10-18T08:00:00+00:00"
+
+    asyncio.run(run())
+
+
+def test_bounded_alpaca_pages_preserve_latest_data_when_older_history_is_partial() -> (
+    None
+):
+    async def run() -> None:
+        http = FakeHTTP()
+        pages = [
+            json.dumps(
+                {
+                    "bars": {
+                        "BTC/USD": [{**BAR, "t": f"2026-10-{18-i:02d}T08:00:00Z"}]
+                    },
+                    "next_page_token": f"page-{i+1}",
+                }
+            ).encode()
+            for i in range(9)
+        ]
+        http.get = AsyncMock(side_effect=pages)  # type: ignore[method-assign]
+        result = await MarketDataService(http).chart("crypto", "BTC/USD", "1m", "1h")
+        assert http.get.await_count == 8
+        assert len(result["candles"]) == 8 and result["truncated"]
+        assert result["candles"][-1]["date"] == "2026-10-18T08:00:00+00:00"
+
+    asyncio.run(run())
+
+
 def test_new_routes_authenticate_before_data_and_carry_interval() -> None:
     async def run() -> None:
         http = FakeHTTP()

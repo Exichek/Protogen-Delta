@@ -58,7 +58,7 @@ async def read_chart(
             "start": start.isoformat(),
             "end": end.isoformat(),
             "limit": "1000",
-            "sort": "asc",
+            "sort": "desc",
         }
     )
     if market == "us":
@@ -72,7 +72,7 @@ async def read_chart(
     rows: list[dict[str, Any]] = []
     truncated = False
     tokens: set[str] = set()
-    for _ in range(4):
+    for _ in range(4 if market == "ru" else 8):
         payload = decode_json(await http.get(url, dict(params), ttl=60))
         if market == "ru":
             page = table_rows(payload.get("candles"))
