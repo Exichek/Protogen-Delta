@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from protogen_delta.repositories.web_api_usage import WebApiLimitError
+
 logger = logging.getLogger(__name__)
 ToolHandler = Callable[[dict[str, str]], Awaitable[dict[str, Any]]]
 
@@ -95,6 +97,8 @@ class ToolExecutor:
                 raise ValueError("Ответ источника слишком большой")
             outcome = "ok"
             return output
+        except WebApiLimitError:
+            return json.dumps({"ok": False, "error": "web_api_limit_exceeded"})
         except ValueError, KeyError, TypeError:
             return json.dumps({"ok": False, "error": "invalid_arguments_or_data"})
         except Exception:

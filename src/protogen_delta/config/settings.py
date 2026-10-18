@@ -56,6 +56,10 @@ class Settings:
     code_review_user_ids: frozenset[int] = frozenset()
     favorites_user_ids: frozenset[int] = frozenset()
     brave_search_api_key: str | None = None
+    deepseek_search_enabled: bool = True
+    deepseek_search_api_key: str | None = field(default=None, repr=False)
+    web_api_daily_limit: int = 200
+    brave_monthly_search_limit: int = 1000
     alpaca_api_key: str | None = field(default=None, repr=False)
     alpaca_secret_key: str | None = field(default=None, repr=False)
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
@@ -81,6 +85,24 @@ class Settings:
     whisper_model_size: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+
+    @property
+    def web_search_api_key(self) -> str | None:
+        """Не отправлять ключ стороннего совместимого LLM в поисковый API DeepSeek."""
+        if not self.deepseek_search_enabled:
+            return None
+        if self.deepseek_search_api_key:
+            return self.deepseek_search_api_key
+        if self.llm_provider == "deepseek" and self.deepseek_base_url.rstrip("/") in {
+            "https://api.deepseek.com",
+            "https://api.deepseek.com/v1",
+        }:
+            return self.deepseek_api_key
+        return None
+
+    @property
+    def web_search_available(self) -> bool:
+        return bool(self.web_search_api_key or self.brave_search_api_key)
 
     @property
     def llm_api_key(self) -> str:
@@ -519,6 +541,18 @@ def load_settings() -> Settings:
             os.getenv("CODE_REVIEW_USER_IDS", ""), "CODE_REVIEW_USER_IDS"
         ),
         brave_search_api_key=brave_search_api_key or None,
+        deepseek_search_enabled=_parse_bool(
+            os.getenv("DEEPSEEK_SEARCH_ENABLED", "true"), "DEEPSEEK_SEARCH_ENABLED"
+        ),
+        deepseek_search_api_key=os.getenv("DEEPSEEK_SEARCH_API_KEY", "").strip()
+        or None,
+        web_api_daily_limit=_parse_positive_int(
+            os.getenv("WEB_API_DAILY_LIMIT", "200"), "WEB_API_DAILY_LIMIT"
+        ),
+        brave_monthly_search_limit=_parse_positive_int(
+            os.getenv("BRAVE_MONTHLY_SEARCH_LIMIT", "1000"),
+            "BRAVE_MONTHLY_SEARCH_LIMIT",
+        ),
         alpaca_api_key=os.getenv("ALPACA_API_KEY", "").strip() or None,
         alpaca_secret_key=os.getenv("ALPACA_SECRET_KEY", "").strip() or None,
         e621_user_agent=(

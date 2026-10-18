@@ -104,7 +104,7 @@ def test_other_intents_do_not_bypass_classifier(message: str) -> None:
 
 
 def test_capabilities_reflect_optional_services() -> None:
-    basic = build_capabilities(_settings())
+    basic = build_capabilities(replace(_settings(), deepseek_search_enabled=False))
     assert "Поисковый API не подключён" in basic.summary
     assert "OCR сканов не включён" in basic.summary
     assert "**Голос.**" in basic.overview

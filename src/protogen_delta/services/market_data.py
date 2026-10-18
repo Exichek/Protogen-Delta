@@ -25,6 +25,7 @@ from protogen_delta.services.market_models import (
 )
 from protogen_delta.services.market_series import ALPACA, MOEX, read_chart
 from protogen_delta.services.tools.web import web_search
+from protogen_delta.services.web_search import WebSearchService
 
 WATCHLISTS = {
     "us": (
@@ -143,10 +144,12 @@ class MarketDataService:
         http: MarketHTTP,
         *,
         brave_key: str | None = None,
+        web_search_service: WebSearchService | None = None,
         proxy_url: str | None = None,
     ) -> None:
         self.http = http
         self._brave_key, self._proxy = brave_key, proxy_url
+        self._web_search = web_search_service
         self._news_cache: tuple[datetime, dict[str, Any]] | None = None
         self._news_lock = asyncio.Lock()
 
@@ -326,17 +329,26 @@ class MarketDataService:
                         )
                 except MarketDataError as error:
                     result["notices"].append(str(error))
-            if self._brave_key:
+            if (
+                self._web_search.enabled
+                if self._web_search is not None
+                else bool(self._brave_key)
+            ):
                 try:
-                    world = await web_search(
-                        {
-                            "query": "мировые финансовые новости инфляция ставки центральных банков нефть рынки",
-                            "freshness": "day",
-                            "count": "8",
-                            "language": "ru",
-                        },
-                        api_key=self._brave_key,
-                        proxy_url=self._proxy,
+                    search_args = {
+                        "query": "мировые финансовые новости инфляция ставки центральных банков нефть рынки",
+                        "freshness": "day",
+                        "count": "8",
+                        "language": "ru",
+                    }
+                    world = (
+                        await self._web_search.search(search_args)
+                        if self._web_search is not None
+                        else await web_search(
+                            search_args,
+                            api_key=self._brave_key or "",
+                            proxy_url=self._proxy,
+                        )
                     )
                     for row in world.get("results", []):
                         if not (link := public_link(row.get("url"))):
@@ -356,7 +368,7 @@ class MarketDataService:
                                 "kind": "Мировые события · поиск за сутки",
                             }
                         )
-                except ValueError, ClientError, TimeoutError:
+                except ValueError, ClientError, TimeoutError, RuntimeError:
                     result["notices"].append(
                         "Поиск мировых новостей временно недоступен."
                     )
