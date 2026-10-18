@@ -1,5 +1,48 @@
 (() => {
   'use strict';
+  const app=window.Telegram?.WebApp, button=document.getElementById('market-fullscreen');
+  const label=document.getElementById('market-fullscreen-label'), note=document.getElementById('market-fullscreen-note');
+  const native=Boolean(app?.initData && app.isVersionAtLeast?.('8.0') && app.requestFullscreen && app.exitFullscreen);
+  let pending=null;
+  function sync(){
+    const active=Boolean(document.fullscreenElement || (native && app.isFullscreen));
+    button.setAttribute('aria-pressed',String(active));
+    label.textContent=active?'Свернуть экран':'На весь экран';
+    button.title=active?'Выйти из полноэкранного режима':'Развернуть Mini App на весь экран';
+  }
+  function complete(){
+    clearTimeout(pending);pending=null;button.disabled=false;sync();
+  }
+  function failed(){
+    complete();
+    note.textContent='Полный экран недоступен в этом окне. Попробуй развернуть окно Telegram или обновить приложение.';
+  }
+  button.addEventListener('click',async()=>{
+    if(pending!==null)return;
+    note.textContent='';
+    button.disabled=true;
+    try{
+      if(document.fullscreenElement){await document.exitFullscreen();complete();}
+      else if(native){
+        pending=setTimeout(failed,5000);
+        if(app.isFullscreen)app.exitFullscreen();else app.requestFullscreen();
+      }else if(document.fullscreenEnabled && document.documentElement.requestFullscreen){
+        await document.documentElement.requestFullscreen();complete();
+      }else{app?.expand?.();failed();}
+    }catch{failed();}
+  });
+  document.addEventListener('fullscreenchange',()=>{note.textContent='';complete();});
+  document.addEventListener('fullscreenerror',failed);
+  if(native){
+    app.onEvent('fullscreenChanged',()=>{note.textContent='';complete();});
+    app.onEvent('fullscreenFailed',failed);
+    app.onEvent('activated',sync);
+  }
+  sync();
+})();
+
+(() => {
+  'use strict';
   const q = id => document.getElementById(id), initData = window.Telegram?.WebApp?.initData || '';
   const number = value => value == null ? '—' : Number(value).toLocaleString('ru-RU', {maximumFractionDigits:6});
   const price = value => value == null ? '—' : Number(value).toLocaleString('ru-RU', {maximumFractionDigits:market()==='crypto'||Math.abs(value)<1?6:2});
@@ -99,18 +142,18 @@
   const canvas=q('market-chart');
   function candleValue(c){text('market-chart-value',`${candleDate(c.date)} · Откр. ${price(c.open)} · Макс. ${price(c.high)} · Мин. ${price(c.low)} · Закр. ${price(c.close)} · Объём ${number(c.volume)}`);}
   function draw(){
-    const width=canvas.clientWidth||300,height=320,scale=window.devicePixelRatio||1;canvas.width=width*scale;canvas.height=height*scale;const ctx=canvas.getContext('2d');if(!ctx)return;ctx.scale(scale,scale);ctx.fillStyle='#0d1118';ctx.fillRect(0,0,width,height);
-    if(!candles.length){ctx.fillStyle='#93a1b5';ctx.font='14px sans-serif';ctx.fillText('Нет данных для графика',12,155);return;}
+    const width=canvas.clientWidth||300,height=canvas.clientHeight||320,scale=window.devicePixelRatio||1;canvas.width=width*scale;canvas.height=height*scale;const ctx=canvas.getContext('2d');if(!ctx)return;ctx.scale(scale,scale);ctx.fillStyle='#0d1118';ctx.fillRect(0,0,width,height);
+    if(!candles.length){ctx.fillStyle='#93a1b5';ctx.font='14px sans-serif';ctx.fillText('Нет данных для графика',12,height/2);return;}
     const visible=candles.slice(viewStart,viewStart+viewCount);
-    const left=10,right=82,top=20,bottom=225,edge=width-right,plot=Math.max(1,edge-left),min=Math.min(...visible.map(c=>c.low)),max=Math.max(...visible.map(c=>c.high)),rawSpan=max-min||max*.01||1,padding=rawSpan*.08,low=min-padding,high=max+padding,span=high-low;
+    const left=10,right=82,top=20,bottom=height-95,volumeBase=height-28,edge=width-right,plot=Math.max(1,edge-left),min=Math.min(...visible.map(c=>c.low)),max=Math.max(...visible.map(c=>c.high)),rawSpan=max-min||max*.01||1,padding=rawSpan*.08,low=min-padding,high=max+padding,span=high-low;
     const y=value=>bottom-(value-low)/span*(bottom-top),step=plot/visible.length;
     ctx.font='11px sans-serif';ctx.lineWidth=1;ctx.strokeStyle='#ffffff0d';ctx.fillStyle='#8998ad';
     for(let i=0;i<=4;i++){const yy=top+(bottom-top)*i/4;ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(edge,yy);ctx.stroke();ctx.fillText(price(high-span*i/4),edge+7,yy+4);}
     const maxVolume=Math.max(1,...visible.map(c=>c.volume||0));
-    visible.forEach((c,i)=>{const x=left+(i+.5)*step,color=c.close>=c.open?'#41d39d':'#ff727e',size=Math.max(.35,Math.min(11,step*.65));ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(c.high));ctx.lineTo(x,y(c.low));ctx.stroke();ctx.fillRect(x-size/2,Math.min(y(c.open),y(c.close)),size,Math.max(1,Math.abs(y(c.open)-y(c.close))));if(c.volume!=null){ctx.globalAlpha=.35;ctx.fillRect(x-size/2,292-c.volume/maxVolume*42,size,c.volume/maxVolume*42);ctx.globalAlpha=1;}});
+    visible.forEach((c,i)=>{const x=left+(i+.5)*step,color=c.close>=c.open?'#41d39d':'#ff727e',size=Math.max(.35,Math.min(11,step*.65));ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(c.high));ctx.lineTo(x,y(c.low));ctx.stroke();ctx.fillRect(x-size/2,Math.min(y(c.open),y(c.close)),size,Math.max(1,Math.abs(y(c.open)-y(c.close))));if(c.volume!=null){ctx.globalAlpha=.35;ctx.fillRect(x-size/2,volumeBase-c.volume/maxVolume*42,size,c.volume/maxVolume*42);ctx.globalAlpha=1;}});
     const last=visible[visible.length-1],lastY=y(last.close);ctx.setLineDash([3,4]);ctx.strokeStyle=last.close>=last.open?'#41d39d66':'#ff727e66';ctx.beginPath();ctx.moveTo(left,lastY);ctx.lineTo(edge,lastY);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=last.close>=last.open?'#174c3d':'#542b35';ctx.fillRect(edge+2,lastY-8,right-4,17);ctx.fillStyle='#edf1f7';ctx.fillText(price(last.close),edge+7,lastY+4);
-    if(point>=viewStart&&point<viewStart+viewCount){const x=left+(point-viewStart+.5)*step;ctx.strokeStyle='#c3d6ef66';ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,292);ctx.stroke();}
-    ctx.fillStyle='#8998ad';ctx.fillText(new Date(visible[0].date).toLocaleDateString('ru-RU',{timeZone:chartZone}),left,310);ctx.textAlign='right';ctx.fillText(new Date(last.date).toLocaleDateString('ru-RU',{timeZone:chartZone}),edge,310);ctx.textAlign='left';
+    if(point>=viewStart&&point<viewStart+viewCount){const x=left+(point-viewStart+.5)*step;ctx.strokeStyle='#c3d6ef66';ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,volumeBase);ctx.stroke();}
+    ctx.fillStyle='#8998ad';ctx.fillText(new Date(visible[0].date).toLocaleDateString('ru-RU',{timeZone:chartZone}),left,height-10);ctx.textAlign='right';ctx.fillText(new Date(last.date).toLocaleDateString('ru-RU',{timeZone:chartZone}),edge,height-10);ctx.textAlign='left';
   }
   canvas.addEventListener('pointermove',event=>{if(!candles.length)return;const x=event.clientX-canvas.getBoundingClientRect().left;point=viewStart+Math.max(0,Math.min(viewCount-1,Math.floor((x-10)/Math.max(1,canvas.clientWidth-92)*viewCount)));candleValue(candles[point]);draw();});
   canvas.addEventListener('pointerleave',()=>{point=-1;if(candles.length)candleValue(candles[viewStart+viewCount-1]);draw();});
