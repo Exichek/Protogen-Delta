@@ -26,6 +26,7 @@ class MarketRoutes:
             for kind, seconds in {
                 "quotes": 0.5,
                 "chart": 0.5,
+                "orderbook": 1,
                 "news": 2,
                 "rates": 0.5,
                 "convert": 0.5,
@@ -36,7 +37,7 @@ class MarketRoutes:
 
     def routes(self) -> list[web.RouteDef]:
         return [
-            web.get("/api/markets/{kind:quotes|chart|news|rates}", self.read),
+            web.get("/api/markets/{kind:quotes|chart|orderbook|news|rates}", self.read),
             web.post("/api/markets/convert", self.convert),
             web.post("/api/markets/consult", self.consult),
             web.delete("/api/markets/history", self.clear),
@@ -78,7 +79,7 @@ class MarketRoutes:
     async def read(self, request: web.Request) -> web.Response:
         kind = request.match_info["kind"]
         _, advisor = self._access(request, kind)
-        if set(request.query) - {"market", "symbols", "symbol", "period"}:
+        if set(request.query) - {"market", "symbols", "symbol", "period", "interval"}:
             raise web.HTTPBadRequest(text="Неизвестные параметры рынка.")
         try:
             if kind == "quotes":
@@ -90,6 +91,12 @@ class MarketRoutes:
                     request.query.get("market", "us"),
                     request.query.get("symbol", "SPY"),
                     request.query.get("period", "1m"),
+                    request.query.get("interval", "1d"),
+                )
+            elif kind == "orderbook":
+                payload = await advisor.data.orderbook(
+                    request.query.get("market", "us"),
+                    request.query.get("symbol", "SPY"),
                 )
             elif kind == "news":
                 payload = await advisor.data.news()
@@ -118,7 +125,9 @@ class MarketRoutes:
 
     async def consult(self, request: web.Request) -> web.Response:
         user_id, advisor = self._access(request, "consult")
-        payload = await self._payload(request, {"text", "market", "symbols", "period"})
+        payload = await self._payload(
+            request, {"text", "market", "symbols", "period", "interval"}
+        )
         try:
             result = await advisor.answer(
                 user_id,
@@ -126,6 +135,7 @@ class MarketRoutes:
                 payload.get("market", "us"),
                 payload.get("symbols", ""),
                 payload.get("period", "1m"),
+                payload.get("interval", "1d"),
             )
         except MarketDataError, DeepSeekError:
             raise web.HTTPServiceUnavailable(
