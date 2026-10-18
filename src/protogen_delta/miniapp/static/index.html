@@ -104,7 +104,7 @@
     .market-panel h3 { margin:0 0 14px; }
     .market-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
     .market-head button { margin:0; width:auto; padding:10px 14px; }
-    .market-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:16px; }
+    .market-grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:16px; align-items:start; }
     .market-card { min-width:0; background:var(--tg-theme-secondary-bg-color,#172334); border:1px solid #ffffff12; border-radius:18px; padding:18px; margin-bottom:16px; }
     .market-row { display:flex; gap:10px; align-items:center; }
     .market-row > * { min-width:0; flex:1; }
@@ -123,9 +123,47 @@
     .market-table button { width:auto; padding:0; margin:0; background:transparent; color:inherit; text-align:left; }
     .market-table button[aria-pressed=true] { color:#a9a1ff; }
     .market-table small { display:block; max-width:130px; white-space:normal; margin-top:4px; font-size:11px; }
-    body.markets-view main { width:min(100%,1080px); }
+    body.markets-view { color-scheme:dark; --tg-theme-bg-color:#0b0e13; --tg-theme-secondary-bg-color:#13171f; --tg-theme-text-color:#edf1f7; --tg-theme-hint-color:#96a2b6; --tg-theme-button-color:#3979d8; background:#0b0e13; }
+    body.markets-view main { width:min(100%,1200px); }
+    .market-panel { --gain:#41d39d; --loss:#ff727e; color-scheme:dark; }
+    .market-panel .market-card { background:#13171f; border-color:#252c39; box-shadow:0 14px 34px #0002; }
+    .market-panel input,.market-panel select,.market-panel textarea { background:#0c1017; color:#edf1f7; outline-color:#2b3444; }
+    .market-panel select option { background:#121721; color:#edf1f7; }
+    .market-panel h3 { margin:0; font-size:19px; }
+    .market-panel button:focus-visible,.market-panel select:focus-visible,.market-panel input:focus-visible,.market-panel canvas:focus-visible { outline:2px solid #7baeff; outline-offset:3px; }
+    .market-panel .market-filters button[aria-pressed=true] { background:#223653; border-color:#689be3; }
+    .market-panel .market-table th { background:#13171f; }
+    .market-panel .market-table button[aria-pressed=true] { color:#8dbaff; }
+    .market-panel .market-table tbody tr:has(button[aria-pressed=true]) { background:#3979d811; }
+    .market-chart-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .market-chart-heading select { width:auto; max-width:180px; font-size:14px; padding:10px; }
+    .market-price { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin:18px 0 6px; }
+    #market-last-price { font-size:32px; font-weight:750; letter-spacing:-.7px; }
+    #market-last-change { font-size:16px; font-weight:600; }
+    .market-intervals { display:flex; gap:6px; margin:18px 0 8px; padding:5px; border-radius:12px; background:#0b0f16; }
+    .market-intervals button { width:auto; flex:1; margin:0; padding:8px 6px; font-size:13px; color:#aebbd0; background:transparent; }
+    .market-intervals button[aria-pressed=true] { color:#fff; background:#293548; }
+    .market-book-top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .market-book-top button { width:auto; margin:0; padding:8px 12px; font-size:13px; }
+    .market-book-mode { display:inline-block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; background:#233044; color:#b7d2fa; border-radius:5px; padding:4px 7px; margin-top:10px; }
+    .market-book { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:16px; }
+    .market-book-side { min-width:0; }
+    .market-book-label { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-bottom:8px; }
+    .market-book-row { position:relative; display:flex; justify-content:space-between; gap:6px; padding:8px 5px; border-radius:3px; font-variant-numeric:tabular-nums; font-size:13px; overflow:hidden; }
+    .market-book-row:before { content:''; position:absolute; inset:0 0 0 auto; width:var(--depth,0%); background:#41d39d12; pointer-events:none; }
+    .market-book-side.ask .market-book-row:before { background:#ff727e12; }
+    .market-book-row span { position:relative; }
+    .market-book-empty { font-size:13px; color:#96a2b6; padding:12px 0; }
+    #market-book-spread { border-top:1px solid #29303e; padding-top:12px; }
+    #market-chart-window { font-size:12px; }
+    .market-chart-nav { display:flex; justify-content:flex-end; gap:6px; }
+    .market-chart-nav button { width:auto; margin:0; padding:7px 12px; font-size:13px; background:#222c3b; color:#dbe7f8; }
+    #market-chart-position { display:block; padding:0; height:22px; outline:0; margin:10px 0; accent-color:#7baeff; }
+    .market-controls label { margin-top:0; }
+    @media(max-width:600px) { .market-controls .market-row { flex-direction:column; align-items:stretch; } }
+    @media(max-width:440px) { .market-book { gap:8px; } .market-book-row { font-size:12px; padding:8px 3px; flex-direction:column; gap:2px; } .market-book-row span:last-child { align-self:flex-end; font-size:11px; opacity:.85; } #market-last-price { font-size:28px; } }
     .market-positive { color:var(--gain); } .market-negative { color:var(--loss); }
-    #market-chart { display:block; width:100%; height:270px; touch-action:pan-y; margin:12px 0; }
+    #market-chart { display:block; width:100%; height:320px; touch-action:pan-y; margin:12px 0; background:#0d1118; border-radius:10px; }
     #market-candles { max-height:180px; }
     .market-news-item { padding:12px 0; border-bottom:1px solid #ffffff12; }
     .market-news-item a { color:inherit; font-weight:600; text-decoration:none; overflow-wrap:anywhere; }
@@ -384,31 +422,42 @@
     <div class="market-head"><h2>Рынки</h2><button id="market-refresh" type="button">Обновить</button></div>
     <p class="market-muted">Котировки, события и анализ — в одном месте.</p>
     <div id="market-status" role="status" aria-live="polite" class="market-muted"></div>
+    <section class="market-card market-controls">
+      <div class="market-row"><div><label for="market-kind">Рынок</label><select id="market-kind"><option value="ru" selected>Российские акции</option><option value="us">США · акции и ETF</option><option value="crypto">Криптовалюты · USD</option></select></div><div><label for="market-symbols">Свой список тикеров</label><input id="market-symbols" maxlength="400" placeholder="SBER, OZON, YDEX, T"></div></div>
+      <p class="market-muted">Пустой список — популярные инструменты. Введи до 20 тикеров через запятую и нажми Enter. Выбери инструмент в таблице для графика и стакана.</p>
+    </section>
     <div class="market-grid">
-      <div>
-        <section class="market-card">
-          <div class="market-row"><select id="market-kind" aria-label="Рынок"><option value="us">США · акции и ETF</option><option value="ru">Российские акции</option><option value="crypto">Криптовалюты · USD</option></select></div>
-          <label for="market-symbols">Инструменты через запятую</label>
-          <input id="market-symbols" maxlength="400" placeholder="SPY, QQQ, AAPL, NVDA">
-          <p class="market-muted">Пустое поле — популярные инструменты. Выбери тикер в таблице, чтобы открыть график и обсудить его.</p>
-          <div class="market-filters" aria-label="Сортировка котировок"><button data-market-sort="all" aria-pressed="true">Все</button><button data-market-sort="up" aria-pressed="false">Рост ↗</button><button data-market-sort="down" aria-pressed="false">Падение ↘</button></div>
-          <div class="market-scroll"><table class="market-table"><thead><tr><th>Инструмент</th><th>Цена</th><th>Изм.</th><th>Объём</th></tr></thead><tbody id="market-quotes"></tbody></table></div>
-          <p id="market-quote-note" class="market-muted"></p>
-        </section>
-        <section class="market-card">
-          <div class="market-row"><h3 id="market-chart-title">График</h3><select id="market-period" aria-label="Период графика"><option value="1w">Неделя</option><option value="1m" selected>Месяц</option><option value="3m">3 месяца</option><option value="1y">Год</option></select></div>
-          <canvas id="market-chart" role="img" aria-label="Дневные свечи и объём; числовые данные доступны в таблице ниже"></canvas>
+      <section class="market-card market-area-chart">
+          <div class="market-chart-heading"><h3 id="market-chart-title">График</h3><select id="market-period" aria-label="Период графика"><option value="1d">1 день</option><option value="1w">Неделя</option><option value="1m" selected>Месяц</option><option value="3m">3 месяца</option><option value="1y">Год</option></select></div>
+          <div class="market-price"><span id="market-last-price">—</span><span id="market-last-change"></span></div>
+          <p id="market-price-note" class="market-muted"></p>
+          <div class="market-intervals" role="group" aria-label="Размер одной свечи"><button type="button" data-market-interval="1m" aria-pressed="false">1 мин</button><button type="button" data-market-interval="10m" aria-pressed="false">10 мин</button><button type="button" data-market-interval="1h" aria-pressed="true">1 час</button><button type="button" data-market-interval="1d" aria-pressed="false">1 день</button></div>
+          <canvas id="market-chart" tabindex="0" role="img" aria-label="Свечи и объём; стрелки влево и вправо выбирают свечу, числовые данные доступны ниже"></canvas>
+          <div class="market-chart-nav" role="group" aria-label="Масштаб графика"><button type="button" id="market-zoom-out" aria-label="Уменьшить масштаб">−</button><button type="button" id="market-zoom-all">Весь период</button><button type="button" id="market-zoom-in" aria-label="Увеличить масштаб">+</button></div>
+          <input id="market-chart-position" type="range" min="0" max="0" value="0" aria-label="Участок истории графика" hidden>
+          <p id="market-chart-window" class="market-muted"></p>
           <p id="market-chart-value" class="market-muted">Выбери инструмент для графика.</p>
           <p id="market-chart-note" class="market-muted"></p>
           <details><summary>Данные свечей</summary><div id="market-candles" class="market-scroll"><table class="market-table"><thead><tr><th>Дата</th><th>Открытие</th><th>Макс.</th><th>Мин.</th><th>Закрытие</th><th>Объём</th></tr></thead><tbody id="market-candle-rows"></tbody></table></div></details>
         </section>
-        <section class="market-card">
-          <h3>События и новости</h3><p class="market-muted">Финансовая лента и мировые публикации за сутки. Влияние новости на цену — гипотеза, которую можно обсудить с консультантом.</p>
-          <div id="market-news"></div><p id="market-news-note" class="market-muted"></p>
+      <section class="market-card market-area-book" aria-labelledby="market-book-title">
+          <div class="market-book-top"><h3 id="market-book-title">Стакан</h3><button id="market-book-refresh" type="button">Обновить</button></div>
+          <span id="market-book-mode" class="market-book-mode">Нет инструмента</span>
+          <p id="market-book-symbol" class="market-muted"></p>
+          <div class="market-book">
+            <div class="market-book-side"><div class="market-book-label"><b class="market-positive">Покупка</b><span id="market-bid-unit">Объём</span></div><div id="market-bids"></div></div>
+            <div class="market-book-side ask"><div class="market-book-label"><b class="market-negative">Продажа</b><span id="market-ask-unit">Объём</span></div><div id="market-asks"></div></div>
+          </div>
+          <p id="market-book-spread" class="market-muted"></p><p id="market-book-note" class="market-muted" role="status" aria-live="polite">Выбери инструмент.</p>
         </section>
-      </div>
-      <div>
-        <section class="market-card">
+      <section class="market-card market-area-quotes">
+          <h3>Инструменты</h3>
+          <label for="market-filter">Найти в списке</label><input id="market-filter" type="search" placeholder="Тикер или компания" autocomplete="off">
+          <div class="market-filters" aria-label="Сортировка котировок"><button data-market-sort="all" aria-pressed="true">Все</button><button data-market-sort="up" aria-pressed="false">Рост ↗</button><button data-market-sort="down" aria-pressed="false">Падение ↘</button></div>
+          <div class="market-scroll"><table class="market-table"><thead><tr><th>Инструмент</th><th>Цена</th><th>Изм.</th><th>Объём</th></tr></thead><tbody id="market-quotes"></tbody></table></div>
+          <p id="market-quote-note" class="market-muted"></p>
+        </section>
+      <section class="market-card market-area-calc">
           <h3>Валютный калькулятор</h3>
           <label for="currency-amount">Сумма</label><input id="currency-amount" inputmode="decimal" value="1000" maxlength="40">
           <div class="market-row"><div><label for="currency-from">Из</label><select id="currency-from" aria-label="Исходная валюта"></select></div><div><label for="currency-to">В</label><select id="currency-to" aria-label="Итоговая валюта"></select></div></div>
@@ -416,16 +465,19 @@
           <button id="currency-convert" type="button">Рассчитать</button>
           <div id="currency-result" role="status" aria-live="polite">—</div><p id="currency-note" class="market-muted">Официальные курсы ЦБ с датой действия, без банковских комиссий и спреда.</p>
         </section>
-        <section class="market-card">
+      <section class="market-card market-area-news">
+          <h3>События и новости</h3><p class="market-muted">Финансовая лента и мировые публикации за сутки. Влияние новости на цену — гипотеза, которую можно обсудить с консультантом.</p>
+          <div id="market-news"></div><p id="market-news-note" class="market-muted"></p>
+        </section>
+      <section class="market-card market-area-advisor">
           <div class="market-head"><h3>Консультант</h3><button id="market-chat-clear" type="button" class="secondary">Очистить</button></div>
-          <p class="market-muted">Отдельный диалог по выбранному инструменту. На обычное общение с Дельтой не влияет.</p>
+          <p class="market-muted">Отдельный диалог по выбранному инструменту и последним 120 свечам выбранного периода. На обычное общение с Дельтой не влияет.</p>
           <p id="market-chat-context" class="market-muted"></p>
           <div id="market-chat" role="log" aria-live="polite"></div>
           <form id="market-chat-form"><label for="market-question">Вопрос</label><textarea id="market-question" maxlength="2000" placeholder="Что видно по тренду? Какие риски учесть?"></textarea><button id="market-chat-send" type="submit">Спросить</button></form>
           <p id="market-chat-status" class="market-muted" role="status"></p>
           <p class="market-muted">Рекомендации — по запросу. Прогнозы не гарантируют доходность. История консультанта хранится отдельно до двух часов и исчезает при перезапуске.</p>
         </section>
-      </div>
     </div>
   </div>
 </main>

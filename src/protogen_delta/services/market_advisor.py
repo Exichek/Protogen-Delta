@@ -14,6 +14,7 @@ from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.market_data import MarketDataService, selected_symbols
 from protogen_delta.services.market_models import MarketDataError
+from protogen_delta.services.market_series import validate_chart_window
 from protogen_delta.services.reasoning_policy import needs_reasoning
 
 
@@ -50,14 +51,19 @@ class MarketAdvisor:
         await self.data.http.close()
 
     async def answer(
-        self, user_id: int, text: str, market: str, symbols: str, period: str = "1m"
+        self,
+        user_id: int,
+        text: str,
+        market: str,
+        symbols: str,
+        period: str = "1m",
+        interval: str = "1d",
     ) -> dict[str, Any]:
         """Обновить факты перед каждым ответом; не принимать историю и роли от клиента."""
         if not text.strip() or len(text) > 2000:
             raise ValueError("Напиши вопрос длиной от 1 до 2000 символов.")
         selected = selected_symbols(market, symbols)
-        if period not in {"1w", "1m", "3m", "1y"}:
-            raise ValueError("Выбери доступный период графика.")
+        validate_chart_window(period, interval)
         if user_id in self._active or len(self._active) >= 8:
             raise MarketDataError("Консультант занят. Дождись ответа и попробуй снова.")
         now = monotonic()
@@ -83,7 +89,16 @@ class MarketAdvisor:
             facts: dict[str, Any] = {"quotes": quotes, "news": news}
             if len(selected) == 1:
                 try:
-                    facts["chart"] = await self.data.chart(market, selected[0], period)
+                    chart = await self.data.chart(market, selected[0], period, interval)
+                    facts["chart"] = {
+                        **chart,
+                        "candles": chart["candles"][-120:],
+                        "context_notice": (
+                            "В контекст консультанта включены последние 120 свечей "
+                            "выбранного периода и интервала."
+                        ),
+                    }
+                    facts["orderbook"] = await self.data.orderbook(market, selected[0])
                 except MarketDataError as error:
                     facts["chart"] = {"notice": str(error)}
             try:

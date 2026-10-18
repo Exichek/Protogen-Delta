@@ -1,35 +1,113 @@
 """Котировки, дневные свечи, финансовые новости и валютный калькулятор."""
 
 import asyncio
-import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from aiohttp import ClientError
 
+from protogen_delta.services.market_depth import read_orderbook
 from protogen_delta.services.market_http import MarketHTTP
 from protogen_delta.services.market_models import (
     MOSCOW,
     CurrencyRates,
     MarketDataError,
     MarketQuote,
-    candle_rows,
+)
+from protogen_delta.services.market_models import decode_json as decode_json
+from protogen_delta.services.market_models import (
     finite_number,
     price_change,
     public_link,
     source_time,
     table_rows,
 )
+from protogen_delta.services.market_series import ALPACA, MOEX, read_chart
 from protogen_delta.services.tools.web import web_search
 
 WATCHLISTS = {
-    "us": ("SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"),
-    "ru": ("SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN", "YDEX", "OZON"),
-    "crypto": ("BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD", "DOGE/USD"),
+    "us": (
+        "SPY",
+        "QQQ",
+        "DIA",
+        "IWM",
+        "VOO",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "TSLA",
+        "AMD",
+        "NFLX",
+        "COIN",
+        "JPM",
+        "V",
+        "XOM",
+        "WMT",
+        "DIS",
+    ),
+    "ru": (
+        "SBER",
+        "SBERP",
+        "GAZP",
+        "LKOH",
+        "ROSN",
+        "GMKN",
+        "NVTK",
+        "TATN",
+        "YDEX",
+        "OZON",
+        "T",
+        "PLZL",
+        "CHMF",
+        "MGNT",
+        "MOEX",
+        "VTBR",
+        "IRAO",
+        "ALRS",
+        "MTSS",
+        "AFLT",
+    ),
+    "crypto": (
+        "BTC/USD",
+        "ETH/USD",
+        "SOL/USD",
+        "LTC/USD",
+        "AVAX/USD",
+        "DOGE/USD",
+        "XRP/USD",
+        "ADA/USD",
+        "BCH/USD",
+        "LINK/USD",
+        "DOT/USD",
+        "UNI/USD",
+    ),
 }
-ALPACA = "https://data.alpaca.markets"
-MOEX = "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities"
+US_NAMES = {
+    "SPY": "SPDR S&P 500 ETF",
+    "QQQ": "Invesco Nasdaq-100 ETF",
+    "DIA": "SPDR Dow Jones ETF",
+    "IWM": "iShares Russell 2000 ETF",
+    "VOO": "Vanguard S&P 500 ETF",
+    "AAPL": "Apple",
+    "MSFT": "Microsoft",
+    "NVDA": "NVIDIA",
+    "AMZN": "Amazon",
+    "GOOGL": "Alphabet",
+    "META": "Meta Platforms",
+    "TSLA": "Tesla",
+    "AMD": "AMD",
+    "NFLX": "Netflix",
+    "COIN": "Coinbase",
+    "JPM": "JPMorgan Chase",
+    "V": "Visa",
+    "XOM": "Exxon Mobil",
+    "WMT": "Walmart",
+    "DIS": "Walt Disney",
+}
 
 
 def selected_symbols(market: str, raw: str = "") -> tuple[str, ...]:
@@ -55,16 +133,6 @@ def selected_symbols(market: str, raw: str = "") -> tuple[str, ...]:
             "Некорректный список тикеров; максимум 20. Криптовалюты — BASE/USD."
         )
     return symbols
-
-
-def decode_json(raw: bytes) -> dict[str, Any]:
-    try:
-        result = json.loads(raw)
-        if isinstance(result, dict):
-            return result
-    except ValueError, RecursionError:
-        pass
-    raise MarketDataError("Источник вернул некорректные данные.")
 
 
 class MarketDataService:
@@ -135,7 +203,7 @@ class MarketDataService:
                             "поступать с задержкой; время — обновление источника MOEX.",
                         )
                     )
-            elif self.http.alpaca_enabled:
+            elif market == "crypto" or self.http.alpaca_enabled:
                 path = (
                     "/v2/stocks/snapshots"
                     if market == "us"
@@ -164,7 +232,7 @@ class MarketDataService:
                         MarketQuote(
                             market,
                             symbol,
-                            symbol,
+                            US_NAMES.get(symbol, symbol) if market == "us" else symbol,
                             "USD",
                             price,
                             price_change(price, previous.get("c")),
@@ -197,71 +265,18 @@ class MarketDataService:
         }
 
     async def chart(
-        self, market: str, symbol: str, period: str = "1m"
+        self, market: str, symbol: str, period: str = "1m", interval: str = "1d"
     ) -> dict[str, Any]:
         symbols = selected_symbols(market, symbol)
-        if len(symbols) != 1 or period not in {"1w", "1m", "3m", "1y"}:
-            raise ValueError("Нужен один тикер и период 1w, 1m, 3m или 1y.")
-        symbol = symbols[0]
-        end = datetime.now(timezone.utc) - timedelta(minutes=16)
-        start = end - timedelta(days={"1w": 7, "1m": 31, "3m": 93, "1y": 366}[period])
-        if market == "ru":
-            payload = decode_json(
-                await self.http.get(
-                    MOEX + f"/{symbol}/candles.json",
-                    {
-                        "iss.meta": "off",
-                        "iss.only": "candles",
-                        "from": start.date().isoformat(),
-                        "till": end.date().isoformat(),
-                        "interval": "24",
-                        "candles.columns": "open,high,low,close,volume,begin,end",
-                    },
-                    ttl=300,
-                )
-            )
-            rows = table_rows(payload.get("candles"))
-            truncated = len(rows) >= 500
-            source, notice = (
-                "Московская биржа",
-                "Дневные свечи TQBR; публичные данные могут задерживаться.",
-            )
-        else:
-            if market == "us" and not self.http.alpaca_enabled:
-                raise MarketDataError(
-                    "Для графиков акций США подключи Alpaca на сервере."
-                )
-            path = "/v2/stocks/bars" if market == "us" else "/v1beta3/crypto/us/bars"
-            params = {
-                "symbols": symbol,
-                "timeframe": "1Day",
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "limit": "500",
-                "sort": "asc",
-            }
-            if market == "us":
-                params.update({"feed": "iex", "adjustment": "all"})
-            payload = decode_json(await self.http.get(ALPACA + path, params, ttl=300))
-            bars = payload.get("bars", {})
-            rows = bars.get(symbol, []) if isinstance(bars, dict) else []
-            truncated = bool(payload.get("next_page_token"))
-            source, notice = "Alpaca · IEX" if market == "us" else "Alpaca Crypto", (
-                "Дневные свечи; последние 16 минут исключены из запроса. "
-                "IEX покрывает часть рынка США; акции скорректированы на корпоративные события."
-                if market == "us"
-                else "Дневные свечи UTC; последние 16 минут исключены из запроса."
-            )
-        return {
-            "market": market,
-            "symbol": symbol,
-            "period": period,
-            "candles": candle_rows(rows, moex=market == "ru"),
-            "source": source,
-            "notice": notice,
-            "truncated": truncated,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
+        if len(symbols) != 1:
+            raise ValueError("Для графика нужен один тикер.")
+        return await read_chart(self.http, market, symbols[0], period, interval)
+
+    async def orderbook(self, market: str, symbol: str) -> dict[str, Any]:
+        symbols = selected_symbols(market, symbol)
+        if len(symbols) != 1:
+            raise ValueError("Для стакана нужен один тикер.")
+        return await read_orderbook(self.http, market, symbols[0])
 
     async def rates(self) -> CurrencyRates:
         return CurrencyRates.parse(

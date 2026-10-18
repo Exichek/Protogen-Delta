@@ -1,6 +1,7 @@
 """Проверенные числа, даты, свечи и официальные валютные курсы."""
 
 import ipaddress
+import json
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -15,6 +16,17 @@ MOSCOW = timezone(timedelta(hours=3))
 
 class MarketDataError(ValueError):
     """Данные источника недоступны; никаких фиктивных котировок."""
+
+
+def decode_json(raw: bytes) -> dict[str, Any]:
+    """Отклонить страницу входа и другой ответ, не являющийся объектом JSON."""
+    try:
+        result = json.loads(raw)
+        if isinstance(result, dict):
+            return result
+    except ValueError, RecursionError:
+        pass
+    raise MarketDataError("Источник вернул некорректные данные.")
 
 
 def finite_number(value: object, *, positive: bool = False) -> float | None:
@@ -118,7 +130,7 @@ def candle_rows(rows: object, *, moex: bool = False) -> list[dict[str, Any]]:
     if not isinstance(rows, list):
         return []
     valid: dict[str, dict[str, Any]] = {}
-    for row in rows[:500]:
+    for row in rows[:2000]:
         if not isinstance(row, dict):
             continue
         date = source_time(
