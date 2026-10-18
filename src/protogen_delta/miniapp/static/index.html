@@ -102,8 +102,12 @@
     .market-panel { --gain:#64dca9; --loss:#ff8994; }
     .market-panel h2 { margin:0; font-size:24px; }
     .market-panel h3 { margin:0 0 14px; }
-    .market-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .market-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
     .market-head button { margin:0; width:auto; padding:10px 14px; }
+    .market-head-actions { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+    #market-fullscreen { display:flex; align-items:center; justify-content:center; gap:8px; background:#222c3b; }
+    #market-fullscreen svg { width:18px; height:18px; flex-shrink:0; }
+    #market-fullscreen-note:empty { display:none; }
     .market-grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:16px; align-items:start; }
     .market-card { min-width:0; background:var(--tg-theme-secondary-bg-color,#172334); border:1px solid #ffffff12; border-radius:18px; padding:18px; margin-bottom:16px; }
     .market-row { display:flex; gap:10px; align-items:center; }
@@ -124,7 +128,10 @@
     .market-table button[aria-pressed=true] { color:#a9a1ff; }
     .market-table small { display:block; max-width:130px; white-space:normal; margin-top:4px; font-size:11px; }
     body.markets-view { color-scheme:dark; --tg-theme-bg-color:#0b0e13; --tg-theme-secondary-bg-color:#13171f; --tg-theme-text-color:#edf1f7; --tg-theme-hint-color:#96a2b6; --tg-theme-button-color:#3979d8; background:#0b0e13; }
-    body.markets-view main { width:min(100%,1200px); }
+    body.markets-view main { width:100%; padding-left:max(16px,calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px)),env(safe-area-inset-left)); padding-right:max(16px,calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px)),env(safe-area-inset-right)); }
+    body.markets-view { --market-safe-top:max(env(safe-area-inset-top),calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px))); }
+    body.markets-view main { padding-top:max(20px,var(--market-safe-top)); padding-bottom:max(32px,env(safe-area-inset-bottom),calc(var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))); }
+    body.markets-view .tabs { top:var(--market-safe-top); }
     .market-panel { --gain:#41d39d; --loss:#ff727e; color-scheme:dark; }
     .market-panel .market-card { background:#13171f; border-color:#252c39; box-shadow:0 14px 34px #0002; }
     .market-panel input,.market-panel select,.market-panel textarea { background:#0c1017; color:#edf1f7; outline-color:#2b3444; }
@@ -163,7 +170,7 @@
     @media(max-width:600px) { .market-controls .market-row { flex-direction:column; align-items:stretch; } }
     @media(max-width:440px) { .market-book { gap:8px; } .market-book-row { font-size:12px; padding:8px 3px; flex-direction:column; gap:2px; } .market-book-row span:last-child { align-self:flex-end; font-size:11px; opacity:.85; } #market-last-price { font-size:28px; } }
     .market-positive { color:var(--gain); } .market-negative { color:var(--loss); }
-    #market-chart { display:block; width:100%; height:320px; touch-action:pan-y; margin:12px 0; background:#0d1118; border-radius:10px; }
+    #market-chart { display:block; width:100%; height:320px; height:clamp(260px,43dvh,640px); touch-action:pan-y; margin:12px 0; background:#0d1118; border-radius:10px; }
     #market-candles { max-height:180px; }
     .market-news-item { padding:12px 0; border-bottom:1px solid #ffffff12; }
     .market-news-item a { color:inherit; font-weight:600; text-decoration:none; overflow-wrap:anywhere; }
@@ -175,6 +182,7 @@
     #market-question { height:95px; min-height:95px; max-height:160px; resize:vertical; }
     #currency-result { font-size:23px; font-weight:700; margin:16px 0 8px; overflow-wrap:anywhere; }
     @media(max-width:700px) { .market-grid { grid-template-columns:minmax(0,1fr); } .market-card { padding:14px; } }
+    @media(min-width:1100px) { .market-grid { grid-template-columns:minmax(0,1fr) clamp(320px,27vw,480px); } body.markets-view main { padding-left:max(24px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); padding-right:max(24px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))); } }
   </style>
 </head>
 <body>
@@ -419,7 +427,8 @@
     <div id="translation-status" class="tool-status" role="status" aria-live="polite"></div>
   </div>
   <div id="markets-panel" class="market-panel" role="tabpanel" aria-labelledby="tab-markets" hidden>
-    <div class="market-head"><h2>Рынки</h2><button id="market-refresh" type="button">Обновить</button></div>
+    <div class="market-head"><h2>Рынки</h2><div class="market-head-actions"><button id="market-fullscreen" type="button" aria-pressed="false" aria-describedby="market-fullscreen-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/></svg><span id="market-fullscreen-label">На весь экран</span></button><button id="market-refresh" type="button">Обновить</button></div></div>
+    <p id="market-fullscreen-note" class="market-muted" role="status" aria-live="polite"></p>
     <p class="market-muted">Котировки, события и анализ — в одном месте.</p>
     <div id="market-status" role="status" aria-live="polite" class="market-muted"></div>
     <section class="market-card market-controls">
