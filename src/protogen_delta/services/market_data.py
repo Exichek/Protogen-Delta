@@ -2,7 +2,10 @@
 
 import asyncio
 import re
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from time import monotonic
 from typing import Any
 
 from aiohttp import ClientError
@@ -152,6 +155,23 @@ class MarketDataService:
         self._web_search = web_search_service
         self._news_cache: tuple[datetime, dict[str, Any]] | None = None
         self._news_lock = asyncio.Lock()
+        self._charts: OrderedDict[
+            tuple[str, str, str, str], tuple[float, dict[str, Any]]
+        ] = OrderedDict()
+        self._chart_pending: dict[
+            tuple[str, str, str, str], asyncio.Task[dict[str, Any]]
+        ] = {}
+        self._closed = False
+
+    async def close(self) -> None:
+        self._closed = True
+        tasks = tuple(self._chart_pending.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._chart_pending.clear()
+        self._charts.clear()
+        await self.http.close()
 
     async def quotes(self, market: str, raw: str = "") -> dict[str, Any]:
         symbols = selected_symbols(market, raw)
@@ -273,7 +293,37 @@ class MarketDataService:
         symbols = selected_symbols(market, symbol)
         if len(symbols) != 1:
             raise ValueError("Для графика нужен один тикер.")
-        return await read_chart(self.http, market, symbols[0], period, interval)
+        if self._closed:
+            raise MarketDataError("Раздел рынков остановлен.")
+        key = market, symbols[0], period, interval
+        cached = self._charts.get(key)
+        if cached and cached[0] > monotonic():
+            self._charts.move_to_end(key)
+            return deepcopy(cached[1])
+        if key not in self._chart_pending:
+            if len(self._chart_pending) >= 32:
+                raise MarketDataError("Графики сейчас заняты. Попробуй позже.")
+            task = asyncio.create_task(self._load_chart(key))
+            self._chart_pending[key] = task
+            task.add_done_callback(self._consume_chart)
+        return deepcopy(await asyncio.shield(self._chart_pending[key]))
+
+    @staticmethod
+    def _consume_chart(task: asyncio.Task[dict[str, Any]]) -> None:
+        if not task.cancelled():
+            task.exception()
+
+    async def _load_chart(self, key: tuple[str, str, str, str]) -> dict[str, Any]:
+        try:
+            result = await read_chart(self.http, *key)
+            # Сохраняем весь снимок, включая подлинное время проверки источника.
+            self._charts[key] = monotonic() + 60, result
+            self._charts.move_to_end(key)
+            while len(self._charts) > 128:
+                self._charts.popitem(last=False)
+            return result
+        finally:
+            self._chart_pending.pop(key, None)
 
     async def orderbook(self, market: str, symbol: str) -> dict[str, Any]:
         symbols = selected_symbols(market, symbol)

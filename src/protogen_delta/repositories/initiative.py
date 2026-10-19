@@ -9,10 +9,9 @@ from math import isfinite
 from pathlib import Path
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.initiative_limits import DAILY_LIMIT, MIN_INTERVAL_SECONDS
 
 MSK = timezone(timedelta(hours=3))
-MIN_INTERVAL_SECONDS = 14400
-DAILY_LIMIT = 2
 
 
 @dataclass(frozen=True, slots=True)

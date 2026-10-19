@@ -39,9 +39,7 @@ assert _SPEC and _SPEC.loader
 runner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(runner)
 _BASELINE = json.loads(
-    (Path(__file__).parent / "fixtures/behavior_prompt_baseline.json").read_text(
-        "utf-8"
-    )
+    (Path(__file__).parent / "fixtures/behavior_prompt_current.json").read_text("utf-8")
 )
 
 

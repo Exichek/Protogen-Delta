@@ -1,0 +1,368 @@
+{
+  "previous_fixture": "behavior_prompt_baseline.json",
+  "base_revision": "91fb83373a2f3a63cc46015ab4598906b2939419",
+  "change": "Исправлено только техническое описание режима инициативы; старый эталон сохранён отдельно.",
+  "cases": [
+    {
+      "id": "conversation",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "691d3c1147fbba76ecd85f6273795b76fe07d8a97fdb7d972d043b5c7783afc5",
+      "chars": 13244
+    },
+    {
+      "id": "technical",
+      "arguments": {
+        "user_message": "Объясни Docker",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "886618257b8868f69278054a9f2a9bbd23b6a338e96b4079d4117ad80f429fc7",
+      "chars": 14062
+    },
+    {
+      "id": "technical_attachment",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft",
+        "technical_context": true
+      },
+      "sha256": "886618257b8868f69278054a9f2a9bbd23b6a338e96b4079d4117ad80f429fc7",
+      "chars": 14062
+    },
+    {
+      "id": "image",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": true,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "2ab5e946ea8233fe687a11f4f9de6ba695a8efd67315c5f54168d99fb7648baa",
+      "chars": 20464
+    },
+    {
+      "id": "species",
+      "arguments": {
+        "user_message": "Кто такие сергалы?",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "8b8abe7f50d52f23ce56e56191347e3323bc1d0783f7dd4774904407bc51f88f",
+      "chars": 19045
+    },
+    {
+      "id": "lore",
+      "arguments": {
+        "user_message": "Кто ты?",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "50041ec3525e5626bca08c327da3b4626b840b743a4937acd370dffb11d4eb2b",
+      "chars": 16667
+    },
+    {
+      "id": "body",
+      "arguments": {
+        "user_message": "Как ты выглядишь?",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "54a9b923dbd57a454f8a63281f55b31950a3fbc9232df7c6a54537619bd133da",
+      "chars": 16220
+    },
+    {
+      "id": "roleplay",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": true,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "32f921264a3c14b52f6f0dc4d8be01dc22d25270d1bd2e448989c263e843682f",
+      "chars": 22637
+    },
+    {
+      "id": "female",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": true,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft",
+        "female_configuration": true
+      },
+      "sha256": "ecee451219675026feaafe45a307e2b3ef52ea4859cade4025e84bc898ce9426",
+      "chars": 23085
+    },
+    {
+      "id": "adult_male",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": true,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "adult",
+        "adult_context": true
+      },
+      "sha256": "83df56b7b37bee0eb13a1bd58057a8f91236f4db96ae757f6eaee40d4736b8ee",
+      "chars": 25651
+    },
+    {
+      "id": "adult_female",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": true,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "adult",
+        "adult_context": true,
+        "female_configuration": true
+      },
+      "sha256": "8a31d9812ba1dca084ed081e968f3d87327c9d1bd276d5fb51d311c69f55acaf",
+      "chars": 26303
+    },
+    {
+      "id": "custom_appearance",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": true,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft",
+        "scene_context": [
+          "Текущий облик Дельты: белый дракон"
+        ]
+      },
+      "sha256": "b7aff2b11f0d6232d9c0770454dc862885ee14b350c13e04c881b9c2d6b12fda",
+      "chars": 16322
+    },
+    {
+      "id": "adult_conversation",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "adult"
+      },
+      "sha256": "ae6d23a6565369488599e3319c75093a1904585c1b6d65b9d06d79c5408eb685",
+      "chars": 14692
+    },
+    {
+      "id": "direct_conflict",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "angry",
+        "insult_type": "direct",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "01f854e6d6c5bb9d746653c12425ccf149b1b8a1a6391840dfda7c623bd9c934",
+      "chars": 13673
+    },
+    {
+      "id": "playful",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "playful",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft"
+      },
+      "sha256": "e26d060d02481c51352c0c8f1e1743f3b457ea18066600f56466f7af7b4120ac",
+      "chars": 13348
+    },
+    {
+      "id": "trusted_facts",
+      "arguments": {
+        "user_message": "Привет",
+        "has_images": false,
+        "is_rp": false,
+        "fetishes": [],
+        "current_fetishes": [],
+        "role": "unknown",
+        "mood": "neutral",
+        "insult_type": "none",
+        "state_context": [
+          "Состояние: спокойное"
+        ],
+        "memory_context": [
+          "Подтверждённая тема: игра"
+        ],
+        "content_mode": "soft",
+        "trusted_input_context": "Подтверждённое сохранение выполнено."
+      },
+      "sha256": "3122ec2262e432966bed5675257cab765c3b1995e27f70a0c52a7a72abd11b47",
+      "chars": 13560
+    }
+  ]
+}

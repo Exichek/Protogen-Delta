@@ -617,6 +617,26 @@ class MiniAppServer:
     ) -> web.Response:
         """Принять один файл только от подписанного владельца профиля."""
         user = self._authenticate(request)
+        if self._input_operations is None:
+            return await self._read_appearance_upload(request, user, target)
+        async with self._input_operations.receive(user.id) as ticket:
+            if not self._input_operations.start_memory(ticket):
+                raise web.HTTPConflict(
+                    text="Память была очищена; загрузи картинку заново."
+                )
+            try:
+                return await self._read_appearance_upload(request, user, target)
+            except asyncio.CancelledError:
+                if not self._input_operations.is_current(ticket):
+                    raise web.HTTPConflict(
+                        text="Память была очищена; загрузи картинку заново."
+                    ) from None
+                raise
+
+    async def _read_appearance_upload(
+        self, request: web.Request, user: MiniAppUser, target: Literal["delta", "user"]
+    ) -> web.Response:
+        """Удерживать регистрацию у сброса с начала чтения до сохранения результата."""
         if self._response_engine is None:
             raise web.HTTPServiceUnavailable(text="Анализ облика сейчас недоступен.")
         options: dict[str, Any] = {}

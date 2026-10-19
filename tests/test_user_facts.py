@@ -255,7 +255,8 @@ def test_memory_command_never_discloses_another_user_profile(tmp_path: Path) -> 
         callback = create_memory_router(memory, states).message.handlers[0].callback
         message = Mock(
             spec=Message,
-            from_user=SimpleNamespace(id=1),
+            from_user=SimpleNamespace(id=1, is_bot=False),
+            forward_origin=None,
             chat=SimpleNamespace(type="private"),
             text="/memory",
             answer=AsyncMock(),
