@@ -120,6 +120,119 @@ def test_correction_or_completion_closes_pending_plan(
     asyncio.run(run())
 
 
+def test_cancelled_unselected_plan_can_be_explicitly_restored_same_day(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        memories = MemoriesRepository(tmp_path)
+        await memories.note_user_activity(7, NOW)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        await repo.observe(7, (TEXT,), NOW)
+        await repo.observe(7, ("Экзамен отменили",), NOW + 10)
+        assert await repo.due(7, DUE) is None
+        restored = "Ладно, экзамен завтра, я пойду"
+        await repo.observe(7, (restored,), NOW + 20)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        row = await repo.due(7, DUE)
+        assert row and row.source == restored
+        assert await repo.select(7, row.id, DUE)
+        await repo.observe(7, ("Экзамен отменили", restored), NOW + 30)
+        assert await repo.due(7, DUE) is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Сдал экзамен на прошлой неделе",
+        "Вчера сдал экзамен",
+        "Позавчера экзамен сдал",
+        "2026-10-10 сдал экзамен",
+        "Неделю назад сдал экзамен",
+        "В прошлом месяце сдал экзамен",
+        "Сегодня экзамен сдал",
+    ],
+)
+def test_other_dated_event_does_not_close_tomorrows_plan(
+    tmp_path: Path, message: str
+) -> None:
+    async def run() -> None:
+        memories = MemoriesRepository(tmp_path)
+        await memories.note_user_activity(7, NOW)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        await repo.observe(7, (TEXT, message), NOW)
+        row = await repo.due(7, DUE)
+        assert row and row.source == TEXT
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Завтра экзамен отменили",
+        "2026-10-18 сдал экзамен",
+        "Экзамен перенесли на послезавтра",
+        "Вчера отменили завтрашний экзамен",
+        "Не пойду завтра на экзамен",
+    ],
+)
+def test_current_event_completion_cancellation_and_rescheduling_still_close(
+    tmp_path: Path, message: str
+) -> None:
+    async def run() -> None:
+        memories = MemoriesRepository(tmp_path)
+        await memories.note_user_activity(7, NOW)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        await repo.observe(7, (TEXT, message), NOW)
+        assert await repo.due(7, DUE) is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "message", ["Сегодня и завтра сдал экзамен", "2026-02-30 сдал экзамен"]
+)
+def test_ambiguous_or_invalid_completed_event_day_does_not_cancel_plan(
+    tmp_path: Path, message: str
+) -> None:
+    async def run() -> None:
+        memories = MemoriesRepository(tmp_path)
+        await memories.note_user_activity(7, NOW)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        await repo.observe(7, (TEXT, message), NOW)
+        assert await repo.due(7, DUE) is not None
+
+    asyncio.run(run())
+
+
+def test_restoration_respects_opt_out_and_only_one_pending_row(tmp_path: Path) -> None:
+    async def run() -> None:
+        memories = MemoriesRepository(tmp_path)
+        await memories.note_user_activity(7, NOW)
+        repo = InitiativeFollowupsRepository(tmp_path)
+        await repo.observe(
+            7, (TEXT, "Экзамен отменили", "Не спрашивай о моих планах", TEXT), NOW
+        )
+        assert await repo.due(7, DUE) is None
+        await repo.observe(7, ("Можешь снова спрашивать о моих планах",), NOW + 1)
+        await asyncio.gather(
+            repo.observe(7, (TEXT,), NOW + 2), repo.observe(7, (TEXT,), NOW + 2)
+        )
+        row = await repo.due(7, DUE)
+        assert row
+        with closing(sqlite3.connect(tmp_path / "memories.db")) as db:
+            assert (
+                db.execute(
+                    "SELECT count(*) FROM initiative_followups WHERE user_id=7 AND closed_at=0 AND selected_at=0"
+                ).fetchone()[0]
+                == 1
+            )
+
+    asyncio.run(run())
+
+
 def test_rescheduling_forgetting_and_expiry(tmp_path: Path) -> None:
     async def run() -> None:
         memories = MemoriesRepository(tmp_path)

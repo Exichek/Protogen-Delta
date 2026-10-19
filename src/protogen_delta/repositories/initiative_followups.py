@@ -9,6 +9,7 @@ from pathlib import Path
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.initiative_followup import (
+    closed_followup_days,
     closed_followup_topics,
     closes_followups,
     extract_followup_plan,
@@ -77,9 +78,17 @@ class InitiativeFollowupsRepository:
                     )
                     continue
                 for topic in closed_followup_topics(visible):
+                    days = closed_followup_days(visible, now)
+                    if days == ():
+                        continue
                     db.execute(
-                        "UPDATE initiative_followups SET closed_at=? WHERE user_id=? AND topic=? AND closed_at=0",
-                        (now, user_id, topic),
+                        "UPDATE initiative_followups SET closed_at=? WHERE user_id=? AND topic=? AND closed_at=0"
+                        + (
+                            " AND event_day IN (" + ",".join("?" for _ in days) + ")"
+                            if days is not None
+                            else ""
+                        ),
+                        (now, user_id, topic, *(days or ())),
                     )
                 plan = extract_followup_plan(message, now)
                 if plan is None:
@@ -102,8 +111,11 @@ class InitiativeFollowupsRepository:
                 if active >= 5:
                     continue
                 db.execute(
-                    "INSERT OR IGNORE INTO initiative_followups"
-                    "(user_id,topic,source,event_day,due_at,expires_at) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO initiative_followups"
+                    "(user_id,topic,source,event_day,due_at,expires_at) VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT(user_id,topic,event_day) DO UPDATE SET "
+                    "source=excluded.source,due_at=excluded.due_at,expires_at=excluded.expires_at,closed_at=0 "
+                    "WHERE initiative_followups.closed_at<>0 AND initiative_followups.selected_at=0",
                     (
                         user_id,
                         plan.topic,

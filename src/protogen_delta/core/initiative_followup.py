@@ -44,6 +44,10 @@ _STOP = re.compile(
 _SECRET = re.compile(
     r"sk-[\w-]+|\b(?:пароль|password|api[_ -]?key|токен|ключ)\b|\d{10,}", re.I
 )
+_COMPLETED = re.compile(
+    r"\b(?:прош[её]л|прошла|сдал\w*|сходил\w*|состоял\w*|закончил\w*|завершил\w*)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,11 +99,7 @@ def followup_preference(text: str) -> bool | None:
 def closed_followup_topics(text: str) -> tuple[str, ...]:
     if "?" in text or _UNCERTAIN.search(text):
         return ()
-    completed = re.search(
-        r"\b(?:прош[её]л|прошла|сдал\w*|сходил\w*|состоял\w*|закончил\w*|завершил\w*)\b",
-        text,
-        re.I,
-    )
+    completed = _COMPLETED.search(text)
     rejected = re.search(r"\bне\s+(?:пойду|буду|сдам|участвую|иду|еду)\b", text, re.I)
     cancelled = any(
         not re.search(r"\bне(?:\s+\w+){0,2}\s*$", text[: match.start()], re.I)
@@ -108,6 +108,52 @@ def closed_followup_topics(text: str) -> tuple[str, ...]:
         )
     )
     return followup_topics(text) if completed or rejected or cancelled else ()
+
+
+def closed_followup_days(text: str, now: float) -> tuple[str, ...] | None:
+    """Дни завершённого события; None — без даты, () — неоднозначный срок."""
+    # При переносе указанная дата часто означает новый срок, не день старого
+    # события. Явный отказ/отмена сохраняют прежнее закрытие активного плана.
+    if not _COMPLETED.search(text):
+        return None
+    days = re.findall(
+        r"\b(?:послезавтра|завтра|сегодня|позавчера|вчера|\d{4}-\d{2}-\d{2}|"
+        r"на\s+прошлой\s+неделе|неделю\s+назад)\b",
+        text,
+        re.I,
+    )
+    if not days:
+        return (
+            ()
+            if re.search(
+                r"\b(?:прошл\w*|назад|раньше|позже|понедельник\w*|вторник\w*|"
+                r"сред[ауе]|четверг\w*|пятниц\w*|суббот\w*|воскресень\w*)\b",
+                text,
+                re.I,
+            )
+            else None
+        )
+    if len(days) != 1:
+        return ()
+    today = datetime.fromtimestamp(now, MSK).date()
+    value = " ".join(days[0].casefold().split())
+    offsets = {
+        "позавчера": -2,
+        "вчера": -1,
+        "сегодня": 0,
+        "завтра": 1,
+        "послезавтра": 2,
+        "неделю назад": -7,
+    }
+    if value in offsets:
+        return ((today + timedelta(days=offsets[value])).isoformat(),)
+    if value == "на прошлой неделе":
+        start = today - timedelta(days=today.weekday() + 7)
+        return tuple((start + timedelta(days=index)).isoformat() for index in range(7))
+    try:
+        return (datetime.strptime(value, "%Y-%m-%d").date().isoformat(),)
+    except ValueError:
+        return ()
 
 
 def extract_followup_plan(text: str, now: float) -> FollowupPlan | None:
