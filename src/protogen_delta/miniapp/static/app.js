@@ -517,10 +517,29 @@ const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
     catch(error) { output.className="tool-status error"; output.textContent=error.message; }
     finally { button.disabled=false; }
   };
-  let copiedId=null;
-  const showId = (result, output) => { copiedId=result.id ?? null; document.querySelector("#copy-id").hidden=copiedId===null; output.textContent=result.message || `${result.title}\nID: ${result.id}`; };
-  for (const [selector, target] of [["#my-id","self"],["#bot-id","bot"],["#select-id","select"],["#lookup-id",null]]) document.querySelector(selector).addEventListener("click", e => toolCall(e.currentTarget,"#id-status","id",{target:target || document.querySelector("#id-target").value.trim()},showId));
-  document.querySelector("#copy-id").addEventListener("click", async () => { try { await navigator.clipboard.writeText(String(copiedId)); document.querySelector("#id-status").textContent=`ID ${copiedId} скопирован.`; } catch { document.querySelector("#id-status").textContent=`ID: ${copiedId}. Выдели текст и скопируй.`; } });
+  let copiedId=null, idBusy=false;
+  const idButtons=['#my-id','#bot-id','#select-id','#lookup-id'].map(selector=>document.querySelector(selector));
+  const idProfileLink=document.querySelector('#id-profile-link');
+  const clearIdResult=()=>{copiedId=null; document.querySelector('#copy-id').hidden=true; idProfileLink.hidden=true; idProfileLink.removeAttribute('href');};
+  const showId = (result, output) => {
+    copiedId=result.id ?? null; document.querySelector('#copy-id').hidden=copiedId===null;
+    output.textContent=result.message || `${result.title}\nID: ${result.id}`;
+    const username=typeof result.username==='string' ? result.username : '';
+    if(/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username)) {idProfileLink.href=`https://t.me/${username}`; idProfileLink.hidden=false;}
+  };
+  for (const [selector, target] of [['#my-id','self'],['#bot-id','bot'],['#select-id','select'],['#lookup-id',null]]) document.querySelector(selector).addEventListener('click', async e => {
+    if(idBusy) return;
+    idBusy=true; clearIdResult(); idButtons.forEach(button=>button.disabled=true);
+    try {await toolCall(e.currentTarget,'#id-status','id',{target:target || document.querySelector('#id-target').value.trim()},showId);}
+    finally {idBusy=false; idButtons.forEach(button=>button.disabled=false);}
+  });
+  document.querySelector('#id-target').addEventListener('keydown',e=>{if(e.key==='Enter') {e.preventDefault(); document.querySelector('#lookup-id').click();}});
+  idProfileLink.addEventListener('click',e=>{if(typeof tg?.openTelegramLink==='function') {e.preventDefault(); tg.openTelegramLink(idProfileLink.href);}});
+  document.querySelector('#copy-id').addEventListener('click', async()=>{
+    const value=copiedId; if(value===null) return;
+    try {await navigator.clipboard.writeText(String(value)); if(!idBusy && copiedId===value) document.querySelector('#id-status').textContent=`ID ${value} скопирован.`;}
+    catch {if(!idBusy && copiedId===value) document.querySelector('#id-status').textContent=`ID: ${value}. Выдели текст и скопируй.`;}
+  });
   document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
   const conversionFormats = {video:['mp4','avi','mov','mkv'],audio:['mp3','wav','flac']};
   const conversionFormat = document.querySelector('#conversion-format'), conversionFileInput = document.querySelector('#conversion-file');

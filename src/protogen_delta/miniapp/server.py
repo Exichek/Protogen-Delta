@@ -1186,6 +1186,10 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text=str(error)) from error
         except TelegramAPIError as error:
             raise web.HTTPBadGateway(
-                text="Telegram не смог определить ID. Для приватных чатов используй выбор в Telegram."
+                text="Telegram не смог получить сведения. Попробуй позже или используй выбор в Telegram."
+            ) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Инструмент не ответил вовремя. Попробуй ещё раз."
             ) from error
         return web.json_response(result, headers={"Cache-Control": "no-store"})
