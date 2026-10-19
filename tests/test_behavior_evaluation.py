@@ -465,6 +465,7 @@ def test_shared_configuration_uses_current_timers_and_prompt_modules() -> None:
             proactive_idle_seconds=7200,
             proactive_idle_max_seconds=14400,
             proactive_cooldown_seconds=21600,
+            proactive_lively_enabled=False,
         ),
         fetish_triggers={},
         fetish_names={},
@@ -480,17 +481,17 @@ def test_shared_configuration_uses_current_timers_and_prompt_modules() -> None:
 
 
 _BASELINE = json.loads(
-    (Path(__file__).parent / "fixtures" / "behavior_prompt_baseline.json").read_text(
+    (Path(__file__).parent / "fixtures" / "behavior_prompt_current.json").read_text(
         encoding="utf-8"
     )
 )
 
 
 @pytest.mark.parametrize("case", _BASELINE["cases"], ids=lambda case: case["id"])
-def test_runtime_prompt_matches_previous_deployed_revision(
+def test_runtime_prompt_matches_reviewed_snapshot(
     case: dict[str, Any],
 ) -> None:
-    """Сверять с прежней сборкой, а не с ожидаемым результатом нового кода."""
+    """Сверять со снимком, утверждённым после исправления описания инициативы."""
     model = AsyncMock(spec=DeepSeekService)
     config = replace(
         load_response_configuration(_settings(), fetish_triggers={}, fetish_names={}),

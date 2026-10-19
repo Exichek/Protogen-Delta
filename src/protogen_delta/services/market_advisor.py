@@ -48,7 +48,7 @@ class MarketAdvisor:
     async def close(self) -> None:
         for user_id in list(self._sessions):
             await self.clear(user_id)
-        await self.data.http.close()
+        await self.data.close()
 
     async def answer(
         self,

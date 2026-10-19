@@ -15,7 +15,10 @@ def create_memory_router(memory: MemoryService, states: UserStateStore) -> Route
 
     @router.message(Command("memory"))
     async def memory_command(message: Message) -> None:
-        if message.from_user is None:
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        if message.forward_origin is not None:
+            await message.answer("Для управления памятью напиши свою команду /memory.")
             return
         if message.chat.type != "private":
             await message.answer("Открой /memory в личном чате с Дельтой.")

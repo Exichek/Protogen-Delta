@@ -288,7 +288,8 @@ def test_quotes_charts_and_partial_unavailability() -> None:
         http.broken = {"AAPL": 42}
         assert (await data.quotes("us", "AAPL"))["quotes"][0]["price"] is None
         http.broken = {"bars": [], "next_page_token": "next"}
-        assert (await data.chart("us", "AAPL"))["truncated"]
+        # Другой период запрашивает новый снимок, минуя кеш предыдущего графика.
+        assert (await data.chart("us", "AAPL", "3m"))["truncated"]
 
     asyncio.run(scenario())
 

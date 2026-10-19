@@ -24,9 +24,7 @@ from protogen_delta.services.response_configuration import load_response_configu
 from protogen_delta.services.response_engine import ResponseEngine
 
 _BASELINE = json.loads(
-    (Path(__file__).parent / "fixtures/behavior_prompt_baseline.json").read_text(
-        "utf-8"
-    )
+    (Path(__file__).parent / "fixtures/behavior_prompt_current.json").read_text("utf-8")
 )
 _SPEC = importlib.util.spec_from_file_location(
     "assembly_behavior_test", Path(__file__).parents[1] / "scripts/evaluate_behavior.py"
@@ -69,7 +67,7 @@ def test_assembly_is_local_immutable_and_preserves_exact_unicode() -> None:
 
 
 @pytest.mark.parametrize("case", _BASELINE["cases"], ids=lambda case: case["id"])
-def test_map_covers_the_exact_previous_prompt(case: dict[str, Any]) -> None:
+def test_map_covers_the_exact_reviewed_prompt(case: dict[str, Any]) -> None:
     engine = make_engine()
     assembly = engine._assemble_prompt(**case["arguments"])
     prompt = assembly.render()

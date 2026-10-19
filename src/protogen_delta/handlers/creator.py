@@ -40,9 +40,18 @@ def create_creator_router(
         return True
 
     def allowed(message: Message) -> bool:
-        return message.from_user is not None and message.from_user.id == creator_id
+        return (
+            message.from_user is not None
+            and message.from_user.id == creator_id
+            and message.forward_origin is None
+        )
 
     async def deny(message: Message) -> None:
+        if message.from_user is not None and message.from_user.id == creator_id:
+            await message.answer(
+                "Команды отправки принимаю только твоим собственным сообщением."
+            )
+            return
         await message.answer("⛔ Эта команда доступна только создателю.")
 
     @router.message(Command("message"))

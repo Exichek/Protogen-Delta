@@ -29,6 +29,9 @@ def create_rp_router(
         """Обработать команду управления RP-режимом."""
         if message.from_user is None:
             return
+        if message.forward_origin is not None:
+            await message.answer("Чтобы завершить сцену, напиши свою команду /rp off.")
+            return
 
         text = (message.text or "").strip()
         parts = text.split(maxsplit=1)

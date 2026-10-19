@@ -65,7 +65,17 @@ class MemoryService:
         result = await self.facts.observe(user_id, text)
         if result.removed_sources or result.forgotten:
             await self._forget_related(
-                user_id, result.removed_sources + result.removed_values
+                user_id,
+                result.removed_sources + result.removed_values,
+                forget_all=bool(
+                    result.forgotten
+                    and re.fullmatch(
+                        r"(?:пожалуйста[,\s]+)?(?:забудь|удали\s+из\s+памяти)\s+"
+                        r"(?:вс[её]|всю\s+(?:информацию|память))(?:\s+обо\s+мне)?[.!]*",
+                        visible_plan_text(text),
+                        re.I,
+                    )
+                ),
             )
         return result
 
@@ -80,7 +90,7 @@ class MemoryService:
         for peer in self.dialogue_members(user_id) - {user_id}:
             peer_result = await self.facts.repository.clear(peer, key)
             sources += peer_result.removed_sources + peer_result.removed_values
-        await self._forget_related(user_id, sources)
+        await self._forget_related(user_id, sources, forget_all=key is None)
         return result
 
     def dialogue_members(self, user_id: int) -> frozenset[int]:
@@ -90,19 +100,26 @@ class MemoryService:
             else frozenset({user_id})
         )
 
-    async def _forget_related(self, user_id: int, sources: tuple[str, ...]) -> None:
+    async def _forget_related(
+        self, user_id: int, sources: tuple[str, ...], *, forget_all: bool = False
+    ) -> None:
         if self.inputs is None:
-            await self._forget_related_locked(user_id, sources)
+            await self._forget_related_locked(user_id, sources, forget_all=forget_all)
         else:
             async with self.inputs.resetting(user_id):
-                await self._forget_related_locked(user_id, sources)
+                await self._forget_related_locked(
+                    user_id, sources, forget_all=forget_all
+                )
 
     async def _forget_related_locked(
-        self, user_id: int, sources: tuple[str, ...]
+        self, user_id: int, sources: tuple[str, ...], *, forget_all: bool = False
     ) -> None:
         for owner in self.dialogue_members(user_id):
-            if self.followups is not None:
-                await self.followups.forget_sources(owner, sources)
+            if self.followups is not None and (sources or forget_all):
+                # Пустая выборка одного поля не означает просьбу удалить все планы.
+                await self.followups.forget_sources(
+                    owner, () if forget_all else sources
+                )
             if self.favorites is not None:
                 await self.favorites.repository.forget_sources(owner, sources)
             await self._repository.forget_sources(owner, sources)

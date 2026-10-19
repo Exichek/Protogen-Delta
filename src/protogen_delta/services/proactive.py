@@ -15,6 +15,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.initiative_limits import QUIET_END_HOUR, QUIET_START_HOUR
 from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
 from protogen_delta.core.reply_formatting import format_reply_text
 from protogen_delta.core.roleplay import has_roleplay_action
@@ -115,8 +116,8 @@ class ProactiveConfig:
     idle_seconds: float = 5400.0
     idle_max_seconds: float | None = None
     cooldown_seconds: float = 72000.0
-    quiet_start_hour: int = 23
-    quiet_end_hour: int = 9
+    quiet_start_hour: int = QUIET_START_HOUR
+    quiet_end_hour: int = QUIET_END_HOUR
     batch_size: int = 10
     sticker_idle_seconds: float | None = None
     sticker_idle_max_seconds: float = 7200.0

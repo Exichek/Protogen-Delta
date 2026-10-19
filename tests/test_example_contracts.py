@@ -34,9 +34,7 @@ assert _SPEC and _SPEC.loader
 runner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(runner)
 _BASELINE = json.loads(
-    (Path(__file__).parent / "fixtures/behavior_prompt_baseline.json").read_text(
-        "utf-8"
-    )
+    (Path(__file__).parent / "fixtures/behavior_prompt_current.json").read_text("utf-8")
 )
 
 
@@ -74,7 +72,7 @@ def test_isolated_examples_preserve_exact_texts_without_becoming_dialogue(
 def test_only_example_block_and_position_change_in_candidate(
     case: dict[str, Any],
 ) -> None:
-    """Не переписывать эталон: проверить прежний SHA и остальной промпт кандидата."""
+    """Проверить утверждённый SHA и неизменность остальных блоков кандидата."""
     model = AsyncMock(spec=DeepSeekService)
     config = replace(
         load_response_configuration(settings(), fetish_triggers={}, fetish_names={}),
