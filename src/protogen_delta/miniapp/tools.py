@@ -6,7 +6,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramForbiddenError,
+)
 from aiogram.types import FSInputFile
 
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
@@ -35,6 +39,8 @@ class MiniAppTools:
         self._pending: set[int] = set()
         self._slots = asyncio.Semaphore(2)
         self._download_limiter = UserRateLimiter(cooldown_seconds=30)
+        self._id_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._id_slots = asyncio.Semaphore(4)
         self._translator = translator
         self._translation_pending: set[int] = set()
         self._translation_slots = asyncio.Semaphore(2)
@@ -100,7 +106,8 @@ class MiniAppTools:
                 self._translation_slots.release()
 
     async def lookup_id(self, user_id: int, target: str) -> dict[str, object]:
-        """Не раскрывать приватные чаты по произвольному числовому ID."""
+        """Получить ID публичного чата или базовый профиль по ID пользователя."""
+        target = target.strip()
         if target == "self":
             return {"id": user_id, "title": "Твой Telegram ID", "type": "private"}
         if target == "select":
@@ -113,9 +120,45 @@ class MiniAppTools:
         if target == "bot":
             user = await self._bot.get_me()
             return {"id": user.id, "title": user.full_name, "type": "bot"}
-        if not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
-            raise ValueError("Укажи @username публичной группы или канала.")
-        chat = await self._bot.get_chat(target)
+        numeric = re.fullmatch(r"[1-9][0-9]{0,15}", target) is not None
+        if numeric and int(target) >= 2**52:
+            raise ValueError("Некорректный ID пользователя: слишком большое число.")
+        if not numeric and not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
+            raise ValueError(
+                "Введи положительный числовой ID пользователя "
+                "или @username публичной группы/канала."
+            )
+        if self._id_slots.locked():
+            raise ToolsBusyError("Поиск занят. Попробуй чуть позже.")
+        if not self._id_limiter.allow(user_id):
+            raise ToolsBusyError("Подожди пару секунд перед следующим поиском.")
+        try:
+            async with self._id_slots, asyncio.timeout(10):
+                chat = await self._bot.get_chat(int(target) if numeric else target)
+        except (TelegramBadRequest, TelegramForbiddenError) as error:
+            if not numeric:
+                raise
+            raise ValueError(
+                "Telegram не дал профиль по этому ID. "
+                "Бот может не знать этого пользователя или не иметь доступа к нему."
+            ) from error
+        if numeric:
+            if chat.type != "private" or chat.id != int(target):
+                raise ValueError(
+                    "По этому ID не удалось получить профиль пользователя."
+                )
+            title = " ".join(part for part in (chat.first_name, chat.last_name) if part)
+            username = chat.username
+            return {
+                "id": chat.id,
+                "title": title or "Имя недоступно",
+                "username": username,
+                "type": "private",
+                "message": (
+                    f"Профиль Telegram: {title or 'имя недоступно'}\nID: {chat.id}\n"
+                    + (f"@{username}" if username else "Username недоступен")
+                ),
+            }
         if chat.type not in {"channel", "supergroup", "group"}:
             raise ValueError("Пользователя выбери кнопкой «Выбрать в Telegram».")
         return {"id": chat.id, "title": chat.title or target, "type": chat.type}

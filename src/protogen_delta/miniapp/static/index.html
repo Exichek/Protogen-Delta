@@ -373,13 +373,15 @@
     <section class="card">
       <b>Telegram ID</b>
       <div class="grid"><button id="my-id" type="button">Мой ID</button><button id="bot-id" type="button">ID Дельты</button></div>
-      <label for="id-target">Публичная группа или канал</label>
-      <input id="id-target" maxlength="33" placeholder="@username" autocapitalize="none" spellcheck="false">
-      <button id="lookup-id" type="button">Узнать ID</button>
+      <label for="id-target">ID пользователя или @username группы/канала</label>
+      <input id="id-target" maxlength="33" placeholder="123456789 или @username" autocapitalize="none" spellcheck="false">
+      <button id="lookup-id" type="button">Найти</button>
       <button id="select-id" type="button">Выбрать в Telegram</button>
       <p class="muted">Для пользователя, бота или приватной группы Telegram откроет выбор в чате с Дельтой.</p>
+      <p class="muted">По числовому ID покажу имя и username, если Telegram даст доступ к профилю. Незнакомого боту пользователя найти удаётся не всегда.</p>
       <div id="id-status" class="tool-status" role="status"></div>
       <button id="copy-id" type="button" hidden>Скопировать ID</button>
+      <a id="id-profile-link" hidden target="_blank" rel="noopener noreferrer">Открыть профиль в Telegram</a>
     </section>
     <section class="card">
       <b>Скачать видео или GIF</b>
