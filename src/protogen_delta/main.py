@@ -19,28 +19,45 @@ from protogen_delta.core.input_operations import (
     ReceiveInputsMiddleware,
 )
 from protogen_delta.core.logging_config import setup_logging
-from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.rate_limiter import MessageTokenBucket, UserRateLimiter
 from protogen_delta.core.runtime_health import PollingHealthMiddleware, RuntimeHealth
+from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 from protogen_delta.core.state import BotState
 from protogen_delta.core.telegram_commands import set_commands, set_user_commands
 from protogen_delta.core.user_state import ContentMode, UserStateStore
 from protogen_delta.core.user_statistics import UserStatisticsMiddleware
+from protogen_delta.handlers.actions import create_actions_router
 from protogen_delta.handlers.admin import create_admin_router
 from protogen_delta.handlers.adult import create_adult_router
 from protogen_delta.handlers.art import create_art_router
+from protogen_delta.handlers.code_review import create_code_review_router
 from protogen_delta.handlers.creator import create_creator_router
+from protogen_delta.handlers.delivery_ledger import DeliveryLedgerMiddleware
+from protogen_delta.handlers.dialogue_archive import (
+    ArchiveIncomingMiddleware,
+    ArchiveOutgoingMiddleware,
+    archive_edit,
+)
 from protogen_delta.handlers.documents import create_document_router
 from protogen_delta.handlers.download import create_download_router
 from protogen_delta.handlers.e621 import create_e621_router
 from protogen_delta.handlers.errors import register_error_handler
+from protogen_delta.handlers.favorites import create_favorites_router
 from protogen_delta.handlers.help import create_help_router
 from protogen_delta.handlers.image_source import create_image_source_router
+from protogen_delta.handlers.input_batches import InputBatchMiddleware
+from protogen_delta.handlers.llm_budget import LlmUserMiddleware
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
+from protogen_delta.handlers.proactive_activity import (
+    ProactiveIncomingMiddleware,
+    ProactiveOutgoingMiddleware,
+)
 from protogen_delta.handlers.reset import create_reset_router
 from protogen_delta.handlers.rp import create_rp_router
 from protogen_delta.handlers.safety import AgeSafetyMiddleware
+from protogen_delta.handlers.sender import SenderMiddleware
 from protogen_delta.handlers.start import create_start_router
 from protogen_delta.handlers.stickers import create_sticker_admin_router
 from protogen_delta.handlers.text import create_text_router
@@ -50,38 +67,65 @@ from protogen_delta.handlers.voice import create_voice_router
 from protogen_delta.miniapp.server import MiniAppServer
 from protogen_delta.miniapp.tools import MiniAppTools
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.code_reviews import CodeReviewsRepository
 from protogen_delta.repositories.creator_messages import CreatorMessagesRepository
+from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
+from protogen_delta.repositories.dialogue_archive import DialogueArchiveRepository
 from protogen_delta.repositories.e621_history import E621HistoryRepository
+from protogen_delta.repositories.favorites import FavoritesRepository
 from protogen_delta.repositories.images import ImagesRepository
+from protogen_delta.repositories.initiative import InitiativeRepository
+from protogen_delta.repositories.initiative_followups import (
+    InitiativeFollowupsRepository,
+)
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.reminders import RemindersRepository
+from protogen_delta.repositories.reply_supplements import ReplySupplementLimits
 from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_facts import UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
+from protogen_delta.repositories.web_api_usage import WebApiUsageRepository
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.capabilities import build_capabilities
+from protogen_delta.services.code_review import CodeReviewService
 from protogen_delta.services.creator_messages import CreatorMessageService
 from protogen_delta.services.deepseek import DeepSeekService
+from protogen_delta.services.dialogue_archive import DialogueArchiveService
 from protogen_delta.services.e621 import E621Client
+from protogen_delta.services.favorites import FavoritesService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
+from protogen_delta.services.llm_budget_alerts import LlmBudgetAlerts
+from protogen_delta.services.market_advisor import MarketAdvisor
+from protogen_delta.services.market_data import MarketDataService
+from protogen_delta.services.market_http import MarketHTTP
 from protogen_delta.services.media_download import MediaDownloader
 from protogen_delta.services.memory import MemoryService
 from protogen_delta.services.menu_sync import synchronize_menus
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.mood import MoodClassifier
-from protogen_delta.services.music import MusicRecognitionService
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenger
-from protogen_delta.services.response_engine import ResponseEngine, ResponseEngineConfig
+from protogen_delta.services.public_github import PublicGithubReader
+from protogen_delta.services.release_journal import ReleaseJournal
+from protogen_delta.services.reminders import ReminderService
+from protogen_delta.services.reply_supplements import ReplySupplements
+from protogen_delta.services.response_configuration import load_response_configuration
+from protogen_delta.services.response_engine import ResponseEngine
+from protogen_delta.services.shazam_music import create_music_recognizer
+from protogen_delta.services.source_access import SourceAccess
 from protogen_delta.services.speech import SpeechTranscriber
 from protogen_delta.services.sticker_pack import StickerPackImporter
 from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 from protogen_delta.services.translation import TranslationService
 from protogen_delta.services.user_facts import UserFactsService
+from protogen_delta.services.web_search import WebSearchService
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +186,8 @@ async def main() -> None:
     bot.session.middleware.register(PollingHealthMiddleware(health))
     menu_task: asyncio.Task[None] | None = None
     deepseek: DeepSeekService | None = None
+    github_reader: PublicGithubReader | None = None
+    web_search_service: WebSearchService | None = None
     proactive_messenger: ProactiveMessenger | None = None
     native_work = NativeWorkPool(2)
     health.add_diagnostics("native", native_work.snapshot)
@@ -149,8 +195,23 @@ async def main() -> None:
     mini_app_server: MiniAppServer | None = None
     audio_understanding: AudioUnderstandingService | None = None
     transcriber: SpeechTranscriber | None = None
+    reminders: ReminderService | None = None
+    dialogue_archive: DialogueArchiveService | None = None
+    code_reviews: CodeReviewService | None = None
+    input_batches: InputBatchMiddleware | None = None
+    budget_alerts: LlmBudgetAlerts | None = None
+    reply_supplements: ReplySupplements | None = None
 
     try:
+        usage_repository = LlmUsageRepository(
+            settings.data_dir,
+            settings.llm_daily_request_limit,
+            limit_overrides=settings.llm_daily_request_limit_overrides,
+            global_daily_limit=settings.llm_global_daily_request_limit,
+        )
+        budget_alerts = LlmBudgetAlerts(
+            bot, usage_repository, settings.llm_budget_alert_user_id
+        )
         if settings.audio_understanding_enabled:
             audio_understanding = AudioUnderstandingService(
                 AsyncOpenAI(
@@ -164,13 +225,54 @@ async def main() -> None:
                 native_work=native_work,
             )
             health.add_diagnostics("audio", audio_understanding.snapshot)
+            audio_understanding.set_usage_repository(usage_repository)
         dispatcher = Dispatcher()
+        dispatcher.message.outer_middleware(LlmUserMiddleware())
+        dispatcher.callback_query.outer_middleware(LlmUserMiddleware())
         register_error_handler(dispatcher)
 
         images_repository = ImagesRepository(settings.data_dir)
         users_repository = UsersRepository(settings.data_dir)
         user_state_repository = UserStateRepository(settings.data_dir)
+        shared_dialogue = SharedDialogueAccounts(settings.dialogue_shared_groups)
+        delivery_ledger = DeliveryLedgerRepository(settings.data_dir)
+        dialogue_archive = DialogueArchiveService(
+            DialogueArchiveRepository(settings.data_dir),
+            settings.dialogue_archive_user_ids,
+            settings.data_dir,
+            shared_dialogue,
+        )
+        bot.session.middleware.register(
+            ArchiveOutgoingMiddleware(dialogue_archive, delivery_ledger)
+        )
         memories_repository = MemoriesRepository(settings.data_dir)
+        favorites = FavoritesService(
+            FavoritesRepository(settings.data_dir), settings.favorites_user_ids
+        )
+        source_access = SourceAccess(
+            settings.code_review_user_ids,
+            secrets=tuple(
+                value
+                for value in (
+                    settings.telegram_token,
+                    settings.deepseek_api_key,
+                    settings.audio_api_key,
+                    settings.music_audd_api_token,
+                    settings.saucenao_api_key,
+                    settings.brave_search_api_key,
+                    settings.deepseek_search_api_key,
+                    settings.alpaca_api_key,
+                    settings.alpaca_secret_key,
+                    settings.telegram_proxy_url,
+                )
+                if value is not None
+            ),
+        )
+        bot.session.middleware.register(
+            ProactiveOutgoingMiddleware(memories_repository)
+        )
+        reminders = ReminderService(bot, RemindersRepository(settings.data_dir))
+        health.add_diagnostics("reminders", reminders.snapshot)
         creator_messages_repository = CreatorMessagesRepository(settings.data_dir)
         stickers_repository = StickersRepository(settings.data_dir)
         e621_history = E621HistoryRepository(settings.data_dir)
@@ -183,12 +285,30 @@ async def main() -> None:
             history_ttl_seconds=settings.conversation_history_ttl_seconds,
             retention_seconds=settings.user_state_retention_seconds,
             persistence=user_state_repository,
+            shared_dialogue=shared_dialogue,
         )
         creator_messages = CreatorMessageService(
             bot, creator_messages_repository, user_states
         )
-        input_operations = InputOperations()
-        dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        input_operations = InputOperations(shared_dialogue)
+        dispatcher.message.outer_middleware(DeliveryLedgerMiddleware(delivery_ledger))
+        receive_inputs = ReceiveInputsMiddleware(input_operations)
+        dispatcher.message.outer_middleware(receive_inputs)
+        dispatcher.message.outer_middleware(SenderMiddleware())
+        dispatcher.message.outer_middleware(
+            ProactiveIncomingMiddleware(
+                memories_repository, user_states, input_operations
+            )
+        )
+        dispatcher.message.outer_middleware(
+            ArchiveIncomingMiddleware(dialogue_archive, input_operations)
+        )
+        dispatcher.edited_message.outer_middleware(receive_inputs)
+        dispatcher.edited_message.outer_middleware(
+            ArchiveIncomingMiddleware(dialogue_archive, input_operations)
+        )
+        if settings.dialogue_archive_user_ids:
+            dispatcher.edited_message.register(archive_edit)
         dispatcher.message.outer_middleware(
             UserStatisticsMiddleware(
                 statistics_repository, user_states, input_operations
@@ -221,37 +341,67 @@ async def main() -> None:
             "repeat_start_greeting.txt",
         )
 
-        core_prompt = load_prompt(
-            "personality/core.txt",
+        response_engine_config = load_response_configuration(
+            settings,
+            fetish_triggers=fetish_triggers,
+            fetish_names=fetish_names,
+            loader=load_prompt,
         )
-        protogen_lore_prompt = load_prompt(
-            "personality/protogen_lore.txt",
-        )
-        body_prompt = load_prompt(
-            "personality/body.txt",
-        )
-        rp_modifier_prompt = load_prompt(
-            "personality/rp.txt",
-        )
+        core_prompt = response_engine_config.system_prompt
 
+        github_reader = PublicGithubReader(
+            settings.data_dir, proxy_url=settings.telegram_proxy_url
+        )
+        web_search_service = WebSearchService(
+            WebApiUsageRepository(
+                settings.data_dir,
+                settings.web_api_daily_limit,
+                settings.brave_monthly_search_limit,
+            ),
+            deepseek_key=settings.web_search_api_key,
+            brave_key=settings.brave_search_api_key,
+            proxy_url=settings.telegram_proxy_url,
+        )
         deepseek = DeepSeekService(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
+            verify_web_answers=True,
             disable_thinking=settings.llm_disable_thinking,
+            adaptive_thinking=(
+                settings.llm_adaptive_thinking and settings.llm_provider == "deepseek"
+            ),
             tools=ToolExecutor(
                 default_registry(
+                    github_reader=github_reader,
+                    source_access=source_access,
+                    favorites=favorites if settings.favorites_user_ids else None,
                     proxy_url=settings.telegram_proxy_url,
                     brave_search_api_key=settings.brave_search_api_key,
+                    web_search_service=web_search_service,
+                    dialogue_archive=(
+                        dialogue_archive if settings.dialogue_archive_user_ids else None
+                    ),
                 )
             ),
         )
 
         health.add_diagnostics("llm", deepseek.snapshot)
+        initiative_followups = (
+            InitiativeFollowupsRepository(settings.data_dir)
+            if settings.proactive_lively_enabled
+            else None
+        )
         memory = MemoryService(
             memories_repository,
             facts=UserFactsService(facts_repository, deepseek),
             creator_messages=creator_messages_repository,
+            dialogue_archive=dialogue_archive,
+            favorites=favorites,
+            states=user_states,
+            delivery_ledger=delivery_ledger,
+            inputs=input_operations,
+            followups=initiative_followups,
         )
         insult_classifier = InsultClassifier(
             deepseek=deepseek,
@@ -266,28 +416,51 @@ async def main() -> None:
             prompt=fetish_role_prompt,
         )
 
-        capabilities = build_capabilities(settings)
-        response_engine_config = ResponseEngineConfig(
-            fetish_triggers=fetish_triggers,
-            fetish_names=fetish_names,
-            system_prompt=core_prompt,
-            rp_prompt=rp_modifier_prompt,
-            protogen_lore_prompt=protogen_lore_prompt,
-            body_prompt=body_prompt,
-            species_prompt=load_prompt("furry_species_reference"),
-            adult_conversation_prompt=load_prompt("adult_conversation_style"),
-            female_body_prompt=load_prompt("personality/body_female"),
-            adult_body_male_prompt=load_prompt("personality/adult_body_male"),
-            adult_body_female_prompt=load_prompt("personality/adult_body_female"),
-            adult_rp_prompt=load_prompt("personality/adult_rp"),
-            technical_prompt=load_prompt("conversation_technical"),
-            visual_prompt=load_prompt("conversation_visual"),
-            voice_prompt=load_prompt("voice_examples"),
-            scene_voice_prompt=load_prompt("scene_examples"),
-            capabilities_context=capabilities.summary,
-            capabilities_overview_context=capabilities.overview,
+        deepseek.set_usage_repository(usage_repository)
+        market_advisor = (
+            MarketAdvisor(
+                MarketDataService(
+                    MarketHTTP(
+                        settings.alpaca_api_key,
+                        settings.alpaca_secret_key,
+                        proxy_url=settings.telegram_proxy_url,
+                    ),
+                    brave_key=settings.brave_search_api_key,
+                    web_search_service=web_search_service,
+                    proxy_url=settings.telegram_proxy_url,
+                ),
+                deepseek.for_consultant(),
+            )
+            if settings.mini_app_server_enabled
+            else None
         )
 
+        code_reviews = CodeReviewService(
+            bot, deepseek, source_access, CodeReviewsRepository(settings.data_dir)
+        )
+
+        async def clear_extra_memory(user_id: int) -> None:
+            if market_advisor is not None:
+                await market_advisor.clear(user_id)
+            await github_reader.clear_user(user_id)
+            if code_reviews is not None:
+                await code_reviews.repository.clear_delivery(user_id)
+
+        memory.extra_cleanup = clear_extra_memory
+        capabilities = build_capabilities(settings)
+        release_journal = ReleaseJournal(
+            settings.data_dir, settings.recognized_creator_ids, health=health
+        )
+        reaction_service = (
+            MessageReactionService(
+                bot,
+                user_states,
+                chance=settings.message_reaction_chance,
+                cooldown_seconds=settings.message_reaction_cooldown_seconds,
+            )
+            if settings.message_reactions_enabled
+            else None
+        )
         sticker_service = ContextualStickerService(
             bot,
             stickers_repository,
@@ -296,7 +469,10 @@ async def main() -> None:
             cooldown_seconds=settings.sticker_cooldown_seconds,
             min_replies=settings.sticker_min_replies,
         )
+        dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
+            code_reviews=code_reviews,
+            github_reader=github_reader,
             deepseek=deepseek,
             appearance_model=(
                 deepseek.for_appearance()
@@ -311,12 +487,31 @@ async def main() -> None:
             config=response_engine_config,
             memory=memory,
             creator_id=settings.creator_id,
+            creator_ids=settings.recognized_creator_ids,
+            source_access=source_access,
             creator_messages=creator_messages,
             reply_transform=sticker_service.correct_reply,
+            release_journal=release_journal,
             interaction_classifier=InteractionClassifier(
-                deepseek, mood_prompt, insult_prompt
+                deepseek,
+                mood_prompt,
+                insult_prompt,
+                favorite_prompt=load_prompt("favorite_selection"),
             ),
         )
+        if settings.reply_supplements_enabled:
+            reply_supplements = ReplySupplements(
+                bot,
+                deepseek,
+                user_states,
+                input_operations,
+                ReplySupplementLimits(settings.data_dir),
+                style_prompt=core_prompt,
+                shared=shared_dialogue,
+            )
+            response_engine.supplements = reply_supplements
+            receive_inputs.on_input = reply_supplements.cancel
+            health.add_diagnostics("supplements", reply_supplements.snapshot)
         sticker_importer = StickerPackImporter(bot, stickers_repository)
         if settings.sticker_pack_enabled:
             try:
@@ -414,6 +609,7 @@ async def main() -> None:
             on_mode_change=on_mode_change,
             user_statistics=statistics_repository,
             input_operations=input_operations,
+            reminders=reminders,
         )
 
         rp_router = create_rp_router(
@@ -427,12 +623,14 @@ async def main() -> None:
             rate_limiter=rate_limiter,
             bot=bot,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
         )
         media_router = create_media_router(
             response_engine,
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
         )
         document_router = create_document_router(
@@ -440,6 +638,7 @@ async def main() -> None:
             bot,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
             ocr_enabled=settings.pdf_ocr_enabled,
         )
@@ -456,24 +655,43 @@ async def main() -> None:
             transcriber,
             rate_limiter=rate_limiter,
             sticker_service=sticker_service,
+            reaction_service=reaction_service,
             native_work=native_work,
             audio_understanding=audio_understanding,
-            music_recognition=(
-                MusicRecognitionService(
-                    settings.music_audd_api_token, native_work=native_work
-                )
-                if settings.music_audd_api_token
-                else None
+            music_recognition=create_music_recognizer(
+                settings.music_recognition_provider,
+                settings.music_audd_api_token,
+                native_work,
             ),
         )
 
+        input_batches = InputBatchMiddleware(
+            response_engine,
+            input_operations,
+            delivery_ledger,
+            bucket=MessageTokenBucket(
+                refill_seconds=(
+                    max(2.5, settings.rate_limit_seconds)
+                    if settings.rate_limit_seconds
+                    else 0
+                ),
+                privileged=settings.recognized_creator_ids,
+            ),
+        )
+        response_engine.cancel_pending_inputs = input_batches.cancel
+        health.add_diagnostics("inputs", input_batches.snapshot)
         for router in (text_router, media_router, document_router, voice_router):
             router.message.middleware(MemoryInputsMiddleware(input_operations))
+            router.message.middleware(input_batches)
 
         dispatcher.include_router(start_router)
         dispatcher.include_router(menu_router)
         dispatcher.include_router(help_router)
         dispatcher.include_router(utilities_router)
+        dispatcher.include_router(create_code_review_router(code_reviews))
+        actions_router = create_actions_router(reminders)
+        actions_router.message.middleware(MemoryInputsMiddleware(input_operations))
+        dispatcher.include_router(actions_router)
         dispatcher.include_router(art_router)
         dispatcher.include_router(admin_router)
         dispatcher.include_router(sticker_admin_router)
@@ -482,9 +700,10 @@ async def main() -> None:
         dispatcher.include_router(e621_router)
         dispatcher.include_router(reset_router)
         dispatcher.include_router(create_memory_router(memory, user_states))
+        dispatcher.include_router(create_favorites_router(favorites, user_states))
         dispatcher.include_router(rp_router)
         downloader = MediaDownloader(settings.youtube_cookies_file)
-        dispatcher.include_router(create_download_router(downloader))
+        dispatcher.include_router(create_download_router(downloader, sticker_service))
         dispatcher.include_router(
             create_image_source_router(
                 bot, ImageSourceService(settings.saucenao_api_key or "")
@@ -501,9 +720,7 @@ async def main() -> None:
         )
         await set_commands(bot, settings.mini_app_url)
 
-        # Команда /proactive временно скрыта: на время этого режима фоновые
-        # сообщения включаются всем, включая ранее отключившие их в тестах.
-        await memories_repository.enable_proactive_for_all()
+        # Сохранённое отключение инициативы не сбрасывается при перезапуске.
 
         if settings.mini_app_server_enabled:
             mini_app_tools = MiniAppTools(
@@ -517,12 +734,15 @@ async def main() -> None:
                 port=settings.mini_app_port,
                 auth_max_age_seconds=settings.mini_app_auth_max_age_seconds,
                 response_engine=response_engine,
+                input_operations=input_operations,
                 on_mode_change=on_mode_change,
                 tools=mini_app_tools,
                 native_work=native_work,
+                llm_usage=usage_repository,
                 runtime_health=health,
                 fetish_triggers=fetish_triggers,
                 fetish_names=fetish_names,
+                market_advisor=market_advisor,
             )
             await mini_app_server.start()
 
@@ -539,18 +759,44 @@ async def main() -> None:
             deepseek=deepseek,
             repository=memories_repository,
             user_states=user_states,
+            creator_ids=settings.recognized_creator_ids,
             system_prompt=core_prompt,
+            stickers=sticker_service,
+            release_journal=release_journal,
+            initiative=(
+                InitiativeRepository(settings.data_dir)
+                if settings.proactive_lively_enabled
+                else None
+            ),
+            followups=initiative_followups,
             config=ProactiveConfig(
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,
+                idle_max_seconds=settings.proactive_idle_max_seconds,
                 cooldown_seconds=settings.proactive_cooldown_seconds,
+                sticker_idle_seconds=1800.0,
+                sticker_idle_max_seconds=7200.0,
             ),
         )
         proactive_task = asyncio.create_task(proactive_messenger.run_forever())
+        await reminders.start()
+        budget_alerts.start()
+        dialogue_archive.start()
+        code_reviews.start()
 
         await dispatcher.start_polling(bot, tasks_concurrency_limit=32)
     finally:
         health.stop()
+        if budget_alerts is not None:
+            await budget_alerts.close()
+        if input_batches is not None:
+            await input_batches.close()
+        if reply_supplements is not None:
+            await reply_supplements.close()
+        if code_reviews is not None:
+            await code_reviews.close()
+        if reminders is not None:
+            await reminders.close()
         if transcriber is not None:
             await transcriber.close()
         if menu_task is not None:
@@ -571,6 +817,12 @@ async def main() -> None:
                 await mini_app_server.close()
             if deepseek is not None:
                 await deepseek.close()
+            if github_reader is not None:
+                await github_reader.close()
+            if web_search_service is not None:
+                await web_search_service.close()
+            if dialogue_archive is not None:
+                await dialogue_archive.close()
         finally:
             await bot.session.close()
 

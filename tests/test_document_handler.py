@@ -18,7 +18,7 @@ from protogen_delta.handlers.documents import (
     UNSUPPORTED_DOCUMENT_REPLY,
     create_document_router,
 )
-from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.documents import (
     MAX_DOCUMENT_BYTES,
@@ -136,8 +136,8 @@ def test_unsupported_and_broken_documents_get_clear_replies() -> None:
     unsupported = SimpleNamespace(
         file_id="zip-id",
         file_size=7,
-        file_name="archive.zip",
-        mime_type="application/zip",
+        file_name="archive.rar",
+        mime_type="application/x-rar-compressed",
     )
     unsupported_message, unsupported_answer = _message(unsupported)
     asyncio.run(unsupported_router.message.handlers[0].callback(unsupported_message))
@@ -214,7 +214,7 @@ def test_document_rate_limit_is_checked_before_download() -> None:
 
     asyncio.run(router.message.handlers[0].callback(message))
 
-    answer.assert_awaited_once_with(RATE_LIMIT_REPLY)
+    answer.assert_not_awaited()
     bot.download.assert_not_awaited()
 
 

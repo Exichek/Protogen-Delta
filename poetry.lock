@@ -196,6 +196,21 @@ yarl = ">=1.17.0,<2.0"
 speedups = ["Brotli (>=1.2) ; platform_python_implementation == \"CPython\" and sys_platform != \"android\" and sys_platform != \"ios\"", "aiodns (>=3.3.0) ; sys_platform != \"android\" and sys_platform != \"ios\"", "backports.zstd ; platform_python_implementation == \"CPython\" and python_version < \"3.14\" and sys_platform != \"android\" and sys_platform != \"ios\"", "brotlicffi (>=1.2) ; platform_python_implementation != \"CPython\""]
 
 [[package]]
+name = "aiohttp-retry"
+version = "2.9.1"
+description = "Simple retry client for aiohttp"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "aiohttp_retry-2.9.1-py3-none-any.whl", hash = "sha256:66d2759d1921838256a05a3f80ad7e724936f083e35be5abb5e16eed6be6dc54"},
+    {file = "aiohttp_retry-2.9.1.tar.gz", hash = "sha256:8eb75e904ed4ee5c2ec242fefe85bf04240f685391c4879d8f541d6028ff01f1"},
+]
+
+[package.dependencies]
+aiohttp = "*"
+
+[[package]]
 name = "aiohttp-socks"
 version = "0.12.0"
 description = "Proxy connector for aiohttp"
@@ -2907,6 +2922,48 @@ lint = ["isort", "mypy", "ruff", "types-Pillow"]
 test = ["pytest"]
 
 [[package]]
+name = "shazamio"
+version = "0.9.0"
+description = "An asynchronous framework for the reverse engineered Shazam API, written in Python with asyncio and aiohttp."
+optional = false
+python-versions = ">=3.10,<4.0"
+groups = ["main"]
+files = [
+    {file = "f94faafdabff9cdec258f3ac024a6402989e9040.tar.gz", hash = "sha256:66204ec195e2a323815e542aa6de0af7b42f417d3111ac18252f42ed0bf3650f"},
+]
+
+[package.dependencies]
+aiohttp = ">=3.8.0"
+aiohttp-retry = ">=2.3"
+pydantic = ">=2.2.0"
+shazamio-core = "2.0.0"
+
+[package.source]
+type = "url"
+url = "https://github.com/shazamio/ShazamIO/archive/f94faafdabff9cdec258f3ac024a6402989e9040.tar.gz"
+
+[[package]]
+name = "shazamio-core"
+version = "2.0.0"
+description = "Audio fingerprinting for Shazam, written in Rust and exposed to Python"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "shazamio_core-2.0.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:dd20b534563a12fc3f6e1f38fd91b2edc3941f583295c60f806fb0ff26ba55cb"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:024a3d63cae76757c6d52bd9b25e6fc81a1cdbbf9cad53c2a8d7e5c3c913e93d"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b5fab1063d47bd13048aa316728e593ec2bb074a0ec2c05a56473556ddf9a962"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:66b4897a58c0c82b087acc7c8117f3ce8a30a89c8e17103f8ff35c45af11bb48"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:d622afea5231e692f1bf12ef5839791c46970222b792a617660e0505e3763fac"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:da6f9780115718baa3d57ea59279237976e73fa60cd0857f0a83bab9e56cf8aa"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-win32.whl", hash = "sha256:2ec2f5b1a00c5aac824c36a531e48f8df6bb684462c60414825eb9a06fbee9ee"},
+    {file = "shazamio_core-2.0.0-cp310-abi3-win_amd64.whl", hash = "sha256:bd1ace4ac7409465eb028e67160d09cf77d49de8f64b70b9aa408c0842dc9eb9"},
+    {file = "shazamio_core-2.0.0-pp311-pypy311_pp73-manylinux_2_28_aarch64.whl", hash = "sha256:05abcc0dcf09ab6a0c2ab98a5a1533bef1fd0fe990f8a5da6a29d3c2010f6adb"},
+    {file = "shazamio_core-2.0.0-pp311-pypy311_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:ee8e22b22d2e5a162cc5e5058521219865768dba819b371a235bf84899a38da6"},
+    {file = "shazamio_core-2.0.0.tar.gz", hash = "sha256:9849276a3a4795683e29218cd8aac14acdcc8bae66df13304b8ce5d7b9077a12"},
+]
+
+[[package]]
 name = "sniffio"
 version = "1.3.1"
 description = "Sniff out which async library your code is running under"
@@ -3182,4 +3239,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<3.15"
-content-hash = "755044e761e47d02bc453c271b79d12e5973033611bd68c7d79b04580df4cdd5"
+content-hash = "20168fb426b225d6216ca4e0917f2d5b5f08881e4965dd3621d0b7a6081d4e8c"

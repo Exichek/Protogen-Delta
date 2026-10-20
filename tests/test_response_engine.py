@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 from unittest.mock import ANY, AsyncMock
 
@@ -16,6 +17,11 @@ from protogen_delta.core.user_state import (
     ConversationTurn,
     UserStateStore,
 )
+from protogen_delta.repositories.dialogue_archive import (
+    DialogueArchiveRepository,
+    DialogueMessage,
+)
+from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.services.deepseek import (
     DeepSeekAPIError,
     DeepSeekAuthError,
@@ -25,6 +31,10 @@ from protogen_delta.services.deepseek import (
     DeepSeekService,
     DeepSeekTimeoutError,
     ImageInput,
+)
+from protogen_delta.services.dialogue_archive import (
+    DialogueArchiveService,
+    current_dialogue_owner,
 )
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.insults import InsultClassifier
@@ -38,6 +48,95 @@ from protogen_delta.services.response_engine import (
 )
 
 TEST_USER_ID = 123456
+
+
+@pytest.mark.parametrize("route", ["ordinary", "rp", "forbidden", "forwarded"])
+def test_optional_web_verification_respects_reply_scope(route: str) -> None:
+    """Незнакомый факт получает поиск, игра и чужая пересылка — прежний маршрут."""
+    from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
+
+    engine, _, model, *_ = _create_engine()
+    message = "Что означает флоккуляция?"
+    if route == "rp":
+        engine._user_states.get(TEST_USER_ID).roleplay_active = True
+        message = "*машу тебе рукой*"
+    elif route == "forbidden":
+        message = "Без поиска, объясни DNS"
+    token = current_reply_sources.set(
+        (ReplySource(message, message, False, False),) if route == "forwarded" else None
+    )
+    try:
+        assert asyncio.run(engine.respond(TEST_USER_ID, message)) == "Ответ"
+    finally:
+        current_reply_sources.reset(token)
+    assert model.chat.await_args.kwargs["tool_names"] == (
+        {"web_search", "fetch_web_page"} if route == "ordinary" else set()
+    )
+
+
+def test_confirmed_reaction_is_remembered_only_for_its_own_turn() -> None:
+    from protogen_delta.core.reaction_receipt import reaction_receipt
+
+    async def run() -> None:
+        engine, _, _, _, _, _ = _create_engine()
+
+        async def deliver(reply: str) -> None:
+            assert "Подтверждённое" not in reply
+            reaction_receipt.set("❤")
+
+        await engine.respond_and_deliver(TEST_USER_ID, "Обнимаю", deliver)
+        history = engine._user_states.get(TEST_USER_ID).history
+        assert "Подтверждённое действие Дельты" in history[-1].assistant_message
+        assert reaction_receipt.get() is None
+        await engine.respond(TEST_USER_ID, "Как дела?")
+        assert "Подтверждённое" not in history[-1].assistant_message
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "scope", ["private", "group", "no_facts", "restricted", "other_owner"]
+)
+def test_archive_context_and_model_tool_keep_private_scope(
+    tmp_path: Path, scope: str
+) -> None:
+    async def run() -> None:
+        engine, _, model, _, _, _ = _create_engine()
+        archive = DialogueArchiveService(
+            DialogueArchiveRepository(tmp_path), frozenset({TEST_USER_ID}), tmp_path
+        )
+        await archive.repository.save(
+            TEST_USER_ID,
+            DialogueMessage("old", "user", "Проект ORBIT_ARCHIVE_930", 100),
+        )
+        memory = MemoryService(MemoriesRepository(tmp_path), dialogue_archive=archive)
+        engine._memory = memory
+        kwargs: dict[str, object] = {}
+        if scope == "group":
+            kwargs["chat_id"] = -100
+        if scope == "no_facts":
+            kwargs["use_personal_facts"] = False
+        if scope == "restricted":
+            engine._user_states.get(TEST_USER_ID).age_restricted = True
+        owner = TEST_USER_ID + 1 if scope == "other_owner" else TEST_USER_ID
+
+        async def chat(**arguments: object) -> str:
+            assert current_dialogue_owner.get() == (
+                owner if scope in {"private", "other_owner"} else None
+            )
+            return "Ответ"
+
+        model.chat.side_effect = chat
+        await engine.respond(owner, "Что помнишь о проекте?", **kwargs)  # type: ignore[arg-type]
+        call = model.chat.await_args
+        assert call is not None
+        assert ("ORBIT_ARCHIVE_930" in call.kwargs["system_prompt"]) is (
+            scope == "private"
+        )
+        assert ("search_dialogue" in call.kwargs["tool_names"]) is (scope == "private")
+        assert current_dialogue_owner.get() is None
+
+    asyncio.run(run())
 
 
 def _create_engine() -> tuple[
@@ -133,7 +232,7 @@ def test_response_engine_routes_greeting_through_chat() -> None:
         system_prompt=ANY,
         user_message="Привет!",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     assert list(engine._user_states.get(TEST_USER_ID).history) == [
@@ -392,6 +491,8 @@ def test_response_engine_recognizes_creator_and_uses_long_term_memory() -> None:
     """Создатель и прошлые эпизоды должны попадать в динамический контекст."""
     engine, _, deepseek_mock, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
+    memory.dialogue_archive = None
+    memory.favorites = None
     memory.context.return_value = ["Долговременный смешной момент"]
     engine._memory = cast(MemoryService, memory)
     engine._creator_id = TEST_USER_ID
@@ -420,6 +521,8 @@ def test_response_engine_keeps_replying_when_memory_storage_fails() -> None:
     """Сбой дополнительной памяти не должен ломать основной ответ."""
     engine, _, _, _, _, _ = _create_engine()
     memory = AsyncMock(spec=MemoryService)
+    memory.dialogue_archive = None
+    memory.favorites = None
     memory.context.side_effect = OSError("read failed")
     memory.note_message.side_effect = OSError("write failed")
     engine._memory = cast(MemoryService, memory)
@@ -505,7 +608,7 @@ def test_response_engine_updates_mood_and_calls_chat() -> None:
         system_prompt=ANY,
         user_message="Как дела?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     role_mock.classify.assert_not_awaited()
@@ -849,7 +952,7 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp() -> None:
         system_prompt=ANY,
         user_message="Ты меня связал?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
 
@@ -871,7 +974,8 @@ def test_response_engine_handles_empty_deepseek_reply() -> None:
     )
 
     assert result == "Пустой ответ от DeepSeek"
-    assert state.reply_count == 1
+    assert state.reply_count == 0
+    assert not engine._user_states.get(TEST_USER_ID).history
 
 
 def test_response_engine_handles_whitespace_deepseek_reply() -> None:
@@ -892,7 +996,8 @@ def test_response_engine_handles_whitespace_deepseek_reply() -> None:
     )
 
     assert result == "DeepSeek промолчал..."
-    assert state.reply_count == 1
+    assert state.reply_count == 0
+    assert not engine._user_states.get(TEST_USER_ID).history
 
 
 def test_response_engine_rejects_empty_system_prompt() -> None:
@@ -1111,7 +1216,7 @@ def test_response_engine_does_not_add_context_for_neutral_message() -> None:
         system_prompt=ANY,
         user_message="Как установить Docker?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
 
@@ -1238,7 +1343,7 @@ def test_response_engine_passes_user_history_to_deepseek() -> None:
         system_prompt=ANY,
         user_message="Как меня зовут?",
         history=(previous_turn,),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     assert list(user_state.history) == [

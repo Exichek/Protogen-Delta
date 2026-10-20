@@ -24,6 +24,7 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
     commands = [
         BotCommand(command="start", description="🚀 Познакомиться с Дельтой"),
         BotCommand(command="funcs", description="📋 Все функции и команды"),
+        BotCommand(command="privacy", description="🔐 Как используются данные"),
         BotCommand(command="menu", description="⚙️ Панель возможностей"),
         BotCommand(command="e6", description="🔎 Поиск артов e621 по тегам"),
         BotCommand(command="rp", description="🎭 Управление RP — /rp off"),
@@ -34,6 +35,10 @@ def commands_for_mode(mode: ContentMode = "unselected") -> list[BotCommand]:
         ),
         BotCommand(command="source", description="🔎 Найти источник арта (ответом)"),
         BotCommand(command="memory", description="🧠 Мой постоянный профиль"),
+        BotCommand(command="favorites", description="⭐ Избранные сообщения Дельты"),
+        BotCommand(command="calc", description="🧮 Калькулятор: /calc (25+17)*3"),
+        BotCommand(command="remind", description="⏰ Создать личное напоминание"),
+        BotCommand(command="reminders", description="📋 Мои напоминания и отмена"),
         BotCommand(command="reset", description="🧹 Полностью очистить память"),
         BotCommand(command="help", description="ℹ️ Помощь"),
     ]

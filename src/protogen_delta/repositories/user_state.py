@@ -9,6 +9,7 @@ from typing import cast
 
 from protogen_delta.core.appearance_profile import AppearanceProfile
 from protogen_delta.core.appearance_species import AppearanceSpecies
+from protogen_delta.core.emotional_memory import EmotionalMemory
 from protogen_delta.core.user_state import (
     ContentMode,
     ConversationTurn,
@@ -60,6 +61,7 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -67,6 +69,7 @@ class UserStateRepository:
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -87,6 +90,7 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_default_profile=delta_default_profile,
             delta_appearance_profile=delta_appearance_profile,
             roleplay_character_thumbnail=roleplay_character_thumbnail,
             roleplay_character_restricted=bool(roleplay_character_restricted),
@@ -94,6 +98,7 @@ class UserStateRepository:
             age_restricted=age_restricted,
             delta_reference_restricted=delta_reference_restricted,
             roleplay_stopword=roleplay_stopword,
+            roleplay_allow_profanity=bool(roleplay_allow_profanity),
             history=history,
             history_updated_at=history_updated_at,
             history_expires_before=history_expires_before,
@@ -109,9 +114,30 @@ class UserStateRepository:
             user_id,
         )
 
+    async def forget_dialogue_context(self, user_id: int) -> None:
+        def update() -> None:
+            with closing(sqlite3.connect(self._path)) as db, db:
+                for table in ("user_states", "conversation_states"):
+                    for row in db.execute(
+                        f"SELECT rowid,emotional_memory FROM {table} WHERE user_id=?",
+                        (user_id,),
+                    ).fetchall():
+                        memory = EmotionalMemory.decode(row[1])
+                        memory.events.clear()
+                        db.execute(
+                            f"UPDATE {table} SET history='[]',history_updated_at=0,emotional_memory=? WHERE rowid=?",
+                            (memory.encode(), row[0]),
+                        )
+
+        await asyncio.to_thread(update)
+
     async def restrict_conversations(self, user_id: int) -> None:
         def update() -> None:
             with closing(sqlite3.connect(self._path)) as db, db:
+                db.execute(
+                    "INSERT OR IGNORE INTO age_restrictions(user_id) VALUES (?)",
+                    (user_id,),
+                )
                 db.execute(
                     "UPDATE conversation_states SET roleplay_active=0, roleplay_fetishes='[]', "
                     "arousal=0, content_mode='soft', age_restricted=1, history='[]', "
@@ -136,6 +162,12 @@ class UserStateRepository:
         table, where, key = self._scope(user_id)
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
+                restricted = (
+                    connection.execute(
+                        "SELECT 1 FROM age_restrictions WHERE user_id=?", (key[-1],)
+                    ).fetchone()
+                    is not None
+                )
                 row = connection.execute(
                     f"""
                     SELECT
@@ -164,8 +196,11 @@ class UserStateRepository:
                         age_restricted,
                         delta_reference_restricted,
                         roleplay_stopword,
+                        roleplay_allow_profanity,
                         history,
-                        history_updated_at
+                        history_updated_at,
+                        emotional_memory,
+                        delta_default_profile
                     FROM {table}
                     WHERE {where}
                     """,
@@ -177,7 +212,17 @@ class UserStateRepository:
             ) from error
 
         if row is None:
-            return None
+            return (
+                PersistentUserState(
+                    emotions=EmotionalState(),
+                    relationship=RelationshipState(),
+                    emotions_updated_at=0,
+                    content_mode="soft",
+                    age_restricted=True,
+                )
+                if restricted
+                else None
+            )
 
         (
             warmth,
@@ -205,9 +250,14 @@ class UserStateRepository:
             age_restricted,
             delta_reference_restricted,
             roleplay_stopword,
+            roleplay_allow_profanity,
             history,
             history_updated_at,
+            emotional_memory,
+            delta_default_profile,
         ) = row
+
+        age_restricted = bool(age_restricted) or restricted
 
         species = AppearanceSpecies.decode(delta_species)
         delta_species = species.encode() if species else ""
@@ -220,7 +270,12 @@ class UserStateRepository:
                 warmth=warmth,
                 irritation=irritation,
                 playfulness=playfulness,
-                arousal=arousal,
+                arousal=0 if age_restricted else arousal,
+                memory=EmotionalMemory.decode(
+                    emotional_memory,
+                    legacy_joy=(warmth + playfulness) / 2,
+                    legacy_confidence=trust / 2,
+                ),
             ),
             relationship=RelationshipState(
                 familiarity=familiarity,
@@ -229,7 +284,7 @@ class UserStateRepository:
                 resentment=resentment,
             ),
             emotions_updated_at=emotions_updated_at,
-            roleplay_active=bool(roleplay_active),
+            roleplay_active=bool(roleplay_active) and not age_restricted,
             roleplay_configuration=roleplay_configuration,
             roleplay_character=roleplay_character,
             roleplay_fetishes=self._decode_fetishes(roleplay_fetishes),
@@ -238,13 +293,17 @@ class UserStateRepository:
             delta_appearance=delta_appearance,
             delta_species=delta_species,
             delta_appearance_thumbnail=delta_appearance_thumbnail,
+            delta_default_profile=delta_default_profile,
             delta_appearance_profile=delta_appearance_profile,
             roleplay_character_thumbnail=roleplay_character_thumbnail,
             roleplay_character_restricted=bool(roleplay_character_restricted),
-            content_mode=self._decode_content_mode(content_mode),
+            content_mode=(
+                "soft" if age_restricted else self._decode_content_mode(content_mode)
+            ),
             age_restricted=bool(age_restricted),
             delta_reference_restricted=bool(delta_reference_restricted),
             roleplay_stopword=roleplay_stopword,
+            roleplay_allow_profanity=bool(roleplay_allow_profanity),
             history=self._decode_history(history),
             history_updated_at=history_updated_at,
         )
@@ -265,6 +324,7 @@ class UserStateRepository:
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -272,12 +332,13 @@ class UserStateRepository:
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
     ) -> None:
         """Синхронно сохранить состояние в SQLite."""
-        table, _, key = self._scope(user_id)
+        table, where, key = self._scope(user_id)
         group = isinstance(user_id, tuple)
         extra_column = "chat_id," if group else ""
         extra_value = "?," if group else ""
@@ -299,6 +360,12 @@ class UserStateRepository:
                     "user": turn.user_message[:8000],
                     "assistant": turn.assistant_message[:16000],
                     "context_closed": turn.context_closed,
+                    "proactive": turn.proactive,
+                    "sender_id": turn.sender_id,
+                    "technical_topic_closed": turn.technical_topic_closed,
+                    "initiative_reason": (
+                        turn.initiative_reason[:300] if turn.proactive else ""
+                    ),
                 }
                 for turn in (history or ())
             ],
@@ -306,6 +373,21 @@ class UserStateRepository:
         )
         try:
             with closing(sqlite3.connect(self._path)) as connection, connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if age_restricted:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO age_restrictions(user_id) VALUES (?)",
+                        (key[-1],),
+                    )
+                restricted = (
+                    connection.execute(
+                        "SELECT 1 FROM age_restrictions WHERE user_id=?", (key[-1],)
+                    ).fetchone()
+                    is not None
+                )
+                if restricted:
+                    age_restricted, content_mode, roleplay_active = True, "soft", False
+                    roleplay_fetishes = ()
                 connection.execute(
                     f"""
                     INSERT INTO {table} (
@@ -336,11 +418,12 @@ class UserStateRepository:
                         age_restricted,
                         delta_reference_restricted,
                         roleplay_stopword,
+                        roleplay_allow_profanity,
                         history,
                         history_updated_at
                     )
                     VALUES ({extra_value} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT({conflict}) DO UPDATE SET
                         warmth = excluded.warmth,
                         irritation = excluded.irritation,
@@ -366,7 +449,8 @@ class UserStateRepository:
                         content_mode = excluded.content_mode,
                         age_restricted = excluded.age_restricted,
                         delta_reference_restricted = excluded.delta_reference_restricted,
-                        roleplay_stopword = excluded.roleplay_stopword
+                        roleplay_stopword = excluded.roleplay_stopword,
+                        roleplay_allow_profanity = excluded.roleplay_allow_profanity
                         {history_update}
                     """,
                     (
@@ -374,7 +458,7 @@ class UserStateRepository:
                         emotions.warmth,
                         emotions.irritation,
                         emotions.playfulness,
-                        emotions.arousal,
+                        0 if restricted else emotions.arousal,
                         relationship.familiarity,
                         relationship.trust,
                         relationship.affection,
@@ -396,8 +480,20 @@ class UserStateRepository:
                         int(age_restricted),
                         int(delta_reference_restricted),
                         roleplay_stopword,
+                        int(roleplay_allow_profanity),
                         encoded_history,
                         history_updated_at,
+                    ),
+                )
+                connection.execute(
+                    f"UPDATE {table} SET emotional_memory=?,delta_default_profile=? WHERE {where}",
+                    (
+                        emotions.memory.encode(),
+                        (
+                            AppearanceProfile.decode(delta_default_profile)
+                            or AppearanceProfile()
+                        ).encode(),
+                        *key,
                     ),
                 )
                 if history_expires_before is not None:
@@ -486,13 +582,16 @@ class UserStateRepository:
                     ("age_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("delta_reference_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("roleplay_stopword", "TEXT NOT NULL DEFAULT 'стоп'"),
+                    ("roleplay_allow_profanity", "INTEGER NOT NULL DEFAULT 0"),
                     ("delta_species", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("delta_appearance_profile", "TEXT NOT NULL DEFAULT ''"),
+                    ("delta_default_profile", "TEXT NOT NULL DEFAULT ''"),
                     ("roleplay_character_thumbnail", "TEXT NOT NULL DEFAULT ''"),
                     ("roleplay_character_restricted", "INTEGER NOT NULL DEFAULT 0"),
                     ("history", "TEXT NOT NULL DEFAULT '[]'"),
                     ("history_updated_at", "REAL NOT NULL DEFAULT 0"),
+                    ("emotional_memory", "TEXT NOT NULL DEFAULT '{}'"),
                 ):
                     if name not in history_columns:
                         connection.execute(
@@ -561,6 +660,15 @@ class UserStateRepository:
                     ADD COLUMN delta_appearance TEXT NOT NULL DEFAULT ''
                     """)
 
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS age_restrictions (user_id INTEGER PRIMARY KEY)"
+            )
+            for table in ("user_states", "conversation_states"):
+                connection.execute(
+                    "INSERT OR IGNORE INTO age_restrictions(user_id) "
+                    f"SELECT user_id FROM {table} WHERE age_restricted != 0"
+                )
+
     @staticmethod
     def _decode_fetishes(value: str) -> tuple[str, ...]:
         """Безопасно прочитать мотивы текущей RP-сцены из JSON."""
@@ -597,6 +705,21 @@ class UserStateRepository:
                 item["user"][:8000],
                 item["assistant"][:16000],
                 context_closed=item.get("context_closed") is True,
+                proactive=item.get("proactive") is True,
+                initiative_reason=(
+                    item["initiative_reason"][:300]
+                    if item.get("proactive") is True
+                    and isinstance(item.get("initiative_reason"), str)
+                    else ""
+                ),
+                technical_topic_closed=item.get("technical_topic_closed") is True,
+                sender_id=(
+                    item["sender_id"]
+                    if type(item.get("sender_id")) is int
+                    and 0 < item["sender_id"] < 2**63
+                    and item.get("proactive") is not True
+                    else None
+                ),
             )
             for item in items
             if isinstance(item, dict)

@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.memory_search import memory_terms
+
 FACT_LABELS = {
     "name": "Имя",
     "address_as": "Как обращаться",
@@ -73,6 +76,28 @@ class UserFactsRepository:
                 (user_id,),
             ).fetchall()
         return [UserFact(*row) for row in rows]
+
+    async def forget_sources(self, user_id: int, sources: tuple[str, ...]) -> None:
+        needles = tuple(source.casefold() for source in sources if source)
+        terms = tuple(set(memory_terms(source)) for source in sources if source)
+
+        def remove() -> None:
+            with closing(sqlite3.connect(self._path)) as db, db:
+                for field, value_key, value, source in db.execute(
+                    "SELECT field,value_key,value,source FROM user_facts WHERE user_id=?",
+                    (user_id,),
+                ).fetchall():
+                    text = value + " " + source
+                    words = set(memory_terms(text, limit=2048))
+                    if any(needle in text.casefold() for needle in needles) or any(
+                        t and t <= words for t in terms
+                    ):
+                        db.execute(
+                            "DELETE FROM user_facts WHERE user_id=? AND field=? AND value_key=?",
+                            (user_id, field, value_key),
+                        )
+
+        await finish_operation(asyncio.to_thread(remove))
 
     async def apply(
         self, user_id: int, changes: list[FactChange], at: float

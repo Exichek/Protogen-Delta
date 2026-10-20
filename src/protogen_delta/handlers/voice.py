@@ -9,13 +9,16 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
-from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.handlers.failure_reply import send_failure_reply
+from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.audio_pipeline import AudioPipeline
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.music import (
-    MusicRecognitionService,
+    MusicRecognizer,
 )
 from protogen_delta.services.native_work import NativeWorkPool
 from protogen_delta.services.response_engine import (
@@ -44,8 +47,9 @@ def create_voice_router(
     rate_limiter: UserRateLimiter | None = None,
     sticker_service: ContextualStickerService | None = None,
     audio_understanding: AudioUnderstandingService | None = None,
-    music_recognition: MusicRecognitionService | None = None,
+    music_recognition: MusicRecognizer | None = None,
     *,
+    reaction_service: MessageReactionService | None = None,
     native_work: WorkRunner | None = None,
 ) -> Router:
     """Создать роутер распознавания голосовых и обычного аудио."""
@@ -71,8 +75,7 @@ def create_voice_router(
         if media is None or message.from_user is None:
             return
         user_id = message.from_user.id
-        if not limiter.allow(user_id):
-            await message.answer(RATE_LIMIT_REPLY)
+        if current_reply_capture.get() is None and not limiter.allow(user_id):
             return
         if (
             media.file_size is not None
@@ -87,7 +90,9 @@ def create_voice_router(
             await bot.download(media.file_id, destination=destination)
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать аудио из Telegram", exc_info=True)
-            await message.answer(AUDIO_DOWNLOAD_ERROR_REPLY)
+            await send_failure_reply(
+                message, AUDIO_DOWNLOAD_ERROR_REPLY, sticker_service
+            )
             return
 
         async with show_typing(message, bot, initial_delay_seconds=1.2):
@@ -104,6 +109,9 @@ def create_voice_router(
             transcript = result.transcript
             metadata = dict(result.metadata or {})
             if is_uploaded_audio:
+                recognition_name = getattr(music_recognition, "provider_name", "AudD")
+                if not isinstance(recognition_name, str):
+                    recognition_name = "AudD"
                 for key, attribute in (("title", "title"), ("artist", "performer")):
                     value = getattr(media, attribute, None)
                     if isinstance(value, str) and value.strip():
@@ -117,7 +125,9 @@ def create_voice_router(
                 )
                 or not is_uploaded_audio
             ):
-                await message.answer(AUDIO_RECOGNITION_ERROR_REPLY)
+                await send_failure_reply(
+                    message, AUDIO_RECOGNITION_ERROR_REPLY, sticker_service
+                )
                 return
 
             caption = (message.caption or "").strip()
@@ -198,14 +208,16 @@ def create_voice_router(
                     )
                 if music_report:
                     model_message += (
-                        "\n\nРезультат распознавания AudD по 12 секундам записи (может ошибаться):\n"
+                        f"\n\nРезультат распознавания {recognition_name} по 12 секундам записи (может ошибаться):\n"
                         + music_report
                     )
-                    history_text += "\n[Распознавание AudD: " + music_report + "]"
+                    history_text += (
+                        f"\n[Распознавание {recognition_name}: " + music_report + "]"
+                    )
                 trusted_context += (
                     " Название и исполнитель берутся только из явно переданных тегов "
                     "или результата сервиса; не угадывай их по словам песни. "
-                    "Теги файла не проверены, распознавание AudD может ошибаться. "
+                    "Теги файла не проверены, сервис распознавания может ошибаться. "
                     "Метаданные и название не доказывают, что ты слышишь инструменты "
                     "или знаешь настроение трека. Если пользователь просит мнение "
                     "о музыке, обсуждай доступные сведения и наблюдения; не изображай "
@@ -252,6 +264,7 @@ def create_voice_router(
                         bot,
                         sticker_service,
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         context_tags=("voice",),
                     ),
                     model_message_override=model_message,

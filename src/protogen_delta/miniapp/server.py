@@ -2,22 +2,30 @@
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, Literal, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
-from protogen_delta.core.appearance_profile import AppearanceProfile
+from protogen_delta.core.appearance_profile import (
+    AppearanceProfile,
+    active_appearance_profile,
+)
 from protogen_delta.core.appearance_species import AppearanceSpecies
 from protogen_delta.core.conversation_safety import (
     reference_is_child,
     validate_stopword,
 )
+from protogen_delta.core.input_operations import InputOperations
+from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
+from protogen_delta.core.operation_metrics import Measurement, OperationMetrics
 from protogen_delta.core.rate_limiter import UserRateLimiter
 from protogen_delta.core.runtime_health import RuntimeHealth
+from protogen_delta.core.sender import Sender, current_sender
 from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.core.user_state import ContentMode, UserState, UserStateStore
 from protogen_delta.miniapp.auth import (
@@ -25,7 +33,9 @@ from protogen_delta.miniapp.auth import (
     MiniAppUser,
     validate_init_data,
 )
+from protogen_delta.miniapp.markets import MarketRoutes
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
+from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.appearance_analysis import (
     validate_reference_notes,
     validate_species_hint,
@@ -35,9 +45,19 @@ from protogen_delta.services.appearance_image import (
     MAX_APPEARANCE_BYTES,
     prepare_appearance_upload,
 )
+from protogen_delta.services.archive_documents import MAX_ZIP_BYTES, extract_zip
 from protogen_delta.services.blocking_work import WorkRunner
+from protogen_delta.services.documents import DocumentError
 from protogen_delta.services.fetishes import FetishTriggers, detect_fetishes
-from protogen_delta.services.native_work import NativeWorkPool
+from protogen_delta.services.market_advisor import MarketAdvisor
+from protogen_delta.services.media_conversion import (
+    MIME_TYPES,
+    ConversionBusyError,
+    ConversionError,
+    MediaConversionService,
+)
+from protogen_delta.services.media_conversion_worker import MAX_INPUT, validate_options
+from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
     AppearanceAnalysisError,
     ResponseBusyError,
@@ -67,6 +87,7 @@ def _profile(
         "age_restricted": state.age_restricted,
         "delta_reference_restricted": state.delta_reference_restricted,
         "roleplay_stopword": state.roleplay_stopword,
+        "roleplay_allow_profanity": state.roleplay_allow_profanity,
         "roleplay_active": state.roleplay_active,
         "roleplay_configuration": state.roleplay_configuration,
         "roleplay_character": state.roleplay_character,
@@ -74,13 +95,8 @@ def _profile(
             state.roleplay_character_thumbnail if state.roleplay_character else ""
         ),
         "roleplay_character_restricted": state.roleplay_character_restricted,
-        "delta_appearance_profile": (
-            asdict(
-                AppearanceProfile.decode(state.delta_appearance_profile)
-                or AppearanceProfile()
-            )
-            if state.delta_appearance
-            else asdict(AppearanceProfile())
+        "delta_appearance_profile": asdict(
+            active_appearance_profile(state) or AppearanceProfile()
         ),
         "delta_appearance": state.delta_appearance,
         "delta_appearance_thumbnail": (
@@ -110,12 +126,16 @@ class MiniAppServer:
         port: int = 8080,
         auth_max_age_seconds: int = 3600,
         response_engine: ResponseEngine | None = None,
+        input_operations: InputOperations | None = None,
         on_mode_change: ModeChange | None = None,
         tools: MiniAppTools | None = None,
         native_work: WorkRunner | None = None,
+        llm_usage: LlmUsageRepository | None = None,
         runtime_health: RuntimeHealth | None = None,
         fetish_triggers: FetishTriggers | None = None,
         fetish_names: dict[str, str] | None = None,
+        media_converter: MediaConversionService | None = None,
+        market_advisor: MarketAdvisor | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -129,10 +149,12 @@ class MiniAppServer:
         self._port = port
         self._auth_max_age_seconds = auth_max_age_seconds
         self._response_engine = response_engine
+        self._input_operations = input_operations
         self._on_mode_change = on_mode_change
         self._tools = tools
         self._native_work = native_work or NativeWorkPool(2)
         self._runtime_health = runtime_health
+        self._llm_usage = llm_usage
         self._fetish_triggers = fetish_triggers or {}
         self._fetish_names = fetish_names or {}
         self._appearance_pending: set[int] = set()
@@ -140,15 +162,33 @@ class MiniAppServer:
         self._appearance_limiter = UserRateLimiter(cooldown_seconds=10)
         self._translation_export_slots = asyncio.Semaphore(2)
         self._translation_export_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._archive_pending: set[int] = set()
+        self._archive_limiter = UserRateLimiter(cooldown_seconds=2)
+        self._archive_slots = asyncio.Semaphore(2)
+        self._archive_metrics = OperationMetrics(capacity=2)
         self._runner: web.AppRunner | None = None
+        self._media_converter = media_converter or MediaConversionService()
+        self._market_advisor = market_advisor
+        if self._runtime_health is not None:
+            self._runtime_health.add_diagnostics(
+                "converter", self._media_converter.snapshot
+            )
+            self._runtime_health.add_diagnostics(
+                "archives", self._archive_metrics.snapshot
+            )
 
     def application(self) -> web.Application:
         """Создать aiohttp-приложение для запуска и тестирования."""
-        application = web.Application(client_max_size=64 * 1024)
+        application = web.Application(
+            client_max_size=64 * 1024, middlewares=[self._llm_scope]
+        )
         application.add_routes(
             [
                 web.get("/", self._index),
+                web.get("/static/app.js", self._javascript),
+                web.get("/static/markets.js", self._market_javascript),
                 web.get("/api/profile", self._get_profile),
+                web.get("/api/usage", self._get_usage),
                 web.patch("/api/profile", self._update_profile),
                 web.delete("/api/profile/roleplay", self._delete_roleplay_profile),
                 web.post("/api/profile/appearance", self._upload_appearance),
@@ -169,15 +209,165 @@ class MiniAppServer:
                 web.post("/api/tools/{tool}", self._run_tool),
                 web.post("/api/tools/translate/file", self._translate_file),
                 web.post("/api/tools/translate/export", self._export_translation),
+                web.post("/api/tools/archive", self._inspect_archive),
+                web.post("/api/tools/convert/file", self._convert_media),
+                web.delete("/api/tools/convert/{token}", self._delete_conversion),
+                web.get("/converted-media/{token}/{kind}", self._conversion_file),
             ]
         )
+        application.add_routes(
+            MarketRoutes(self._authenticate, self._market_advisor).routes()
+        )
+        application.on_startup.append(self._start_converter)
+        application.on_cleanup.append(self._close_converter)
         return application
+
+    async def _start_converter(self, application: web.Application) -> None:
+        await self._media_converter.start()
+
+    async def _close_converter(self, application: web.Application) -> None:
+        await self._media_converter.close()
+        if self._market_advisor is not None:
+            await self._market_advisor.close()
+
+    async def _convert_media(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        try:
+            raw = request.headers.get("X-Conversion-Options", "")
+            if len(raw) > 3000:
+                raise ValueError("Слишком длинные параметры.")
+            options = json.loads(unquote(raw, errors="strict"))
+            if not isinstance(options, dict) or set(options) - {
+                "mode",
+                "format",
+                "resolution",
+                "bitrate",
+                "file_name",
+            }:
+                raise ValueError("Некорректные параметры.")
+            mode, extension = options.get("mode"), options.get("format")
+            resolution, bitrate = options.get("resolution", "720"), options.get(
+                "bitrate", 192
+            )
+            name = options.get("file_name", "файл")
+            if (
+                not all(
+                    isinstance(value, str)
+                    for value in (mode, extension, resolution, name)
+                )
+                or len(name) > 160
+            ):
+                raise ValueError("Проверь параметры файла.")
+            mode, extension = cast(str, mode), cast(str, extension)
+            validate_options(mode, extension, resolution, bitrate)
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(
+                text="Выбери файл и поддерживаемый формат."
+            ) from error
+        if request.content_length is not None and request.content_length > MAX_INPUT:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_INPUT,
+                actual_size=request.content_length,
+                text="Файл должен быть до 100 МБ.",
+            )
+
+        async def read_file() -> bytes:
+            return await request.clone(client_max_size=MAX_INPUT + 1).read()
+
+        try:
+            job = await self._media_converter.convert(
+                user.id,
+                read_file,
+                name=name,
+                mode=mode,
+                extension=extension,
+                resolution=resolution,
+                bitrate=bitrate,
+            )
+        except ConversionBusyError as error:
+            raise web.HTTPTooManyRequests(text=str(error)) from error
+        except (ConversionError, ValueError) as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        prefix = "/converted-media/" + job.token
+        return web.json_response(
+            {
+                "token": job.token,
+                "name": job.name,
+                "format": job.extension,
+                "mode": mode,
+                "bytes": job.size,
+                "duration": job.duration,
+                "expires_in": 900,
+                "download_url": prefix + "/download",
+                "preview_url": prefix + "/preview",
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _delete_conversion(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if not await self._media_converter.remove(request.match_info["token"], user.id):
+            raise web.HTTPNotFound(text="Результат уже удалён.")
+        return web.json_response(
+            {"deleted": True}, headers={"Cache-Control": "no-store"}
+        )
+
+    async def _conversion_file(self, request: web.Request) -> web.FileResponse:
+        job = self._media_converter.get(request.match_info["token"])
+        kind = request.match_info["kind"]
+        if job is None or kind not in {"download", "preview"}:
+            raise web.HTTPNotFound(
+                text="Результат устарел. Преобразуй файл ещё раз.",
+                headers={"Cache-Control": "no-store"},
+            )
+        path = job.path if kind == "download" else job.preview
+        disposition = (
+            "attachment; filename*=UTF-8''" + quote(job.name)
+            if kind == "download"
+            else "inline"
+        )
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": MIME_TYPES[path.suffix[1:]],
+                "Content-Disposition": disposition,
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
+        )
+
+    @web.middleware
+    async def _llm_scope(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        user_id = (
+            self._authenticate(request).id if request.path.startswith("/api/") else None
+        )
+        with llm_user(user_id):
+            try:
+                return await handler(request)
+            except LlmBudgetError as error:
+                raise web.HTTPTooManyRequests(
+                    text=str(error), headers={"Cache-Control": "no-store"}
+                ) from error
+
+    async def _get_usage(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if self._llm_usage is None:
+            raise web.HTTPServiceUnavailable(text="Учёт запросов сейчас недоступен")
+        return web.json_response(
+            await self._llm_usage.get(user.id), headers={"Cache-Control": "no-store"}
+        )
 
     async def start(self) -> None:
         """Запустить HTTP-сервер."""
         if self._runner is not None:
             return
-        runner = web.AppRunner(self.application())
+        runner = web.AppRunner(self.application(), access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, self._host, self._port)
         try:
@@ -206,11 +396,22 @@ class MiniAppServer:
             headers={
                 "Cache-Control": "no-store",
                 "Content-Security-Policy": (
-                    "default-src 'self'; script-src 'self' https://telegram.org "
-                    "'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-                    "connect-src 'self'; img-src 'self' data: blob: https:"
+                    "default-src 'self'; script-src 'self' https://telegram.org; "
+                    "style-src 'self' 'unsafe-inline'; "
+                    "connect-src 'self'; img-src 'self' data: blob: https:; "
+                    "object-src 'none'; base-uri 'none'"
                 ),
             },
+        )
+
+    async def _javascript(self, request: web.Request) -> web.Response:
+        del request
+        return web.Response(
+            text=files("protogen_delta.miniapp.static")
+            .joinpath("app.js")
+            .read_text(encoding="utf-8"),
+            content_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
         )
 
     async def _health(self, request: web.Request) -> web.Response:
@@ -219,6 +420,16 @@ class MiniAppServer:
             return web.json_response({"ok": True})
         state = self._runtime_health.snapshot()
         return web.json_response(state, status=200 if state["ok"] else 503)
+
+    async def _market_javascript(self, request: web.Request) -> web.Response:
+        """Отдать собственный скрипт без ключей и внешних библиотек графика."""
+        return web.Response(
+            text=files("protogen_delta.miniapp.static")
+            .joinpath("markets.js")
+            .read_text(encoding="utf-8"),
+            content_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+        )
 
     def _authenticate(self, request: web.Request) -> MiniAppUser:
         init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -258,6 +469,7 @@ class MiniAppServer:
             "roleplay_preferences",
             "roleplay_boundaries",
             "roleplay_stopword",
+            "roleplay_allow_profanity",
         }
         if set(payload) - allowed:
             raise web.HTTPBadRequest(text="Переданы неизвестные настройки")
@@ -275,6 +487,11 @@ class MiniAppServer:
         ):
             raise web.HTTPBadRequest(text="Некорректный возрастной режим")
         roleplay_active = payload.get("roleplay_active")
+        allow_profanity = payload.get("roleplay_allow_profanity")
+        if "roleplay_allow_profanity" in payload and type(allow_profanity) is not bool:
+            raise web.HTTPBadRequest(
+                text="Настройка мата должна быть включена или выключена."
+            )
         if roleplay_active is not None and type(roleplay_active) is not bool:
             raise web.HTTPBadRequest(text="Некорректный RP-режим")
         configuration = payload.get("roleplay_configuration")
@@ -326,6 +543,8 @@ class MiniAppServer:
                     text="Персонаж уже изменился. Открой панель заново."
                 )
             previous_mode = state.content_mode
+            if allow_profanity is not None:
+                state.roleplay_allow_profanity = allow_profanity
             if stopword is not None:
                 state.roleplay_stopword = stopword
             if content_mode is not None:
@@ -372,6 +591,7 @@ class MiniAppServer:
             state.roleplay_fetishes = ()
             state.roleplay_preferences = ""
             state.roleplay_boundaries = ""
+            state.roleplay_allow_profanity = False
             state.emotions.arousal = 0.0
             response = self._profile(state, user)
         return web.json_response(response, headers={"Cache-Control": "no-store"})
@@ -397,6 +617,26 @@ class MiniAppServer:
     ) -> web.Response:
         """Принять один файл только от подписанного владельца профиля."""
         user = self._authenticate(request)
+        if self._input_operations is None:
+            return await self._read_appearance_upload(request, user, target)
+        async with self._input_operations.receive(user.id) as ticket:
+            if not self._input_operations.start_memory(ticket):
+                raise web.HTTPConflict(
+                    text="Память была очищена; загрузи картинку заново."
+                )
+            try:
+                return await self._read_appearance_upload(request, user, target)
+            except asyncio.CancelledError:
+                if not self._input_operations.is_current(ticket):
+                    raise web.HTTPConflict(
+                        text="Память была очищена; загрузи картинку заново."
+                    ) from None
+                raise
+
+    async def _read_appearance_upload(
+        self, request: web.Request, user: MiniAppUser, target: Literal["delta", "user"]
+    ) -> web.Response:
+        """Удерживать регистрацию у сброса с начала чтения до сохранения результата."""
         if self._response_engine is None:
             raise web.HTTPServiceUnavailable(text="Анализ облика сейчас недоступен.")
         options: dict[str, Any] = {}
@@ -584,7 +824,7 @@ class MiniAppServer:
                     or set(payload)
                     != {"profile", "expected_appearance", "expected_profile"}
                     or not isinstance(payload["expected_appearance"], str)
-                    or not 1 <= len(payload["expected_appearance"]) <= 2000
+                    or len(payload["expected_appearance"]) > 2000
                 ):
                     raise ValueError("Нужны профиль и исходная версия облика.")
                 await self._response_engine.set_delta_appearance_profile(
@@ -774,6 +1014,137 @@ class MiniAppServer:
             if acquired:
                 self._translation_export_slots.release()
 
+    async def _inspect_archive(self, request: web.Request) -> web.Response:
+        user = self._authenticate(request)
+        if user.id in self._archive_pending or not self._archive_limiter.allow(user.id):
+            raise web.HTTPTooManyRequests(
+                text="Архив уже обрабатывается или запросы идут слишком часто."
+            )
+        try:
+            raw = request.headers.get("X-Archive-Options", "")
+            if len(raw) > 7500:
+                raise ValueError("Слишком длинные параметры архива.")
+            options = json.loads(unquote(raw, errors="strict"))
+            if not isinstance(options, dict) or set(options) != {
+                "file_name",
+                "question",
+                "analyze",
+            }:
+                raise ValueError("Некорректные параметры архива.")
+            name, question, analyze = (
+                options["file_name"],
+                options["question"],
+                options["analyze"],
+            )
+            if (
+                not isinstance(name, str)
+                or not 1 <= len(name) <= 160
+                or not name.lower().endswith(".zip")
+                or not isinstance(question, str)
+                or len(question) > 2000
+                or type(analyze) is not bool
+            ):
+                raise ValueError("Нужен ZIP и вопрос до 2000 символов.")
+            if analyze and self._response_engine is None:
+                raise web.HTTPServiceUnavailable(
+                    text="Разбор с Дельтой сейчас недоступен."
+                )
+        except (ValueError, UnicodeError, RecursionError) as error:
+            raise web.HTTPBadRequest(text="Проверь ZIP и параметры запроса.") from error
+        if (
+            request.content_length is not None
+            and request.content_length > MAX_ZIP_BYTES
+        ):
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_ZIP_BYTES,
+                actual_size=request.content_length,
+                text="ZIP должен быть до 50 МБ.",
+            )
+        self._archive_pending.add(user.id)
+        try:
+            with self._archive_metrics.measure(queued=True) as measurement:
+                if analyze and self._input_operations is not None:
+                    async with self._input_operations.receive(user.id) as ticket:
+                        if not self._input_operations.start_memory(ticket):
+                            raise web.HTTPConflict(
+                                text="Память была очищена; загрузи архив заново."
+                            )
+                        return await self._read_archive(
+                            request, user, name, question, analyze, measurement
+                        )
+                return await self._read_archive(
+                    request, user, name, question, analyze, measurement
+                )
+        finally:
+            self._archive_pending.discard(user.id)
+
+    async def _read_archive(
+        self,
+        request: web.Request,
+        user: MiniAppUser,
+        name: str,
+        question: str,
+        analyze: bool,
+        measurement: Measurement,
+    ) -> web.Response:
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(self._archive_slots.acquire(), 0.1)
+                acquired = True
+                measurement.start()
+            except TimeoutError as error:
+                raise web.HTTPTooManyRequests(
+                    text="Обработка архивов занята. Попробуй немного позже."
+                ) from error
+            async with asyncio.timeout(90):
+                data = await request.clone(client_max_size=MAX_ZIP_BYTES + 1).read()
+            if len(data) > MAX_ZIP_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=MAX_ZIP_BYTES,
+                    actual_size=len(data),
+                    text="ZIP должен быть до 50 МБ.",
+                )
+            document = await self._native_work.run(extract_zip, data)
+            reply = ""
+            if analyze:
+                assert self._response_engine is not None
+                token = current_sender.set(
+                    Sender(user.id, user.first_name, user.username or "")
+                )
+                try:
+                    reply = await self._response_engine.respond(
+                        user.id,
+                        question.strip()
+                        or "Покажи, что есть в архиве, и коротко разбери его содержимое.",
+                        attachment_name=name,
+                        attachment_text=document.text
+                        + (
+                            "\n[ZIP прочитан частично. Не считай пропущенные файлы прочитанными.]"
+                            if document.truncated
+                            else ""
+                        ),
+                    )
+                finally:
+                    current_sender.reset(token)
+            return web.json_response(
+                {
+                    "text": document.text,
+                    "reply": reply,
+                    "truncated": document.truncated,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        except (DocumentError, NativeWorkError) as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Загрузка ZIP заняла слишком много времени."
+            ) from error
+        finally:
+            if acquired:
+                self._archive_slots.release()
+
     async def _run_tool(self, request: web.Request) -> web.Response:
         """Авторизовать владельца до разбора тела и запуска инструмента."""
         user = self._authenticate(request)
@@ -815,6 +1186,10 @@ class MiniAppServer:
             raise web.HTTPBadRequest(text=str(error)) from error
         except TelegramAPIError as error:
             raise web.HTTPBadGateway(
-                text="Telegram не смог определить ID. Для приватных чатов используй выбор в Telegram."
+                text="Telegram не смог получить сведения. Попробуй позже или используй выбор в Telegram."
+            ) from error
+        except TimeoutError as error:
+            raise web.HTTPGatewayTimeout(
+                text="Инструмент не ответил вовремя. Попробуй ещё раз."
             ) from error
         return web.json_response(result, headers={"Cache-Control": "no-store"})

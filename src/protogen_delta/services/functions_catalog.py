@@ -3,6 +3,7 @@
 from protogen_delta.config.settings import Settings
 from protogen_delta.core.telegram_commands import commands_for_mode
 from protogen_delta.core.user_state import ContentMode
+from protogen_delta.services.privacy_notice import DATA_NOTICE
 
 
 def functions_text(
@@ -26,8 +27,12 @@ def functions_text(
         "adult": "выбрать возрастной режим общения и доступный рейтинг артов",
         "id": "твой Telegram ID; ответом на сообщение — ID отправителя; /id @username — доступной группы или канала",
         "memory": "сохранённый профиль фактов; /memory forget <поле> — удалить поле (в личке)",
+        "calc": "арифметика без модели: /calc (25+17)*3; десятичная запятая поддерживается",
+        "remind": "в личке: /remind через 1 час выпить воду; время — московское",
+        "reminders": "личный список; /reminders cancel 12 — отменить своё напоминание",
         "reset": "полностью сбросить диалог и память (с подтверждением)",
         "help": "помощь и этот же список функций",
+        "privacy": "как передаются, сохраняются и удаляются данные",
     }
     if settings is not None and not settings.saucenao_api_key:
         descriptions["source"] = "поиск источника арта; сейчас сервис не подключён"
@@ -52,10 +57,11 @@ def functions_text(
             "• PDF, DOCX, XLSX, текст и код до 20 МБ — приложи документ для разбора.",
             "• Голосовые и аудиофайлы — распознавание речи.",
             "• RP — начни сцену или действие в *звёздочках*; /rp off завершает её.",
+            "• Напоминания в личке — например, «Напомни завтра в 18:30 позвонить». Сохраняются после перезапуска.",
         )
     )
     if settings is not None:
-        if settings.brave_search_api_key:
+        if settings.web_search_available:
             lines.append("• Поиск в интернете с источниками и чтение публичных ссылок.")
         else:
             lines.append(
@@ -70,4 +76,4 @@ def functions_text(
                 "• «RP и функции» — облик по картинке или тексту, "
                 "исправление описания и вида, характер облика Дельты, свой персонаж по арту."
             )
-    return "\n".join(lines)
+    return "\n".join([*lines, "", DATA_NOTICE])

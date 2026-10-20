@@ -7,10 +7,56 @@ from pathlib import Path
 
 import av
 
+from protogen_delta.services.media_remux import remux_download
+
 MAX_UPLOAD_BYTES = 49_000_000
 _TARGET_BYTES = 43_000_000
 _MAX_INPUT_BYTES = 100 * 1024 * 1024
 _MAX_SECONDS = 600
+
+
+def prepare_download(source: Path, target: Path) -> bool:
+    """Проверить содержимое, пересобрать MP4 либо перекодировать несовместимые кодеки."""
+    if source == target or not 0 < source.stat().st_size <= _MAX_INPUT_BYTES:
+        raise ValueError("compression_input_size")
+    if source.stat().st_size > MAX_UPLOAD_BYTES:
+        compress_download(source, target)
+        return True
+    with av.open(str(source), options={"protocol_whitelist": "file"}) as incoming:
+        if not incoming.streams.video:
+            raise ValueError("compression_no_video")
+        video = incoming.streams.video[0]
+        if not 0 < video.width <= 4096 or not 0 < video.height <= 4096:
+            raise ValueError("compression_dimensions")
+        duration = (incoming.duration or 0) / av.time_base
+        if not math.isfinite(duration) or not 0 < duration <= _MAX_SECONDS:
+            raise ValueError("compression_duration")
+        video.codec_context.thread_count = 2
+        video.thread_type = "SLICE"
+        frame = next(incoming.decode(video=0), None)
+        if frame is None:
+            raise ValueError("compression_no_frames")
+        compatible = (
+            bool({"mp4", "mpegts"} & set(incoming.format.name.split(",")))
+            and video.codec_context.name == "h264"
+            and frame.format.name == "yuv420p"
+            and len(incoming.streams.audio) <= 1
+            and all(s.codec_context.name == "aac" for s in incoming.streams.audio)
+        )
+    if compatible:
+        remux_download(source, target, MAX_UPLOAD_BYTES)
+        # HLS may be saved by yt-dlp with an MP4 suffix while containing MPEG-TS.
+        # Probe the completed output, never trust that suffix or extractor metadata.
+        with av.open(str(target), options={"protocol_whitelist": "file"}) as output:
+            if "mp4" not in output.format.name.split(","):
+                raise ValueError("remux_format")
+            if not output.duration or output.duration <= 0:
+                raise ValueError("remux_duration")
+            if next(output.decode(video=0), None) is None:
+                raise ValueError("remux_no_frames")
+        return False
+    compress_download(source, target)
+    return True
 
 
 def limit_compression_process() -> None:

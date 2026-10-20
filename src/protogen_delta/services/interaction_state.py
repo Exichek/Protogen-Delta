@@ -1,5 +1,7 @@
 """Накопление эмоционального состояния и отношений после взаимодействия."""
 
+import re
+
 from protogen_delta.core.user_state import UserState
 from protogen_delta.services.insults import InsultType
 from protogen_delta.services.mood import MoodType
@@ -10,6 +12,9 @@ def apply_interaction_effects(
     *,
     mood: MoodType | None,
     insult_type: InsultType,
+    text: str = "",
+    at: float | None = None,
+    creator: bool = False,
 ) -> None:
     """Применить накопительные последствия сообщения."""
     user_state.relationship.adjust(
@@ -66,3 +71,51 @@ def apply_interaction_effects(
             affection=-0.02,
             resentment=0.05,
         )
+
+    if at is not None:
+        # Цитаты и код не становятся сообщениями о результате или личном настроении.
+        plain = re.sub(
+            r"```.*?```|`[^`]*`|«[^»]*»|“[^”]*”|\"[^\"]*\"|(?m:^\s*>[^\n]*)",
+            " ",
+            text,
+            flags=re.S,
+        ).casefold()
+        kinds: list[str] = []
+        if insult_type in {"direct", "question"} or mood == "angry":
+            kinds.append("conflict")
+        else:
+            if mood == "sweet" or re.search(
+                r"\b(?:спасибо|благодарю|молодец)\b", plain
+            ):
+                kinds.append("support")
+            if mood == "playful":
+                kinds.append("play")
+            if re.search(
+                r"\b(?:получилось|заработало|исправил|исправили|сделал|готово)\b|тесты.{0,30}прошли",
+                plain,
+            ):
+                kinds.append("progress")
+            if "?" in plain or re.search(
+                r"\b(?:объясни|проверь|интересно|почему|как работает)\b", plain
+            ):
+                kinds.append("question")
+            if re.search(
+                r"\b(?:мне грустно|я расстроен|я расстроился|я расстроилась)\b", plain
+            ):
+                kinds.append("sadness")
+            if re.search(r"\b(?:я тревожусь|я переживаю|мне страшно|я боюсь)\b", plain):
+                kinds.append("worry")
+        # Фрагмент является данными пользователя, а не доказанным событием или инструкцией.
+        snippet = " ".join(plain.split())[:160]
+        if mood == "horny" or re.search(
+            r"(?:sk-[a-z0-9_-]{8,}|\d{6,12}:[a-z0-9_-]{20,}|"
+            r"парол|password|токен|api[_ -]?key|secret|секрет|фетиш|секс|минет|дроч)",
+            snippet,
+            re.I,
+        ):
+            snippet = ""
+        positive = user_state.emotions.memory.observe(
+            tuple(kinds), at, creator=creator, source=snippet
+        )
+        if creator and positive:
+            user_state.relationship.adjust(trust=0.003, affection=0.005)

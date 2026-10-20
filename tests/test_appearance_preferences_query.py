@@ -101,7 +101,7 @@ def test_query_reads_saved_text_without_model_or_scene_changes(active: bool) -> 
 @pytest.mark.parametrize(
     ("appearance", "profile", "expected"),
     [
-        ("", AppearanceProfile(fetishes="orphan").encode(), "не выбран"),
+        ("", AppearanceProfile(fetishes="orphan").encode(), "ничего не записано"),
         ("Облик", "", "ничего не записано"),
         ("Облик", "[]", "ничего не записано"),
         (

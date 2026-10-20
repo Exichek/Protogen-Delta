@@ -1,7 +1,8 @@
 """Настройки приложения и загрузка переменных окружения."""
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
 
@@ -23,11 +24,16 @@ class Settings:
     deepseek_model: str = "deepseek-flash"
     llm_provider: str = "deepseek"
     llm_disable_thinking: bool = True
+    llm_adaptive_thinking: bool = True
     mini_app_url: str | None = None
     mini_app_server_enabled: bool = False
     mini_app_host: str = "127.0.0.1"
     mini_app_port: int = 8080
     mini_app_auth_max_age_seconds: int = 3600
+    message_reactions_enabled: bool = True
+    reply_supplements_enabled: bool = True
+    message_reaction_chance: float = 0.35
+    message_reaction_cooldown_seconds: float = 120.0
     sticker_reaction_chance: float = 0.35
     sticker_cooldown_seconds: float = 180.0
     sticker_min_replies: int = 3
@@ -39,6 +45,7 @@ class Settings:
     audio_model: str | None = None
     audio_input_data_url: bool = False
     music_audd_api_token: str | None = None
+    music_recognition_provider: str = "shazam"
     saucenao_api_key: str | None = None
     telegram_proxy_url: str | None = None
     youtube_cookies_file: Path | None = None
@@ -46,25 +53,68 @@ class Settings:
     data_dir: Path = Path("data")
     admin_ids: frozenset[int] = frozenset()
     creator_id: int | None = None
+    creator_ids: frozenset[int] = frozenset()
+    code_review_user_ids: frozenset[int] = frozenset()
+    favorites_user_ids: frozenset[int] = frozenset()
     brave_search_api_key: str | None = None
+    deepseek_search_enabled: bool = True
+    deepseek_search_api_key: str | None = field(default=None, repr=False)
+    web_api_daily_limit: int = 200
+    brave_monthly_search_limit: int = 1000
+    alpaca_api_key: str | None = field(default=None, repr=False)
+    alpaca_secret_key: str | None = field(default=None, repr=False)
     e621_user_agent: str = DEFAULT_E621_USER_AGENT
     e621_request_interval_seconds: float = 1.0
     rate_limit_seconds: float = 2.0
+    llm_daily_request_limit: int = 300
+    llm_global_daily_request_limit: int = 3000
+    llm_budget_alert_user_id: int | None = field(default=None, repr=False)
+    llm_daily_request_limit_overrides: dict[int, int] = field(
+        default_factory=dict, repr=False
+    )
     rate_limit_retention_seconds: float = 300.0
     conversation_history_limit: int = 8
     conversation_history_ttl_seconds: float = 604800.0
+    dialogue_archive_user_ids: frozenset[int] = frozenset()
+    dialogue_shared_groups: tuple[frozenset[int], ...] = ()
     user_state_retention_seconds: float = 86400.0
-    proactive_check_seconds: float = 300.0
-    proactive_idle_seconds: float = 14400.0
-    proactive_cooldown_seconds: float = 86400.0
+    proactive_check_seconds: float = 30.0
+    proactive_lively_enabled: bool = True
+    proactive_idle_seconds: float = 5400.0
+    proactive_idle_max_seconds: float = 10800.0
+    proactive_cooldown_seconds: float = 72000.0
     whisper_model_size: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
 
     @property
+    def web_search_api_key(self) -> str | None:
+        """Не отправлять ключ стороннего совместимого LLM в поисковый API DeepSeek."""
+        if not self.deepseek_search_enabled:
+            return None
+        if self.deepseek_search_api_key:
+            return self.deepseek_search_api_key
+        if self.llm_provider == "deepseek" and self.deepseek_base_url.rstrip("/") in {
+            "https://api.deepseek.com",
+            "https://api.deepseek.com/v1",
+        }:
+            return self.deepseek_api_key
+        return None
+
+    @property
+    def web_search_available(self) -> bool:
+        return bool(self.web_search_api_key or self.brave_search_api_key)
+
+    @property
     def llm_api_key(self) -> str:
         """Вернуть ключ выбранного OpenAI-совместимого LLM-провайдера."""
         return self.deepseek_api_key
+
+    @property
+    def recognized_creator_ids(self) -> frozenset[int]:
+        return self.creator_ids | (
+            frozenset({self.creator_id}) if self.creator_id is not None else frozenset()
+        )
 
     @property
     def llm_base_url(self) -> str:
@@ -92,6 +142,43 @@ def _parse_admin_ids(value: str) -> frozenset[int]:
         ) from error
 
 
+def _parse_llm_limit_overrides(value: str) -> dict[int, int]:
+    """Загрузить закрытую карту квот без раскрытия ID в сообщении об ошибке."""
+    name = "LLM_DAILY_REQUEST_LIMIT_OVERRIDES"
+
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        """Не принимать неоднозначное повторное значение одного ключа."""
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(name)
+            result[key] = item
+        return result
+
+    try:
+        raw = json.loads(value or "{}", object_pairs_hook=unique_pairs)
+        if not isinstance(raw, dict):
+            raise ValueError(name)
+        result: dict[int, int] = {}
+        for owner, limit in raw.items():
+            if (
+                not owner.isascii()
+                or not owner.isdecimal()
+                or owner.startswith("0")
+                or not 0 < int(owner) < 2**63
+                or type(limit) is not int
+                or not 0 < limit < 2**63
+            ):
+                raise ValueError(name)
+            result[int(owner)] = limit
+        return result
+    except ValueError, TypeError:
+        raise ValueError(
+            name
+            + " должен быть JSON-объектом с уникальными положительными ID и целыми квотами"
+        ) from None
+
+
 def _parse_positive_int(
     value: str,
     name: str,
@@ -106,6 +193,37 @@ def _parse_positive_int(
         raise ValueError(f"{name} должен быть больше нуля")
 
     return result
+
+
+def _parse_archive_ids(
+    value: str, name: str = "DIALOGUE_ARCHIVE_USER_IDS"
+) -> frozenset[int]:
+    """Архивировать только явно выбранные личные аккаунты."""
+    ids = frozenset(
+        _parse_positive_int(item.strip(), name)
+        for item in value.split(",")
+        if item.strip()
+    )
+    if any(user_id >= 2**63 for user_id in ids):
+        raise ValueError(name + " содержит слишком большой ID")
+    return ids
+
+
+def _parse_dialogue_groups(value: str) -> tuple[frozenset[int], ...]:
+    """Группы через точку с запятой; один аккаунт не входит в две группы."""
+    groups = tuple(
+        _parse_archive_ids(part, "DIALOGUE_SHARED_GROUPS")
+        for part in value.split(";")
+        if part.strip()
+    )
+    seen: set[int] = set()
+    for group in groups:
+        if len(group) < 2 or seen.intersection(group):
+            raise ValueError(
+                "DIALOGUE_SHARED_GROUPS: нужны непересекающиеся группы от двух ID"
+            )
+        seen.update(group)
+    return groups
 
 
 def _parse_non_negative_float(
@@ -156,6 +274,9 @@ def load_settings() -> Settings:
 
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     llm_provider = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
+    music_provider = os.getenv("MUSIC_RECOGNITION_PROVIDER", "shazam").strip().lower()
+    if music_provider not in {"shazam", "audd", "off"}:
+        raise ValueError("MUSIC_RECOGNITION_PROVIDER должен быть shazam, audd или off")
     if llm_provider not in {"deepseek", "openai-compatible"}:
         raise ValueError("LLM_PROVIDER должен быть deepseek или openai-compatible")
 
@@ -176,6 +297,9 @@ def load_settings() -> Settings:
             "true" if llm_provider == "deepseek" else "false",
         ),
         "LLM_DISABLE_THINKING",
+    )
+    llm_adaptive_thinking = _parse_bool(
+        os.getenv("LLM_ADAPTIVE_THINKING", "true"), "LLM_ADAPTIVE_THINKING"
     )
 
     telegram_proxy_url = os.getenv(
@@ -268,18 +392,40 @@ def load_settings() -> Settings:
     )
 
     proactive_check_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_CHECK_SECONDS", "300.0"), "PROACTIVE_CHECK_SECONDS"
+        os.getenv("PROACTIVE_CHECK_SECONDS", "30.0"), "PROACTIVE_CHECK_SECONDS"
     )
     proactive_idle_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_IDLE_SECONDS", "14400.0"), "PROACTIVE_IDLE_SECONDS"
+        os.getenv("PROACTIVE_IDLE_SECONDS", "5400.0"), "PROACTIVE_IDLE_SECONDS"
     )
+    proactive_idle_max_seconds = _parse_positive_float(
+        os.getenv(
+            "PROACTIVE_IDLE_MAX_SECONDS", str(max(10800.0, proactive_idle_seconds))
+        ),
+        "PROACTIVE_IDLE_MAX_SECONDS",
+    )
+    if proactive_idle_max_seconds < proactive_idle_seconds:
+        raise ValueError(
+            "PROACTIVE_IDLE_MAX_SECONDS не может быть меньше PROACTIVE_IDLE_SECONDS"
+        )
     proactive_cooldown_seconds = _parse_positive_float(
-        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "86400.0"),
+        os.getenv("PROACTIVE_COOLDOWN_SECONDS", "72000.0"),
         "PROACTIVE_COOLDOWN_SECONDS",
     )
     e621_request_interval_seconds = _parse_non_negative_float(
         os.getenv("E621_REQUEST_INTERVAL_SECONDS", "1.0"),
         "E621_REQUEST_INTERVAL_SECONDS",
+    )
+    message_reactions_enabled = _parse_bool(
+        os.getenv("MESSAGE_REACTIONS_ENABLED", "true"), "MESSAGE_REACTIONS_ENABLED"
+    )
+    message_reaction_chance = _parse_non_negative_float(
+        os.getenv("MESSAGE_REACTION_CHANCE", "0.35"), "MESSAGE_REACTION_CHANCE"
+    )
+    if message_reaction_chance > 1:
+        raise ValueError("MESSAGE_REACTION_CHANCE не может быть больше 1")
+    message_reaction_cooldown_seconds = _parse_non_negative_float(
+        os.getenv("MESSAGE_REACTION_COOLDOWN_SECONDS", "120"),
+        "MESSAGE_REACTION_COOLDOWN_SECONDS",
     )
     sticker_reaction_chance = _parse_non_negative_float(
         os.getenv("STICKER_REACTION_CHANCE", "0.35"),
@@ -335,11 +481,18 @@ def load_settings() -> Settings:
         art_chat_id=art_chat_id,
         llm_provider=llm_provider,
         llm_disable_thinking=llm_disable_thinking,
+        llm_adaptive_thinking=llm_adaptive_thinking,
         mini_app_url=mini_app_url or None,
         mini_app_server_enabled=mini_app_server_enabled,
         mini_app_host=mini_app_host,
         mini_app_port=mini_app_port,
         mini_app_auth_max_age_seconds=mini_app_auth_max_age_seconds,
+        message_reactions_enabled=message_reactions_enabled,
+        reply_supplements_enabled=_parse_bool(
+            os.getenv("REPLY_SUPPLEMENTS_ENABLED", "true"), "REPLY_SUPPLEMENTS_ENABLED"
+        ),
+        message_reaction_chance=message_reaction_chance,
+        message_reaction_cooldown_seconds=message_reaction_cooldown_seconds,
         sticker_reaction_chance=sticker_reaction_chance,
         sticker_cooldown_seconds=sticker_cooldown_seconds,
         sticker_min_replies=sticker_min_replies,
@@ -357,6 +510,7 @@ def load_settings() -> Settings:
             os.getenv("AUDIO_INPUT_DATA_URL", "false"), "AUDIO_INPUT_DATA_URL"
         ),
         music_audd_api_token=os.getenv("MUSIC_AUDD_API_TOKEN", "").strip() or None,
+        music_recognition_provider=music_provider,
         saucenao_api_key=os.getenv("SAUCENAO_API_KEY", "").strip() or None,
         deepseek_model=deepseek_model,
         deepseek_base_url=deepseek_base_url,
@@ -383,7 +537,28 @@ def load_settings() -> Settings:
             )
         ),
         creator_id=creator_id,
+        creator_ids=_parse_archive_ids(os.getenv("CREATOR_IDS", ""), "CREATOR_IDS"),
+        favorites_user_ids=_parse_archive_ids(
+            os.getenv("FAVORITES_USER_IDS", ""), "FAVORITES_USER_IDS"
+        ),
+        code_review_user_ids=_parse_archive_ids(
+            os.getenv("CODE_REVIEW_USER_IDS", ""), "CODE_REVIEW_USER_IDS"
+        ),
         brave_search_api_key=brave_search_api_key or None,
+        deepseek_search_enabled=_parse_bool(
+            os.getenv("DEEPSEEK_SEARCH_ENABLED", "true"), "DEEPSEEK_SEARCH_ENABLED"
+        ),
+        deepseek_search_api_key=os.getenv("DEEPSEEK_SEARCH_API_KEY", "").strip()
+        or None,
+        web_api_daily_limit=_parse_positive_int(
+            os.getenv("WEB_API_DAILY_LIMIT", "200"), "WEB_API_DAILY_LIMIT"
+        ),
+        brave_monthly_search_limit=_parse_positive_int(
+            os.getenv("BRAVE_MONTHLY_SEARCH_LIMIT", "1000"),
+            "BRAVE_MONTHLY_SEARCH_LIMIT",
+        ),
+        alpaca_api_key=os.getenv("ALPACA_API_KEY", "").strip() or None,
+        alpaca_secret_key=os.getenv("ALPACA_SECRET_KEY", "").strip() or None,
         e621_user_agent=(
             os.getenv(
                 "E621_USER_AGENT",
@@ -393,12 +568,39 @@ def load_settings() -> Settings:
         ),
         e621_request_interval_seconds=e621_request_interval_seconds,
         rate_limit_seconds=rate_limit_seconds,
+        llm_daily_request_limit=_parse_positive_int(
+            os.getenv("LLM_DAILY_REQUEST_LIMIT", "300"), "LLM_DAILY_REQUEST_LIMIT"
+        ),
+        llm_global_daily_request_limit=_parse_positive_int(
+            os.getenv("LLM_GLOBAL_DAILY_REQUEST_LIMIT", "3000"),
+            "LLM_GLOBAL_DAILY_REQUEST_LIMIT",
+        ),
+        llm_budget_alert_user_id=(
+            _parse_positive_int(
+                os.environ["LLM_BUDGET_ALERT_USER_ID"], "LLM_BUDGET_ALERT_USER_ID"
+            )
+            if os.getenv("LLM_BUDGET_ALERT_USER_ID", "").strip()
+            else None
+        ),
+        llm_daily_request_limit_overrides=_parse_llm_limit_overrides(
+            os.getenv("LLM_DAILY_REQUEST_LIMIT_OVERRIDES", "{}")
+        ),
         rate_limit_retention_seconds=rate_limit_retention_seconds,
         conversation_history_limit=conversation_history_limit,
         conversation_history_ttl_seconds=conversation_history_ttl_seconds,
+        dialogue_archive_user_ids=_parse_archive_ids(
+            os.getenv("DIALOGUE_ARCHIVE_USER_IDS", "")
+        ),
+        dialogue_shared_groups=_parse_dialogue_groups(
+            os.getenv("DIALOGUE_SHARED_GROUPS", "")
+        ),
         user_state_retention_seconds=user_state_retention_seconds,
         proactive_check_seconds=proactive_check_seconds,
+        proactive_lively_enabled=_parse_bool(
+            os.getenv("PROACTIVE_LIVELY_ENABLED", "true"), "PROACTIVE_LIVELY_ENABLED"
+        ),
         proactive_idle_seconds=proactive_idle_seconds,
+        proactive_idle_max_seconds=proactive_idle_max_seconds,
         proactive_cooldown_seconds=proactive_cooldown_seconds,
         whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "small").strip() or "small",
         whisper_device=os.getenv("WHISPER_DEVICE", "cpu").strip() or "cpu",

@@ -11,6 +11,11 @@ import pytest
 from protogen_delta.core.user_state import UserStateStore
 from protogen_delta.maintenance import copy_snapshot, main
 from protogen_delta.repositories.art_sources import ArtSourcesRepository
+from protogen_delta.repositories.delivery_ledger import DeliveryLedgerRepository
+from protogen_delta.repositories.dialogue_archive import (
+    DialogueArchiveRepository,
+    DialogueMessage,
+)
 from protogen_delta.repositories.e621_history import E621HistoryRepository
 from protogen_delta.repositories.images import ImagesRepository
 from protogen_delta.repositories.memories import MemoriesRepository
@@ -22,6 +27,8 @@ from protogen_delta.repositories.users import UsersRepository
 
 
 def seed(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "users.json").write_text('{"USERS": [123]}', encoding="utf-8")
     UsersRepository(path).add(123)
     ImagesRepository(path).add("test-image")
     states = UserStateStore(persistence=UserStateRepository(path))
@@ -44,6 +51,9 @@ def seed(path: Path) -> None:
 def test_backup_restore_and_restart(tmp_path: Path) -> None:
     source, backup, restored = (tmp_path / name for name in ("data", "backup", "new"))
     seed(source)
+    ledger = DeliveryLedgerRepository(source)
+    asyncio.run(ledger.claim(123, "telegram:private:1"))
+    asyncio.run(ledger.mark("telegram:private:1", "answered", 1))
     asyncio.run(
         UserFactsRepository(source).apply(
             123, [FactChange("name", "replace", "Exi", "Зови меня Exi")], 20.0
@@ -54,10 +64,18 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     )
     ArtSourcesRepository(source, -100).change(-200, add=True)
     asyncio.run(E621HistoryRepository(source).mark_seen(123, 456, 20.0))
+    asyncio.run(
+        DialogueArchiveRepository(source).save(
+            123, DialogueMessage("old", "user", "Проект RESTORED_ARCHIVE_91", 20)
+        )
+    )
     copy_snapshot(source, backup)
     UsersRepository(source).remove(123)
     asyncio.run(UserStateRepository(source).delete(123))
     copy_snapshot(backup, restored)
+    assert not asyncio.run(
+        DeliveryLedgerRepository(restored).claim(123, "telegram:private:1")
+    )
     assert UsersRepository(restored).get_all() == [123]
     assert asyncio.run(UserFactsRepository(restored).all(123))[0].value == "Exi"
     statistics = asyncio.run(UserStatisticsRepository(restored).get(123, 20.0))
@@ -67,6 +85,12 @@ def test_backup_restore_and_restart(tmp_path: Path) -> None:
     assert StickersRepository(restored).get_all()[0].file_unique_id == "sticker-unique"
     assert asyncio.run(E621HistoryRepository(restored).seen_ids(123)) == {456}
     assert asyncio.run(MemoriesRepository(restored).recent(123))[0].text == "старый мем"
+    assert (
+        asyncio.run(
+            DialogueArchiveRepository(restored).search(123, "RESTORED_ARCHIVE_91")
+        )[0].text
+        == "Проект RESTORED_ARCHIVE_91"
+    )
 
     async def check() -> None:
         states = UserStateStore(persistence=UserStateRepository(restored))

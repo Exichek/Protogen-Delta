@@ -258,7 +258,7 @@ def test_appearance_api_rejects_bad_files_without_model(data: bytes) -> None:
             response = await client.post(
                 "/api/profile/appearance",
                 headers={"X-Telegram-Init-Data": _signed_init_data()},
-                data=data,
+                data=BytesIO(data),
             )
             assert response.status == (413 if len(data) > MAX_APPEARANCE_BYTES else 400)
             assert not server._appearance_pending

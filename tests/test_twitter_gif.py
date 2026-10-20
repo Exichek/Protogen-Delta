@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
+import av
 import pytest
 from aiogram.types import Message
 from test_download_compression import _mp4
@@ -83,7 +84,15 @@ def test_real_x_extractor_downloads_gif_without_api_duration(
     assert process.call_args.args[0].get("duration") is None
     assert json.loads((directory / "result.json").read_text("utf-8"))["animation"]
     assert not worker.prepare_upload(directory)
-    assert (directory / "video.mp4").read_bytes() == prepared.read_bytes()
+    with (
+        av.open(str(prepared)) as original,
+        av.open(str(directory / "telegram.mp4")) as result,
+    ):
+        assert not result.streams.audio
+        assert result.duration == original.duration
+        assert [frame.to_ndarray().tobytes() for frame in result.decode(video=0)] == [
+            frame.to_ndarray().tobytes() for frame in original.decode(video=0)
+        ]
 
 
 def test_animation_is_not_inferred_from_missing_duration_or_silent_video() -> None:

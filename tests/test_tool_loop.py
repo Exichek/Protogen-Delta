@@ -14,6 +14,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekService,
     _forced_web_tool,
 )
+from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import Tool, ToolExecutor, ToolRegistry
 
 
@@ -34,6 +35,218 @@ def response(count: int = 0, args: str = "{}") -> SimpleNamespace:
         }
     )
     return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+
+
+@pytest.mark.parametrize("rounds", [0, 3, 4])
+def test_serialized_tool_requests_are_never_returned_as_final_text(
+    monkeypatch: pytest.MonkeyPatch, rounds: int
+) -> None:
+    """Проверить утечку сразу, на последнем шаге и в резервном итоговом запросе."""
+    handler = AsyncMock(return_value={"ok": True})
+    malformed = response()
+    malformed.choices[0].message.content = (
+        '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="test">'
+    )
+    client = Mock()
+    client.chat.completions.create = AsyncMock(
+        side_effect=[*(response(1) for _ in range(rounds)), malformed]
+    )
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)])),
+    )
+    with pytest.raises(DeepSeekAPIError, match="служебная разметка"):
+        asyncio.run(service.chat("system", "question"))
+    assert client.chat.completions.create.await_count == rounds + 1
+    assert handler.await_count == min(rounds, 3)
+    if rounds:
+        messages = client.chat.completions.create.await_args.kwargs["messages"]
+        assert any(
+            "Не запрашивай новые инструменты" in (m.get("content") or "")
+            for m in messages
+        )
+
+
+def test_tool_markup_can_be_explained_as_quoted_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Защита не должна мешать обсуждать уже отправленную служебную разметку."""
+    result = response()
+    result.choices[0].message.content = (
+        "Это некорректный автообзор. Например: ` <｜DSML｜invoke> `\n"
+        "```xml\n<｜DSML｜calls>\n```\nТекст не исполняется."
+    )
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), AsyncMock())])),
+    )
+    assert "некорректный автообзор" in asyncio.run(
+        service.chat("system", "Объясни разметку")
+    )
+
+
+@pytest.mark.parametrize("route", ["no_executor", "disabled", "empty_schema"])
+@pytest.mark.parametrize("quoted", [False, True])
+def test_chat_without_tools_checks_final_markup(
+    monkeypatch: pytest.MonkeyPatch, route: str, quoted: bool
+) -> None:
+    """Неподключённые схемы не должны обходить защиту готового ответа."""
+    markup = '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="test">'
+    text = f"Разберём цитату: `{markup}`" if quoted else markup
+    result = response()
+    result.choices[0].message.content = text
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    handler = AsyncMock()
+    executor = ToolExecutor(ToolRegistry([Tool("test", "test", {}, (), handler)]))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=None if route == "no_executor" else executor,
+    )
+    selected = {"not_registered"} if route == "empty_schema" else set()
+    if quoted:
+        assert (
+            asyncio.run(service.chat("system", "question", tool_names=selected)) == text
+        )
+    else:
+        with pytest.raises(DeepSeekAPIError, match="служебная разметка"):
+            asyncio.run(service.chat("system", "question", tool_names=selected))
+    assert client.chat.completions.create.await_count == 1
+    handler.assert_not_awaited()
+
+
+def test_json_chat_can_extract_tool_markup_as_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Структурированное извлечение цитаты не является готовым вызовом инструмента."""
+    text = json.dumps({"observed_text": "<｜DSML｜calls>"})
+    result = response()
+    result.choices[0].message.content = text
+    client = Mock()
+    client.chat.completions.create = AsyncMock(return_value=result)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService("key", "https://test.local", "test")
+    assert asyncio.run(service.chat("system", "question", json_response=True)) == text
+    assert client.chat.completions.create.await_count == 1
+
+
+def test_model_cannot_execute_registered_tool_outside_selected_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forbidden = AsyncMock(return_value={"secret": "never"})
+    allowed = AsyncMock(return_value={})
+    client = Mock()
+    client.chat.completions.create = AsyncMock(side_effect=[response(1), response()])
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool("test", "forbidden", {}, (), forbidden),
+                    Tool("allowed", "allowed", {}, (), allowed),
+                ]
+            )
+        ),
+    )
+    assert (
+        asyncio.run(service.chat("system", "question", tool_names={"allowed"}))
+        == "Итог"
+    )
+    forbidden.assert_not_awaited()
+    messages = client.chat.completions.create.await_args.kwargs["messages"]
+    assert any("tool_not_allowed" in message.get("content", "") for message in messages)
+
+
+@pytest.mark.parametrize("thinking", [False, True])
+def test_colloquial_information_request_searches_and_reads_but_keeps_scope(
+    monkeypatch: pytest.MonkeyPatch, thinking: bool
+) -> None:
+    """Воспроизвести поиск из скрина, чтение источника и запрет лишнего доступа."""
+    request = (
+        "Так, поиск тебе новый добавили, а ну ка найди мне последнюю инфу "
+        "о Call of duty modern warfare 4"
+    )
+    calls = []
+    for index, (name, arguments) in enumerate(
+        [
+            ("web_search", {"query": "Call of Duty Modern Warfare 4 latest"}),
+            ("fetch_web_page", {"url": "https://example.org/news"}),
+            ("read_source", {"path": "config/settings.py"}),
+        ]
+    ):
+        result = response(1, json.dumps(arguments))
+        call = result.choices[0].message.tool_calls[0]
+        call.id = f"call_{index}"
+        call.function.name = name
+        calls.append(result)
+    search = AsyncMock(return_value={"results": [{"url": "https://example.org/news"}]})
+    read = AsyncMock(return_value={"text": "Проверенные сведения об игре"})
+    forbidden = AsyncMock(return_value={"secret": "never"})
+    client = Mock()
+    client.with_options.return_value = client
+    client.chat.completions.create = AsyncMock(side_effect=[*calls, response()])
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        adaptive_thinking=True,
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "web_search", "search", {"query": "query"}, ("query",), search
+                    ),
+                    Tool("fetch_web_page", "read", {"url": "url"}, ("url",), read),
+                    Tool(
+                        "read_source", "source", {"path": "path"}, ("path",), forbidden
+                    ),
+                ]
+            )
+        ),
+    )
+    assert (
+        asyncio.run(
+            service.chat(
+                "system",
+                request,
+                tool_names=PromptComposer.select_tools(request),
+                thinking=thinking,
+            )
+        )
+        == "Итог"
+    )
+    search.assert_awaited_once_with({"query": "Call of Duty Modern Warfare 4 latest"})
+    read.assert_awaited_once_with({"url": "https://example.org/news"})
+    forbidden.assert_not_awaited()
+    first = client.chat.completions.create.await_args_list[0].kwargs
+    assert {schema["function"]["name"] for schema in first["tools"]} == {
+        "web_search",
+        "fetch_web_page",
+    }
+    assert first["tool_choice"]["function"]["name"] == "web_search"
+    messages = client.chat.completions.create.await_args.kwargs["messages"]
+    outputs = {
+        m["tool_call_id"]: json.loads(m["content"])
+        for m in messages
+        if m["role"] == "tool"
+    }
+    assert outputs["call_0"]["ok"] and outputs["call_1"]["ok"]
+    assert outputs["call_2"]["error"] == "tool_not_allowed"
 
 
 @pytest.mark.parametrize("invalid", [False, True])
@@ -81,8 +294,12 @@ def test_loop_caps_execution_and_stops_ignoring_model_requests(
     )
     assert "Не удалось" in asyncio.run(service.chat("system", "question"))
     assert handler.await_count == 6
-    assert client.chat.completions.create.await_count == 4
-    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == "none"
+    assert client.chat.completions.create.await_count == 5
+    assert "tools" not in client.chat.completions.create.await_args.kwargs
+    assert (
+        client.chat.completions.create.await_args_list[-2].kwargs["tool_choice"]
+        == "none"
+    )
     client.chat.completions.create.return_value = response(7)
     with pytest.raises(DeepSeekAPIError):
         asyncio.run(service.chat("system", "question"))
@@ -94,8 +311,10 @@ def test_loop_caps_execution_and_stops_ignoring_model_requests(
         ("Найди в интернете новости про Python", "web_search"),
         ("В интернете найди новости про Python", "web_search"),
         ("Посмотри в сети свежую цену", "web_search"),
+        ("В инете посмотри, откуда эта цитата", "web_search"),
         ("Открой https://example.org/article", "fetch_web_page"),
         ("Не ищи в интернете, просто предположи", None),
+        ("Без поиска, объясни DNS", None),
         ("Что такое TCP?", None),
     ],
 )
@@ -134,6 +353,57 @@ def test_loop_forces_web_search_for_explicit_request(
         "type": "function",
         "function": {"name": "web_search"},
     }
+
+
+@pytest.mark.parametrize("search_needed", [False, True])
+def test_optional_search_can_verify_unfamiliar_fact_without_forcing_every_reply(
+    monkeypatch: pytest.MonkeyPatch, search_needed: bool
+) -> None:
+    """Проверить полный assistant/tool обмен и обычный ответ без сетевого вызова."""
+    request = "Что означает флоккуляция?" if search_needed else "Как дела?"
+    selected = PromptComposer.select_tools(request, allow_web_fallback=True)
+    search = AsyncMock(return_value={"results": [{"url": "https://example.org/fact"}]})
+    read = AsyncMock(return_value={"text": "Подтверждение термина из источника"})
+    forbidden = AsyncMock()
+    results = []
+    if search_needed:
+        for name, arguments in [
+            ("web_search", {"query": "флоккуляция определение"}),
+            ("fetch_web_page", {"url": "https://example.org/fact"}),
+        ]:
+            result = response(1, json.dumps(arguments))
+            result.choices[0].message.tool_calls[0].function.name = name
+            results.append(result)
+    results.append(response())
+    client = Mock()
+    client.chat.completions.create = AsyncMock(side_effect=results)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "web_search", "search", {"query": "query"}, ("query",), search
+                    ),
+                    Tool("fetch_web_page", "read", {"url": "url"}, ("url",), read),
+                    Tool("read_source", "private source", {}, (), forbidden),
+                ]
+            )
+        ),
+    )
+    assert asyncio.run(service.chat("system", request, tool_names=selected)) == "Итог"
+    first = client.chat.completions.create.await_args_list[0].kwargs
+    assert first["tool_choice"] == "auto"
+    assert {item["function"]["name"] for item in first["tools"]} == selected
+    assert client.chat.completions.create.await_count == (3 if search_needed else 1)
+    assert search.await_count == read.await_count == int(search_needed)
+    forbidden.assert_not_awaited()
+    context = first["messages"][1]["content"]
+    assert "не знаешь или в котором не уверен" in context
+    assert "не заполняй пробел догадкой" in context
 
 
 def test_chat_skips_tool_schemas_when_composer_selects_none(

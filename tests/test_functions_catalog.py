@@ -38,7 +38,7 @@ def test_functions_reflect_connected_optional_services() -> None:
     settings = Settings(
         telegram_token="synthetic", deepseek_api_key="synthetic", art_chat_id=1
     )
-    basic = functions_text(settings=settings)
+    basic = functions_text(settings=replace(settings, deepseek_search_enabled=False))
     assert "сейчас сервис не подключён" in basic
     assert "отдельный поисковый сервис не подключён" in basic
     assert "Сканированные PDF" not in basic and "Музыка и звуки" not in basic

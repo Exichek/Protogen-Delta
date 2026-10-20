@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+from typing import Protocol
 
 import aiohttp
 import av
@@ -51,8 +52,20 @@ class MusicRecognitionError(RuntimeError):
     """Распознавание недоступно; разбор самого файла может продолжиться."""
 
 
+class MusicRecognizer(Protocol):
+    """Единый результат провайдера, отдельно от распознавания речи."""
+
+    provider_name: str
+
+    async def recognize(self, data: bytes) -> str | None:
+        """Вернуть проверенные поля совпадения либо отсутствие результата."""
+        ...
+
+
 class MusicRecognitionService:
     """Отправлять в AudD 12 секунд WAV, без истории чата и Telegram-ссылок."""
+
+    provider_name = "AudD"
 
     def __init__(
         self, api_token: str, *, native_work: WorkRunner | None = None

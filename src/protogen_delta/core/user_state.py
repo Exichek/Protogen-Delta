@@ -12,6 +12,8 @@ from typing import Literal, Protocol
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.conversation_gate import ConversationGate
+from protogen_delta.core.emotional_memory import EmotionalMemory
+from protogen_delta.core.shared_dialogue import SharedDialogueAccounts
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,10 @@ class ConversationTurn:
     user_message: str
     assistant_message: str
     context_closed: bool = False
+    proactive: bool = False
+    sender_id: int | None = None
+    technical_topic_closed: bool = False
+    initiative_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -48,6 +54,7 @@ class EmotionalState:
     irritation: float = 0.0
     playfulness: float = 0.0
     arousal: float = 0.0
+    memory: EmotionalMemory = field(default_factory=EmotionalMemory)
 
     def adjust(
         self,
@@ -74,6 +81,7 @@ class EmotionalState:
             return
 
         elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
+        self.memory.decay(elapsed_seconds)
 
         self.adjust(
             warmth=-_WARMTH_DECAY_PER_HOUR * elapsed_hours,
@@ -129,6 +137,7 @@ class PersistentUserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_default_profile: str = ""
     delta_appearance_profile: str = ""
     roleplay_character_thumbnail: str = ""
     roleplay_character_restricted: bool = False
@@ -138,6 +147,7 @@ class PersistentUserState:
     roleplay_stopword: str = "стоп"
     history: tuple[ConversationTurn, ...] = ()
     history_updated_at: float = 0.0
+    roleplay_allow_profanity: bool = False
 
 
 class UserStatePersistenceError(RuntimeError):
@@ -174,6 +184,7 @@ class UserStatePersistence(Protocol):
         delta_appearance: str = "",
         delta_species: str = "",
         delta_appearance_thumbnail: str = "",
+        delta_default_profile: str = "",
         delta_appearance_profile: str = "",
         roleplay_character_thumbnail: str = "",
         roleplay_character_restricted: bool = False,
@@ -181,6 +192,7 @@ class UserStatePersistence(Protocol):
         age_restricted: bool = False,
         delta_reference_restricted: bool = False,
         roleplay_stopword: str = "стоп",
+        roleplay_allow_profanity: bool = False,
         history: tuple[ConversationTurn, ...] | None = None,
         history_updated_at: float = 0.0,
         history_expires_before: float | None = None,
@@ -220,6 +232,7 @@ class UserState:
     delta_appearance: str = ""
     delta_species: str = ""
     delta_appearance_thumbnail: str = ""
+    delta_default_profile: str = ""
     delta_appearance_profile: str = ""
     roleplay_character_thumbnail: str = ""
     roleplay_character_restricted: bool = False
@@ -257,6 +270,8 @@ class UserState:
         repr=False,
         compare=False,
     )
+
+    roleplay_allow_profanity: bool = False
 
     def register_reply(self) -> None:
         """Увеличить счётчик ответов этому пользователю."""
@@ -297,13 +312,14 @@ class UserState:
         self.delta_appearance = ""
         self.delta_species = ""
         self.delta_appearance_thumbnail = ""
+        self.delta_default_profile = ""
         self.delta_appearance_profile = ""
         self.roleplay_character_thumbnail = ""
         self.roleplay_character_restricted = False
         self.delta_reference_restricted = False
         self.roleplay_stopword = "стоп"
-        self.content_mode = "unselected"
-        self.age_restricted = False
+        self.roleplay_allow_profanity = False
+        self.content_mode = "soft" if self.age_restricted else "unselected"
 
 
 class UserStateStore:
@@ -315,6 +331,7 @@ class UserStateStore:
         retention_seconds: float = 86400.0,
         clock: Callable[[], float] | None = None,
         wall_clock: Callable[[], float] | None = None,
+        shared_dialogue: SharedDialogueAccounts | None = None,
         persistence: UserStatePersistence | None = None,
         history_ttl_seconds: float = 7 * 86400,
     ) -> None:
@@ -333,12 +350,14 @@ class UserStateStore:
                 "history_ttl_seconds должен быть положительным конечным числом"
             )
         self._history_ttl_seconds = history_ttl_seconds
+        self.shared_dialogue = shared_dialogue or SharedDialogueAccounts()
         self._states: OrderedDict[StateKey, UserState] = OrderedDict()
         self._history_limit = history_limit
         self._retention_seconds = retention_seconds
         self._clock = clock or monotonic
         self._wall_clock = wall_clock or time
         self._persistence = persistence
+        self._age_restrictions: set[int] = set()
 
     def get(self, user_id: StateKey) -> UserState:
         """Получить runtime-состояние пользователя или создать новое."""
@@ -365,6 +384,12 @@ class UserStateStore:
             state.last_accessed_at = now
             self._states.move_to_end(user_id)
 
+        owner = user_id if isinstance(user_id, int) else user_id[1]
+        if state.age_restricted:
+            self._age_restrictions.add(owner)
+        if owner in self._age_restrictions:
+            state.age_restricted = True
+            state.content_mode = "soft"
         return state
 
     @asynccontextmanager
@@ -405,6 +430,27 @@ class UserStateStore:
     async def _coordinate(
         self, key: StateKey, *, exclusive: bool
     ) -> AsyncIterator[UserState]:
+        owner = key if isinstance(key, int) else key[1]
+        async with self.shared_dialogue.coordinate(owner):
+            async with self._coordinate_account(key, exclusive=exclusive) as state:
+                yield state
+
+    async def forget_dialogue_context(self, user_id: int) -> None:
+        """Удалить цитаты из короткой памяти, сохранив настройки и возрастные запреты."""
+        async with self._coordinate(user_id, exclusive=True):
+            for key, state in self._states.items():
+                if key == user_id or isinstance(key, tuple) and key[1] == user_id:
+                    state.history.clear()
+                    state.history_updated_at = 0
+                    state.emotions.memory.events.clear()
+            clear = getattr(self._persistence, "forget_dialogue_context", None)
+            if clear is not None:
+                await finish_operation(clear(user_id))
+
+    @asynccontextmanager
+    async def _coordinate_account(
+        self, key: StateKey, *, exclusive: bool
+    ) -> AsyncIterator[UserState]:
         user_id = key if isinstance(key, int) else key[1]
         private = self.get(user_id)
         # Очередь и активные чаты удерживают один и тот же gate в кеше.
@@ -443,6 +489,9 @@ class UserStateStore:
                 try:
                     yield state
                 finally:
+                    if state.age_restricted:
+                        owner = user_id if isinstance(user_id, int) else user_id[1]
+                        self._age_restrictions.add(owner)
                     if tuple(state.history) != original_history:
                         state.history_updated_at = (
                             self._wall_clock() if state.history else 0.0
@@ -464,6 +513,7 @@ class UserStateStore:
                                     delta_appearance=state.delta_appearance,
                                     delta_species=state.delta_species,
                                     delta_appearance_thumbnail=state.delta_appearance_thumbnail,
+                                    delta_default_profile=state.delta_default_profile,
                                     delta_appearance_profile=state.delta_appearance_profile,
                                     roleplay_character_thumbnail=state.roleplay_character_thumbnail,
                                     roleplay_character_restricted=state.roleplay_character_restricted,
@@ -471,6 +521,7 @@ class UserStateStore:
                                     age_restricted=state.age_restricted,
                                     delta_reference_restricted=state.delta_reference_restricted,
                                     roleplay_stopword=state.roleplay_stopword,
+                                    roleplay_allow_profanity=state.roleplay_allow_profanity,
                                     history=tuple(state.history),
                                     history_updated_at=state.history_updated_at,
                                     history_expires_before=self._wall_clock()
@@ -500,6 +551,10 @@ class UserStateStore:
     def mark_history_updated(self, state: UserState) -> None:
         """Учесть доставленный ход, даже если заполненная история не изменилась."""
         state.history_updated_at = self._wall_clock()
+
+    def wall_clock(self) -> float:
+        """Общие часы для сохраняемых событий персонажа."""
+        return self._wall_clock()
 
     @asynccontextmanager
     async def use_conversation(
@@ -565,6 +620,7 @@ class UserStateStore:
     ) -> None:
         """Завершить удаление и сброс RAM вместе, даже при отмене ожидающего запроса."""
         if self._persistence is not None:
+            await self._load_persistent_state(user_id, state)
             await self._persistence.delete(user_id)
         if isinstance(user_id, int):
             for key, conversation in self._states.items():
@@ -611,6 +667,7 @@ class UserStateStore:
             state.delta_appearance_thumbnail = (
                 persistent_state.delta_appearance_thumbnail
             )
+            state.delta_default_profile = persistent_state.delta_default_profile
             state.delta_appearance_profile = persistent_state.delta_appearance_profile
             state.roleplay_character_thumbnail = (
                 persistent_state.roleplay_character_thumbnail
@@ -624,6 +681,7 @@ class UserStateStore:
                 persistent_state.delta_reference_restricted
             )
             state.roleplay_stopword = persistent_state.roleplay_stopword
+            state.roleplay_allow_profanity = persistent_state.roleplay_allow_profanity
             state.history = deque(persistent_state.history, maxlen=self._history_limit)
             state.history_updated_at = persistent_state.history_updated_at
         else:

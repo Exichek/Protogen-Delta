@@ -145,7 +145,7 @@ def test_appearance_reasoning_is_scoped_and_does_not_expose_thoughts(
     assert len(calls) == 4
     for request in calls[:2]:
         assert request.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
-        assert request.kwargs["reasoning_effort"] == "high"
+        assert request.kwargs["reasoning_effort"] == "medium"
         assert request.kwargs["max_tokens"] == 16384
         assert request.kwargs["response_format"] == {"type": "json_object"}
         assert "temperature" not in request.kwargs and "tools" not in request.kwargs

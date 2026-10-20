@@ -16,6 +16,7 @@ from protogen_delta.services.deepseek import (
     DeepSeekError,
     DeepSeekService,
 )
+from protogen_delta.services.privacy_notice import DATA_NOTICE
 from protogen_delta.services.stickers import ContextualStickerService
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ def create_start_router(
             if sticker_service is not None:
                 reply = sticker_service.correct_reply(user_id, reply)
 
+            reply += "\n\n" + DATA_NOTICE
             for chunk in split_message(reply):
                 await message.answer(chunk)
 
@@ -169,6 +171,7 @@ def create_start_router(
             if sticker_service is not None:
                 reply = sticker_service.correct_reply(user_id, reply)
 
+            reply += "\n\n" + DATA_NOTICE
             for chunk in split_message(reply):
                 await message.answer(chunk)
 

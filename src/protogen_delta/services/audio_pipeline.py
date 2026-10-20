@@ -10,7 +10,7 @@ from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.services.audio_analysis import AudioAnalysis, analyze_audio
 from protogen_delta.services.audio_understanding import AudioUnderstandingService
 from protogen_delta.services.blocking_work import WorkRunner
-from protogen_delta.services.music import MusicRecognitionService, audio_tags
+from protogen_delta.services.music import MusicRecognizer, audio_tags
 from protogen_delta.services.speech import SpeechTranscriber, Transcript
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class AudioPipeline:
         transcriber: SpeechTranscriber,
         work: WorkRunner,
         understanding: AudioUnderstandingService | None = None,
-        recognition: MusicRecognitionService | None = None,
+        recognition: MusicRecognizer | None = None,
         *,
         timeout: float = 130.0,
         speech_timeout: float = 120.0,

@@ -68,7 +68,10 @@ def test_active_scene_uses_private_open_roleplay_turns(tmp_path: Path) -> None:
         assert excluded not in args["user_message"]
     assert "не продолжение RP" not in args["system_prompt"]
     assert "данные сцены" in args["system_prompt"]
-    assert tuple(state.history) == before and state.roleplay_active
+    assert tuple(state.history) == before + (
+        ConversationTurn("", "Продолжим сцену у моста?", proactive=True),
+    )
+    assert state.roleplay_active
     bot.send_message.assert_awaited_once_with(7, "Продолжим сцену у моста?")
 
 
@@ -126,11 +129,18 @@ def test_scene_fallback_invites_continuation_without_inventing_events(
     bot.send_message.assert_awaited_once_with(
         7, "Хочешь продолжить нашу RP-сцену с того места, где остановились?"
     )
-    assert not states.get(7).history
+    assert tuple(states.get(7).history) == (
+        ConversationTurn(
+            "",
+            "Хочешь продолжить нашу RP-сцену с того места, где остановились?",
+            proactive=True,
+        ),
+    )
 
 
 @pytest.mark.parametrize(
-    "change", ["stop", "start", "reset", "history", "character", "profile", "age"]
+    "change",
+    ["stop", "start", "reset", "history", "character", "profile", "age", "speech"],
 )
 def test_pending_nudge_is_discarded_when_scene_changes(
     tmp_path: Path, change: str
@@ -156,6 +166,8 @@ def test_pending_nudge_is_discarded_when_scene_changes(
                 state.roleplay_character = "Другой персонаж"
             elif change == "profile":
                 state.delta_appearance_profile = '{"personality":"Сдержанный"}'
+            elif change == "speech":
+                state.roleplay_allow_profanity = True
             else:
                 state.age_restricted = True
         return "Хочешь продолжить сцену?"
@@ -189,3 +201,26 @@ def test_scene_is_loaded_from_persistence_after_restart(tmp_path: Path) -> None:
 
     asyncio.run(run())
     assert "лес" in model.chat.await_args.kwargs["user_message"]
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_proactive_rp_invitation_respects_speech_style(
+    tmp_path: Path, allowed: bool
+) -> None:
+    repository = MemoriesRepository(tmp_path)
+    states = UserStateStore()
+    states.get(7).roleplay_active = True
+    states.get(7).roleplay_allow_profanity = allowed
+    bot = AsyncMock(spec=Bot)
+    model = AsyncMock(spec=DeepSeekService)
+    model.chat.return_value = "Продолжим нашу сцену?"
+
+    async def run() -> None:
+        await repository.note_user_activity(7, 10)
+        assert await messenger(repository, states, bot, model).run_once() == 1
+
+    asyncio.run(run())
+    prompt = model.chat.await_args.kwargs["system_prompt"]
+    assert (
+        "Стиль речи в RP: мат разрешён" if allowed else "Стиль речи в RP: без мата"
+    ) in prompt

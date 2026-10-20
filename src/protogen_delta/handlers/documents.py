@@ -9,8 +9,11 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
-from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.handlers.failure_reply import send_failure_reply
+from protogen_delta.handlers.text import BUSY_REPLY
+from protogen_delta.services.archive_documents import ArchiveLimitError
 from protogen_delta.services.blocking_work import WorkRunner
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.documents import (
@@ -20,6 +23,7 @@ from protogen_delta.services.documents import (
     UnsupportedDocumentError,
     extract_document,
 )
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.music import is_audio_file
 from protogen_delta.services.native_work import NativeWorkError, NativeWorkPool
 from protogen_delta.services.response_engine import (
@@ -41,7 +45,9 @@ DOCUMENT_DOWNLOAD_ERROR_REPLY = (
 DOCUMENT_READ_ERROR_REPLY = (
     "Не смог прочитать этот документ: возможно, он повреждён или защищён паролем."
 )
-UNSUPPORTED_DOCUMENT_REPLY = "Этот формат пока не разбираю. Пришли TXT, Markdown, код, JSON, CSV, PDF, DOCX или XLSX."
+UNSUPPORTED_DOCUMENT_REPLY = (
+    "Этот формат пока не разбираю. Пришли текст, код, PDF, DOCX, XLSX или ZIP."
+)
 
 
 def _safe_file_name(file_name: str | None) -> str:
@@ -56,6 +62,7 @@ def create_document_router(
     rate_limiter: UserRateLimiter | None = None,
     sticker_service: ContextualStickerService | None = None,
     *,
+    reaction_service: MessageReactionService | None = None,
     ocr_enabled: bool = False,
     native_work: WorkRunner | None = None,
 ) -> Router:
@@ -76,11 +83,15 @@ def create_document_router(
         if document is None or message.from_user is None:
             return
         user_id = message.from_user.id
-        if not limiter.allow(user_id):
-            await message.answer(RATE_LIMIT_REPLY)
+        if current_reply_capture.get() is None and not limiter.allow(user_id):
             return
         if document.file_size is not None and document.file_size > MAX_DOCUMENT_BYTES:
-            await message.answer(DOCUMENT_TOO_LARGE_REPLY)
+            await message.answer(
+                "В чат можно прислать ZIP до 20 МБ; архив до 50 МБ загрузи в Mini App, "
+                "вкладка «Полезное» → «ZIP-архив»."
+                if (document.file_name or "").lower().endswith(".zip")
+                else DOCUMENT_TOO_LARGE_REPLY
+            )
             return
 
         destination = io.BytesIO()
@@ -88,7 +99,9 @@ def create_document_router(
             await bot.download(document.file_id, destination=destination)
         except TelegramAPIError, OSError:
             logger.warning("Не удалось скачать документ из Telegram", exc_info=True)
-            await message.answer(DOCUMENT_DOWNLOAD_ERROR_REPLY)
+            await send_failure_reply(
+                message, DOCUMENT_DOWNLOAD_ERROR_REPLY, sticker_service
+            )
             return
 
         file_name = _safe_file_name(document.file_name)
@@ -104,6 +117,9 @@ def create_document_router(
         except NativeWorkError as error:
             await message.answer(str(error))
             return
+        except ArchiveLimitError as error:
+            await message.answer(str(error))
+            return
         except DocumentTooLargeError:
             await message.answer(DOCUMENT_TOO_LARGE_REPLY)
             return
@@ -111,7 +127,9 @@ def create_document_router(
             await message.answer(UNSUPPORTED_DOCUMENT_REPLY)
             return
         except DocumentReadError:
-            await message.answer(DOCUMENT_READ_ERROR_REPLY)
+            await send_failure_reply(
+                message, DOCUMENT_READ_ERROR_REPLY, sticker_service
+            )
             return
 
         request = (message.caption or "").strip()
@@ -145,6 +163,7 @@ def create_document_router(
                         bot,
                         sticker_service,
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         context_tags=("document",),
                     ),
                     attachment_text=attachment_text,

@@ -21,7 +21,7 @@ from protogen_delta.handlers.media import (
     _has_supported_animation_document,
     create_media_router,
 )
-from protogen_delta.handlers.text import BUSY_REPLY, RATE_LIMIT_REPLY
+from protogen_delta.handlers.text import BUSY_REPLY
 from protogen_delta.services.blocking_work import BlockingWorkPool
 from protogen_delta.services.deepseek import ImageInput
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
@@ -429,7 +429,7 @@ def test_media_uses_shared_rate_limit() -> None:
 
     asyncio.run(router.message.handlers[0].callback(message))
 
-    answer.assert_awaited_once_with(RATE_LIMIT_REPLY)
+    answer.assert_not_awaited()
     bot.download.assert_awaited_once()
 
 

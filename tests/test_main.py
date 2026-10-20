@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 import protogen_delta.main as main_module
 from protogen_delta.config.settings import Settings
+from protogen_delta.services.shazam_music import ShazamMusicRecognitionService
 
 
 def test_require_string_lists_rejects_invalid_value() -> None:
@@ -63,6 +64,7 @@ def test_main_builds_application_and_starts_polling(
         llm_provider=provider,
         log_level="INFO",
         data_dir=tmp_path,
+        llm_daily_request_limit_overrides={123: 1000},
         admin_ids=frozenset({123}),
         brave_search_api_key="brave-key",
         conversation_history_limit=12,
@@ -144,6 +146,9 @@ def test_main_builds_application_and_starts_polling(
         "mood_classification.txt": "MOOD PROMPT",
         "fetish_role_classification.txt": "ROLE PROMPT",
         "personality/core.txt": "CORE PROMPT",
+        "initiative_system": "INITIATIVE PROMPT",
+        "emotional_system": "EMOTIONAL SYSTEM PROMPT",
+        "favorite_selection": "FAVORITE SELECTION PROMPT",
         "personality/protogen_lore.txt": "LORE PROMPT",
         "personality/body.txt": "BODY PROMPT",
         "personality/rp.txt": "RP PROMPT",
@@ -412,6 +417,11 @@ def test_main_builds_application_and_starts_polling(
         assert main_module.StickersRepository(tmp_path).get_all() == []
 
     load_settings_mock.assert_called_once_with()
+    usage = deepseek_constructor_mock.return_value.set_usage_repository.call_args.args[
+        0
+    ]
+    assert usage.limit_for(123) == 1000
+    assert usage.limit_for(456) == 300
 
     assert load_prompt_mock.call_args_list == [
         call("insult_classification.txt"),
@@ -420,6 +430,8 @@ def test_main_builds_application_and_starts_polling(
         call("start_greeting.txt"),
         call("repeat_start_greeting.txt"),
         call("personality/core.txt"),
+        call("initiative_system"),
+        call("emotional_system"),
         call("personality/protogen_lore.txt"),
         call("personality/body.txt"),
         call("personality/rp.txt"),
@@ -433,6 +445,7 @@ def test_main_builds_application_and_starts_polling(
         call("conversation_visual"),
         call("voice_examples"),
         call("scene_examples"),
+        call("favorite_selection"),
     ]
 
     setup_logging_mock.assert_called_once_with(
@@ -448,6 +461,7 @@ def test_main_builds_application_and_starts_polling(
         history_ttl_seconds=604800.0,
         retention_seconds=3600.0,
         persistence=user_state_repository,
+        shared_dialogue=ANY,
     )
 
     bot_constructor_mock.assert_called_once_with(
@@ -463,6 +477,8 @@ def test_main_builds_application_and_starts_polling(
         base_url="https://api.test.local",
         model="test-model",
         disable_thinking=True,
+        adaptive_thinking=provider == "deepseek",
+        verify_web_answers=True,
         tools=ANY,
     )
 
@@ -473,6 +489,7 @@ def test_main_builds_application_and_starts_polling(
         rate_limiter=ANY,
         bot=bot_mock,
         sticker_service=ANY,
+        reaction_service=ANY,
     )
 
     start_router_call = create_start_router_mock.call_args
@@ -500,16 +517,29 @@ def test_main_builds_application_and_starts_polling(
     inputs = reset_router_call.kwargs["input_operations"]
     assert isinstance(inputs, main_module.InputOperations)
     outer = dispatcher_mock.message.outer_middleware.call_args_list
-    assert len(outer) == 3
+    assert len(outer) == 8
+    assert isinstance(outer[0].args[0], main_module.LlmUserMiddleware)
+    dispatcher_mock.callback_query.outer_middleware.assert_called_once()
+    assert isinstance(outer[1].args[0], main_module.DeliveryLedgerMiddleware)
+    outer = outer[2:]
     assert isinstance(outer[0].args[0], main_module.ReceiveInputsMiddleware)
     assert outer[0].args[0]._operations is inputs
-    assert isinstance(outer[1].args[0], main_module.UserStatisticsMiddleware)
-    assert outer[1].args[0]._input_operations is inputs
+    assert isinstance(outer[1].args[0], main_module.SenderMiddleware)
+    outer = [outer[0], *outer[2:]]
+    assert isinstance(outer[1].args[0], main_module.ProactiveIncomingMiddleware)
+    assert outer[1].args[0]._operations is inputs
+    assert isinstance(outer[2].args[0], main_module.ArchiveIncomingMiddleware)
+    assert outer[2].args[0]._operations is inputs
+    assert isinstance(outer[3].args[0], main_module.UserStatisticsMiddleware)
+    assert outer[3].args[0]._input_operations is inputs
     for router in (text_router, media_router, document_router, voice_router):
-        router.message.middleware.assert_called_once()
-        inner = router.message.middleware.call_args.args[0]
+        assert router.message.middleware.call_count == 2
+        inner = router.message.middleware.call_args_list[0].args[0]
         assert isinstance(inner, main_module.MemoryInputsMiddleware)
         assert inner._operations is inputs
+        batcher = router.message.middleware.call_args_list[1].args[0]
+        assert isinstance(batcher, main_module.InputBatchMiddleware)
+        assert batcher._operations is inputs
     for router in (start_router, art_router, adult_router, reset_router, rp_router):
         router.message.middleware.assert_not_called()
 
@@ -542,7 +572,10 @@ def test_main_builds_application_and_starts_polling(
         user_states, ANY, restrict_minor=ANY
     )
 
-    assert dispatcher_mock.include_router.call_count == 20
+    assert dispatcher_mock.include_router.call_count == 23
+    assert isinstance(
+        reset_router_call.kwargs["reminders"], main_module.ReminderService
+    )
 
     dispatcher_mock.include_router.assert_any_call(
         start_router,
@@ -592,6 +625,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         native_work=ANY,
     )
     create_document_router_mock.assert_called_once_with(
@@ -599,6 +633,7 @@ def test_main_builds_application_and_starts_polling(
         bot_mock,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         ocr_enabled=False,
         native_work=ANY,
     )
@@ -614,9 +649,15 @@ def test_main_builds_application_and_starts_polling(
         speech_transcriber,
         rate_limiter=ANY,
         sticker_service=ANY,
+        reaction_service=ANY,
         audio_understanding=None,
-        music_recognition=None,
+        music_recognition=ANY,
         native_work=ANY,
+    )
+
+    assert isinstance(
+        create_voice_router_mock.call_args.kwargs["music_recognition"],
+        ShazamMusicRecognitionService,
     )
 
     bot_mock.delete_webhook.assert_awaited_once_with(

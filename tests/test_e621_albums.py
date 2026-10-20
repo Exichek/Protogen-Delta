@@ -381,11 +381,11 @@ def test_timeout_sends_prepared_part_and_allows_continuation(
             self: E621MediaService, post: E621Post, **kwargs: object
         ) -> PreparedMedia:
             if post.post_id == 2:
-                await asyncio.sleep(1)
+                await asyncio.Event().wait()
             return PreparedMedia(post, "key", "jpg", _JPEG)
 
         monkeypatch.setattr(E621MediaService, "prepare", prepare)
-        monkeypatch.setattr(handler, "_BATCH_SECONDS", 0.1)
+        monkeypatch.setattr(handler, "_BATCH_SECONDS", 3.0)
         history = E621HistoryRepository(tmp_path)
         router = handler.create_e621_router(
             cast(E621Client, _Client([_post(1), _post(2)])), history, UserStateStore()

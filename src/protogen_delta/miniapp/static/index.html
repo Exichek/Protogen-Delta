@@ -6,13 +6,15 @@
   <title>ИИ-ассистент Протоген Дельта</title>
   <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
   <style>
-    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
+    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; --miniapp-safe-top:max(env(safe-area-inset-top),calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px))); }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; color: var(--tg-theme-text-color,#eef4ff); background: var(--tg-theme-bg-color,#0c1420); }
-    main { width: min(100%, 720px); margin: 0 auto; padding: max(20px,env(safe-area-inset-top)) 16px max(32px,env(safe-area-inset-bottom)); }
+    main { width: min(100%, 720px); margin: 0 auto; padding:20px max(16px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))) max(32px,env(safe-area-inset-bottom),calc(var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))) max(16px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); }
     header { display:flex; gap:14px; align-items:center; margin-bottom:20px; }
     .visor { width:56px; height:56px; border-radius:18px; display:grid; place-items:center; font-size:28px; background:linear-gradient(145deg,#25234c,#00b6d6); box-shadow:0 10px 28px #00b6d633; }
     #appearance-same-character { width:auto; margin-right:6px; padding:0; }
+    .checkbox-setting { display:flex; align-items:center; gap:10px; font-size:15px; color:var(--tg-theme-text-color,#eef4ff); }
+    .checkbox-setting input { width:20px; height:20px; margin:0; padding:0; accent-color:var(--tg-theme-button-color,#6c5ce7); flex-shrink:0; }
     h1 { margin:0; font-size:24px; } .muted { color:var(--tg-theme-hint-color,#95a4b8); margin:4px 0 0; }
     .card { background:var(--tg-theme-secondary-bg-color,#162333); border:1px solid #ffffff12; border-radius:18px; padding:16px; margin:12px 0; box-shadow:0 12px 30px #0003; }
     .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
@@ -43,7 +45,11 @@
     #appearance-status, #character-status { margin-top:12px; min-height:20px; font-size:14px; }
     #appearance-file-name, #character-file-name { overflow-wrap:anywhere; font-size:13px; }
     button.small-action { width:auto; padding:8px 12px; font-size:13px; margin-top:8px; }
-    .tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; position:sticky; top:0; background:var(--tg-theme-bg-color,#0c1420); z-index:2; padding-bottom:12px; }
+    .app-navigation { position:sticky; top:0; z-index:10; padding-top:var(--miniapp-safe-top); background:var(--tg-theme-bg-color,#0c1420); box-shadow:0 1px 0 #ffffff12; }
+    .tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; width:min(100%,720px); margin:0 auto; padding:12px max(16px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))) 12px max(16px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); }
+    body.translation-view .tabs { width:min(100%,1160px); }
+    body.markets-view .tabs { width:100%; }
+    .tabs button { padding:11px 4px; font-size:13px; }
     .tabs button { margin-top:0; opacity:.65; }
     .tabs button[aria-selected="true"] { opacity:1; }
     .tool-status { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:12px; }
@@ -77,20 +83,120 @@
     .translation-upload img { display:block; width:100%; max-height:210px; object-fit:contain; margin:10px auto; border-radius:8px; }
     #translation-file-name { overflow-wrap:anywhere; font-size:13px; }
     #translation-status { min-height:22px; }
+    .converter h2 { margin:0 0 16px; font-size:21px; }
+    .converter-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+    .converter-upload { border:2px dashed var(--tg-theme-button-color,#6c5ce7); border-radius:16px; padding:22px 16px; text-align:center; background:#6c5ce70a; }
+    .converter-upload.drag-over { background:#6c5ce722; }
+    .converter-upload svg { width:36px; height:36px; color:var(--tg-theme-button-color,#6c5ce7); }
+    .converter-upload button { margin-top:14px; }
+    .converter-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .converter-options select { min-width:0; }
+    #conversion-file-name, #conversion-result-name { overflow-wrap:anywhere; }
+    #conversion-file-name { max-height:70px; overflow:auto; font-size:14px; }
+    .converter-player { display:block; width:100%; max-height:320px; border-radius:12px; background:#000; }
+    #conversion-audio { width:100%; display:block; margin:16px 0; }
+    #conversion-progress { width:100%; height:8px; margin-top:16px; accent-color:var(--tg-theme-button-color,#6c5ce7); }
+    #conversion-result { border-top:1px solid #8797af44; padding-top:16px; }
+    @media (max-width:380px) { .converter-options { grid-template-columns:1fr; } }
     @media (max-width:650px) { .translation-panes { grid-template-columns:1fr; } .translation-pane textarea { height:clamp(165px,26vh,250px); max-height:250px; } }
     @media (max-width:380px) { .tabs button { padding:11px 6px; font-size:13px; } .translation-modes button { padding:9px 10px; } .translation-languages { gap:6px; grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr); } .translation-languages select { padding:10px 5px; font-size:14px; } }
     @media (max-width:430px) { .grid { grid-template-columns:1fr; } }
     @media (max-width:380px) { .appearance-actions { grid-template-columns:1fr; } }
+    .market-panel { --gain:#64dca9; --loss:#ff8994; }
+    .market-panel h2 { margin:0; font-size:24px; }
+    .market-panel h3 { margin:0 0 14px; }
+    .market-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .market-head button { margin:0; width:auto; padding:10px 14px; }
+    .market-head-actions { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+    #market-fullscreen { display:flex; align-items:center; justify-content:center; gap:8px; background:#222c3b; }
+    #market-fullscreen svg { width:18px; height:18px; flex-shrink:0; }
+    #market-fullscreen-note:empty { display:none; }
+    .market-grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:16px; align-items:start; }
+    .market-card { min-width:0; background:var(--tg-theme-secondary-bg-color,#172334); border:1px solid #ffffff12; border-radius:18px; padding:18px; margin-bottom:16px; }
+    .market-row { display:flex; gap:10px; align-items:center; }
+    .market-row > * { min-width:0; flex:1; }
+    .market-row button { margin:0; }
+    .market-panel label { margin-top:12px; }
+    .market-panel select,.market-panel input { min-width:0; }
+    .market-muted { color:var(--tg-theme-hint-color,#a1b0c4); font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+    .market-filters { display:flex; gap:6px; margin:14px 0; }
+    .market-filters button { margin:0; padding:8px 10px; border:1px solid #ffffff22; background:transparent; color:inherit; }
+    .market-filters button[aria-pressed=true] { background:#6c5ce733; border-color:#8f83ff; }
+    .market-scroll { max-height:340px; overflow:auto; overscroll-behavior:contain; }
+    .market-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .market-table th,.market-table td { padding:12px 8px; text-align:right; border-bottom:1px solid #ffffff12; white-space:nowrap; }
+    .market-table th:first-child,.market-table td:first-child { text-align:left; }
+    .market-table th { position:sticky; top:0; background:var(--tg-theme-secondary-bg-color,#172334); z-index:1; font-size:12px; color:var(--tg-theme-hint-color,#a1b0c4); }
+    .market-table button { width:auto; padding:0; margin:0; background:transparent; color:inherit; text-align:left; }
+    .market-table button[aria-pressed=true] { color:#a9a1ff; }
+    .market-table small { display:block; max-width:130px; white-space:normal; margin-top:4px; font-size:11px; }
+    body.markets-view { color-scheme:dark; --tg-theme-bg-color:#0b0e13; --tg-theme-secondary-bg-color:#13171f; --tg-theme-text-color:#edf1f7; --tg-theme-hint-color:#96a2b6; --tg-theme-button-color:#3979d8; background:#0b0e13; }
+    body.markets-view main { width:100%; }
+    .market-panel { --gain:#41d39d; --loss:#ff727e; color-scheme:dark; }
+    .market-panel .market-card { background:#13171f; border-color:#252c39; box-shadow:0 14px 34px #0002; }
+    .market-panel input,.market-panel select,.market-panel textarea { background:#0c1017; color:#edf1f7; outline-color:#2b3444; }
+    .market-panel select option { background:#121721; color:#edf1f7; }
+    .market-panel h3 { margin:0; font-size:19px; }
+    .market-panel button:focus-visible,.market-panel select:focus-visible,.market-panel input:focus-visible,.market-panel canvas:focus-visible { outline:2px solid #7baeff; outline-offset:3px; }
+    .market-panel .market-filters button[aria-pressed=true] { background:#223653; border-color:#689be3; }
+    .market-panel .market-table th { background:#13171f; }
+    .market-panel .market-table button[aria-pressed=true] { color:#8dbaff; }
+    .market-panel .market-table tbody tr:has(button[aria-pressed=true]) { background:#3979d811; }
+    .market-chart-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .market-chart-heading select { width:auto; max-width:180px; font-size:14px; padding:10px; }
+    .market-price { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin:18px 0 6px; }
+    #market-last-price { font-size:32px; font-weight:750; letter-spacing:-.7px; }
+    #market-last-change { font-size:16px; font-weight:600; }
+    .market-intervals { display:flex; gap:6px; margin:18px 0 8px; padding:5px; border-radius:12px; background:#0b0f16; }
+    .market-intervals button { width:auto; flex:1; margin:0; padding:8px 6px; font-size:13px; color:#aebbd0; background:transparent; }
+    .market-intervals button[aria-pressed=true] { color:#fff; background:#293548; }
+    .market-book-top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .market-book-top button { width:auto; margin:0; padding:8px 12px; font-size:13px; }
+    .market-book-mode { display:inline-block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; background:#233044; color:#b7d2fa; border-radius:5px; padding:4px 7px; margin-top:10px; }
+    .market-book { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:16px; }
+    .market-book-side { min-width:0; }
+    .market-book-label { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-bottom:8px; }
+    .market-book-row { position:relative; display:flex; justify-content:space-between; gap:6px; padding:8px 5px; border-radius:3px; font-variant-numeric:tabular-nums; font-size:13px; overflow:hidden; }
+    .market-book-row:before { content:''; position:absolute; inset:0 0 0 auto; width:var(--depth,0%); background:#41d39d12; pointer-events:none; }
+    .market-book-side.ask .market-book-row:before { background:#ff727e12; }
+    .market-book-row span { position:relative; }
+    .market-book-empty { font-size:13px; color:#96a2b6; padding:12px 0; }
+    #market-book-spread { border-top:1px solid #29303e; padding-top:12px; }
+    #market-chart-window { font-size:12px; }
+    .market-chart-nav { display:flex; justify-content:flex-end; gap:6px; }
+    .market-chart-nav button { width:auto; margin:0; padding:7px 12px; font-size:13px; background:#222c3b; color:#dbe7f8; }
+    #market-chart-position { display:block; padding:0; height:22px; outline:0; margin:10px 0; accent-color:#7baeff; }
+    .market-controls label { margin-top:0; }
+    @media(max-width:600px) { .market-controls .market-row { flex-direction:column; align-items:stretch; } }
+    @media(max-width:440px) { .market-book { gap:8px; } .market-book-row { font-size:12px; padding:8px 3px; flex-direction:column; gap:2px; } .market-book-row span:last-child { align-self:flex-end; font-size:11px; opacity:.85; } #market-last-price { font-size:28px; } }
+    .market-positive { color:var(--gain); } .market-negative { color:var(--loss); }
+    #market-chart { display:block; width:100%; height:320px; height:clamp(260px,43dvh,640px); touch-action:pan-y; margin:12px 0; background:#0d1118; border-radius:10px; }
+    #market-candles { max-height:180px; }
+    .market-news-item { padding:12px 0; border-bottom:1px solid #ffffff12; }
+    .market-news-item a { color:inherit; font-weight:600; text-decoration:none; overflow-wrap:anywhere; }
+    .market-news-item p { margin:6px 0; font-size:14px; line-height:1.5; }
+    #market-news { max-height:460px; overflow:auto; overscroll-behavior:contain; }
+    #market-chat { max-height:360px; overflow:auto; overscroll-behavior:contain; margin:12px 0; }
+    .market-bubble { padding:12px; border-radius:14px; margin:8px 0; background:#ffffff08; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; font-size:14px; }
+    .market-bubble.user { margin-left:20px; background:#6c5ce726; }
+    #market-question { height:95px; min-height:95px; max-height:160px; resize:vertical; }
+    #currency-result { font-size:23px; font-weight:700; margin:16px 0 8px; overflow-wrap:anywhere; }
+    @media(max-width:700px) { .market-grid { grid-template-columns:minmax(0,1fr); } .market-card { padding:14px; } }
+    @media(min-width:1100px) { .market-grid { grid-template-columns:minmax(0,1fr) clamp(320px,27vw,480px); } body.markets-view main,body.markets-view .tabs { padding-left:max(24px,env(safe-area-inset-left),calc(var(--tg-safe-area-inset-left,0px) + var(--tg-content-safe-area-inset-left,0px))); padding-right:max(24px,env(safe-area-inset-right),calc(var(--tg-safe-area-inset-right,0px) + var(--tg-content-safe-area-inset-right,0px))); } }
   </style>
 </head>
 <body>
-<main>
-  <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted">ИИ-ассистент</p><p class="muted" id="hello">Профиль и настройки</p></div></header>
+<div class="app-navigation">
   <nav class="tabs" role="tablist" aria-label="Разделы Дельты">
     <button id="tab-rp" role="tab" aria-controls="rp-panel" aria-selected="true">RP и облик</button>
     <button id="tab-tools" role="tab" aria-controls="tools-panel" aria-selected="false">Полезное</button>
-    <button id="tab-translate" role="tab" aria-controls="translate-panel" aria-selected="false">Переводчик</button>
+    <button id="tab-translate" role="tab" aria-controls="translate-panel" aria-selected="false">Перевод</button>
+    <button id="tab-markets" role="tab" aria-controls="markets-panel" aria-selected="false">Рынки</button>
   </nav>
+</div>
+<main>
+  <header><div class="visor">Δ</div><div><h1>Протоген Дельта</h1><p class="muted">ИИ-ассистент</p><p class="muted" id="hello">Профиль и настройки</p></div></header>
+
   <div id="rp-panel" role="tabpanel" aria-labelledby="tab-rp">
   <section class="card">
     <p class="muted">RP и облик для личного чата. В группах сцены и персонажи отдельные. Возрастной режим общий.</p>
@@ -103,6 +209,8 @@
     <p id="age-restriction-hint" class="muted" hidden>Обычный режим выбран по указанному тобой возрасту.</p>
     <label for="configuration">Конфигурация Дельты в RP</label>
     <select id="configuration"><option value="male">Мужская</option><option value="female">Женская</option></select>
+    <label class="checkbox-setting" for="rp-allow-profanity"><input id="rp-allow-profanity" type="checkbox">Разрешить мат в RP</label>
+    <p class="muted">Выключено — речь без мата. Включено — мат допустим по контексту сцены. Применяется после сохранения настроек.</p>
     <label for="character">Мой персонаж для RP</label>
     <textarea id="character" maxlength="2000" placeholder="Вид, внешность, важные детали и роль в сцене"></textarea>
     <p class="muted">До 2000 знаков. После разбора арта описание можно исправить здесь.</p>
@@ -199,7 +307,7 @@
     <button id="reset-appearance" class="secondary" type="button" disabled>Вернуть базовый облик</button>
     <div id="appearance-status" role="status" aria-live="polite"></div>
     <div id="delta-profile-panel">
-      <p><b>Характер и поведение этого облика Дельты</b></p>
+      <p><b>Характер и поведение Дельты</b></p>
       <p class="muted" id="delta-profile-hint">Для текущего облика. Заполни вручную: эти сведения не определяются по картинке.</p>
       <label for="delta-fetishes">Фетиши и предпочтения</label>
       <textarea id="delta-fetishes" maxlength="1000" rows="3" placeholder="Например: Бдсм, кроссдрессинг, унижения, риминг" disabled></textarea>
@@ -218,16 +326,62 @@
   </section>
   </div>
   <div id="tools-panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+    <section class="card" aria-labelledby="archive-title">
+      <h2 id="archive-title">ZIP-архив</h2>
+      <p class="muted">До 50 МБ. Просмотр списка и текста файлов бесплатен; разбор с Дельтой использует модель. Вложенные архивы и секретные файлы пропускаются.</p>
+      <label for="archive-file">Архив с документами или кодом</label>
+      <input id="archive-file" type="file" accept=".zip,application/zip">
+      <label for="archive-question">Что проверить в архиве?</label>
+      <textarea id="archive-question" maxlength="2000" rows="2" placeholder="Например: объясни устройство проекта или найди возможную ошибку"></textarea>
+      <div class="grid"><button id="archive-view" type="button" disabled>Просмотреть файлы</button><button id="archive-analyze" type="button" disabled>Разобрать с Дельтой</button></div>
+      <div id="archive-status" class="tool-status" role="status" aria-live="polite"></div>
+      <pre id="archive-result" style="max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
+    </section>
+    <section class="card converter" aria-labelledby="conversion-title">
+      <h2 id="conversion-title">Конвертер видео и аудио</h2>
+      <div class="translation-modes" role="group" aria-label="Тип результата">
+        <button type="button" data-conversion-mode="video" aria-pressed="true">Видео</button>
+        <button type="button" data-conversion-mode="audio" aria-pressed="false">Аудио</button>
+      </div>
+      <div class="converter-layout">
+        <div id="conversion-upload" class="converter-upload" tabindex="0" aria-label="Загрузить файл для преобразования">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/></svg>
+          <p class="muted">Перетащи файл сюда или выбери его на устройстве.</p>
+          <input id="conversion-file" type="file" accept="video/*,audio/*,.mp4,.avi,.mov,.mkv,.webm,.mp3,.wav,.flac,.m4a,.ogg,.aac" hidden>
+          <button id="conversion-choose" type="button">Загрузить файл</button>
+          <p id="conversion-file-name" class="muted"></p>
+        </div>
+        <div class="converter-options">
+          <div><label for="conversion-format">Формат результата</label><select id="conversion-format"></select></div>
+          <div id="conversion-resolution-field"><label for="conversion-resolution">Разрешение видео</label><select id="conversion-resolution"><option value="720">До 720p</option><option value="480">До 480p</option><option value="1080">До 1080p</option><option value="original">Исходное, до 1080p</option></select></div>
+          <div id="conversion-bitrate-field" hidden><label for="conversion-bitrate">Качество MP3</label><select id="conversion-bitrate"><option value="128">128 кбит/с</option><option value="192" selected>192 кбит/с</option><option value="320">320 кбит/с</option></select></div>
+        </div>
+        <p class="muted" id="conversion-hint">Файл до 100 МБ и 10 минут. Видео сохраняется со звуком, если он есть; до 30 кадров/с. Обработка — до четырёх минут.</p>
+        <div class="translation-actions"><button id="conversion-submit" type="button" disabled>Преобразовать</button><button id="conversion-clear" type="button" class="clipboard-button" disabled>Очистить</button></div>
+        <progress id="conversion-progress" max="100" hidden aria-label="Обработка файла"></progress>
+        <div id="conversion-status" class="tool-status" role="status" aria-live="polite"></div>
+        <div id="conversion-result" hidden>
+          <b id="conversion-result-name"></b><p id="conversion-result-info" class="muted"></p>
+          <video id="conversion-video" class="converter-player" controls playsinline preload="metadata" hidden></video>
+          <audio id="conversion-audio" controls preload="metadata" hidden></audio>
+          <p id="conversion-preview-hint" class="muted"></p>
+          <button id="conversion-save" type="button">Сохранить файл</button>
+          <p class="muted">Результат доступен 15 минут. Сохрани его до закрытия панели.</p>
+        </div>
+      </div>
+    </section>
     <section class="card">
       <b>Telegram ID</b>
       <div class="grid"><button id="my-id" type="button">Мой ID</button><button id="bot-id" type="button">ID Дельты</button></div>
-      <label for="id-target">Публичная группа или канал</label>
-      <input id="id-target" maxlength="33" placeholder="@username" autocapitalize="none" spellcheck="false">
-      <button id="lookup-id" type="button">Узнать ID</button>
+      <label for="id-target">ID пользователя или @username группы/канала</label>
+      <input id="id-target" maxlength="33" placeholder="123456789 или @username" autocapitalize="none" spellcheck="false">
+      <button id="lookup-id" type="button">Найти</button>
       <button id="select-id" type="button">Выбрать в Telegram</button>
       <p class="muted">Для пользователя, бота или приватной группы Telegram откроет выбор в чате с Дельтой.</p>
+      <p class="muted">По числовому ID покажу имя и username, если Telegram даст доступ к профилю. Незнакомого боту пользователя найти удаётся не всегда.</p>
       <div id="id-status" class="tool-status" role="status"></div>
       <button id="copy-id" type="button" hidden>Скопировать ID</button>
+      <a id="id-profile-link" hidden target="_blank" rel="noopener noreferrer">Открыть профиль в Telegram</a>
     </section>
     <section class="card">
       <b>Скачать видео или GIF</b>
@@ -277,499 +431,71 @@
     </div>
     <div id="translation-status" class="tool-status" role="status" aria-live="polite"></div>
   </div>
+  <div id="markets-panel" class="market-panel" role="tabpanel" aria-labelledby="tab-markets" hidden>
+    <div class="market-head"><h2>Рынки</h2><div class="market-head-actions"><button id="market-fullscreen" type="button" aria-pressed="false" aria-describedby="market-fullscreen-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/></svg><span id="market-fullscreen-label">На весь экран</span></button><button id="market-refresh" type="button">Обновить</button></div></div>
+    <p id="market-fullscreen-note" class="market-muted" role="status" aria-live="polite"></p>
+    <p class="market-muted">Котировки, события и анализ — в одном месте.</p>
+    <div id="market-status" role="status" aria-live="polite" class="market-muted"></div>
+    <section class="market-card market-controls">
+      <div class="market-row"><div><label for="market-kind">Рынок</label><select id="market-kind"><option value="ru" selected>Российские акции</option><option value="us">США · акции и ETF</option><option value="crypto">Криптовалюты · USD</option></select></div><div><label for="market-symbols">Свой список тикеров</label><input id="market-symbols" maxlength="400" placeholder="SBER, OZON, YDEX, T"></div></div>
+      <p class="market-muted">Пустой список — популярные инструменты. Введи до 20 тикеров через запятую и нажми Enter. Выбери инструмент в таблице для графика и стакана.</p>
+    </section>
+    <div class="market-grid">
+      <section class="market-card market-area-chart">
+          <div class="market-chart-heading"><h3 id="market-chart-title">График</h3><select id="market-period" aria-label="Период графика"><option value="1d">1 день</option><option value="1w">Неделя</option><option value="1m" selected>Месяц</option><option value="3m">3 месяца</option><option value="1y">Год</option></select></div>
+          <div class="market-price"><span id="market-last-price">—</span><span id="market-last-change"></span></div>
+          <p id="market-price-note" class="market-muted"></p>
+          <div class="market-intervals" role="group" aria-label="Размер одной свечи"><button type="button" data-market-interval="1m" aria-pressed="false">1 мин</button><button type="button" data-market-interval="10m" aria-pressed="false">10 мин</button><button type="button" data-market-interval="1h" aria-pressed="true">1 час</button><button type="button" data-market-interval="1d" aria-pressed="false">1 день</button></div>
+          <canvas id="market-chart" tabindex="0" role="img" aria-label="Свечи и объём; стрелки влево и вправо выбирают свечу, числовые данные доступны ниже"></canvas>
+          <div class="market-chart-nav" role="group" aria-label="Масштаб графика"><button type="button" id="market-zoom-out" aria-label="Уменьшить масштаб">−</button><button type="button" id="market-zoom-all">Весь период</button><button type="button" id="market-zoom-in" aria-label="Увеличить масштаб">+</button></div>
+          <input id="market-chart-position" type="range" min="0" max="0" value="0" aria-label="Участок истории графика" hidden>
+          <p id="market-chart-window" class="market-muted"></p>
+          <p id="market-chart-value" class="market-muted">Выбери инструмент для графика.</p>
+          <p id="market-chart-note" class="market-muted"></p>
+          <details><summary>Данные свечей</summary><div id="market-candles" class="market-scroll"><table class="market-table"><thead><tr><th>Дата</th><th>Открытие</th><th>Макс.</th><th>Мин.</th><th>Закрытие</th><th>Объём</th></tr></thead><tbody id="market-candle-rows"></tbody></table></div></details>
+        </section>
+      <section class="market-card market-area-book" aria-labelledby="market-book-title">
+          <div class="market-book-top"><h3 id="market-book-title">Стакан</h3><button id="market-book-refresh" type="button">Обновить</button></div>
+          <span id="market-book-mode" class="market-book-mode">Нет инструмента</span>
+          <p id="market-book-symbol" class="market-muted"></p>
+          <div class="market-book">
+            <div class="market-book-side"><div class="market-book-label"><b class="market-positive">Покупка</b><span id="market-bid-unit">Объём</span></div><div id="market-bids"></div></div>
+            <div class="market-book-side ask"><div class="market-book-label"><b class="market-negative">Продажа</b><span id="market-ask-unit">Объём</span></div><div id="market-asks"></div></div>
+          </div>
+          <p id="market-book-spread" class="market-muted"></p><p id="market-book-note" class="market-muted" role="status" aria-live="polite">Выбери инструмент.</p>
+        </section>
+      <section class="market-card market-area-quotes">
+          <h3>Инструменты</h3>
+          <label for="market-filter">Найти в списке</label><input id="market-filter" type="search" placeholder="Тикер или компания" autocomplete="off">
+          <div class="market-filters" aria-label="Сортировка котировок"><button data-market-sort="all" aria-pressed="true">Все</button><button data-market-sort="up" aria-pressed="false">Рост ↗</button><button data-market-sort="down" aria-pressed="false">Падение ↘</button></div>
+          <div class="market-scroll"><table class="market-table"><thead><tr><th>Инструмент</th><th>Цена</th><th>Изм.</th><th>Объём</th></tr></thead><tbody id="market-quotes"></tbody></table></div>
+          <p id="market-quote-note" class="market-muted"></p>
+        </section>
+      <section class="market-card market-area-calc">
+          <h3>Валютный калькулятор</h3>
+          <label for="currency-amount">Сумма</label><input id="currency-amount" inputmode="decimal" value="1000" maxlength="40">
+          <div class="market-row"><div><label for="currency-from">Из</label><select id="currency-from" aria-label="Исходная валюта"></select></div><div><label for="currency-to">В</label><select id="currency-to" aria-label="Итоговая валюта"></select></div></div>
+          <button id="currency-swap" type="button" class="secondary">Поменять валюты ↔</button>
+          <button id="currency-convert" type="button">Рассчитать</button>
+          <div id="currency-result" role="status" aria-live="polite">—</div><p id="currency-note" class="market-muted">Официальные курсы ЦБ с датой действия, без банковских комиссий и спреда.</p>
+        </section>
+      <section class="market-card market-area-news">
+          <h3>События и новости</h3><p class="market-muted">Финансовая лента и мировые публикации за сутки. Влияние новости на цену — гипотеза, которую можно обсудить с консультантом.</p>
+          <div id="market-news"></div><p id="market-news-note" class="market-muted"></p>
+        </section>
+      <section class="market-card market-area-advisor">
+          <div class="market-head"><h3>Консультант</h3><button id="market-chat-clear" type="button" class="secondary">Очистить</button></div>
+          <p class="market-muted">Отдельный диалог по выбранному инструменту и последним 120 свечам выбранного периода. На обычное общение с Дельтой не влияет.</p>
+          <p id="market-chat-context" class="market-muted"></p>
+          <div id="market-chat" role="log" aria-live="polite"></div>
+          <form id="market-chat-form"><label for="market-question">Вопрос</label><textarea id="market-question" maxlength="2000" placeholder="Что видно по тренду? Какие риски учесть?"></textarea><button id="market-chat-send" type="submit">Спросить</button></form>
+          <p id="market-chat-status" class="market-muted" role="status"></p>
+          <p class="market-muted">Рекомендации — по запросу. Прогнозы не гарантируют доходность. История консультанта хранится отдельно до двух часов и исчезает при перезапуске.</p>
+        </section>
+    </div>
+  </div>
 </main>
-<script>
-  const tg = window.Telegram?.WebApp; if (tg) { tg.ready(); tg.expand(); }
-  const initData = tg?.initData || ""; const status = document.querySelector("#status");
-  const api = async (method="GET", body=null, path="/api/profile", extraHeaders={}) => {
-    const file = body instanceof File;
-    const response = await fetch(path, {method, headers:{"X-Telegram-Init-Data":initData,"Content-Type":file ? (body.type || "application/octet-stream") : "application/json",...extraHeaders}, body:file ? body : body?JSON.stringify(body):null});
-    if (!response.ok) {
-      const message = await response.text();
-      if (response.status === 401) throw new Error(message === "initData просрочен"
-        ? "Срок доступа к панели истёк. Полностью закрой Mini App и открой заново через «RP и функции»."
-        : "Не удалось подтвердить доступ. Полностью закрой панель и открой заново кнопкой бота внутри Telegram.");
-      throw new Error(message || `HTTP ${response.status}`);
-    }
-    return response.json();
-  };
-  const render = p => {
-    document.querySelector("#hello").textContent = `${p.user.first_name} · ID ${p.user.id}`;
-    document.querySelector("#content-mode").value = p.content_mode === "adult" ? "adult" : "soft";
-    document.querySelector('#content-mode option[value="adult"]').disabled = Boolean(p.age_restricted);
-    document.querySelector("#age-restriction-hint").hidden = !p.age_restricted;
-    document.querySelector("#stopword").value = p.roleplay_stopword || "стоп";
-    document.querySelector("#configuration").value = p.roleplay_configuration;
-    renderCharacter(p);
-    document.querySelector("#preferences").value = p.roleplay_preferences;
-    document.querySelector("#boundaries").value = p.roleplay_boundaries;
-    document.querySelector("#fetishes").textContent = `Распознанные темы: ${p.roleplay_fetishes.length ? p.roleplay_fetishes.join(", ") : "пока нет"}`;
-    document.querySelector("#mode").textContent = p.content_mode === "adult" ? "18+" : "Мягкий";
-    document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
-    renderAppearance(p, true);
-  };
-  const appearanceStatus = document.querySelector("#appearance-status");
-  const fileInput = document.querySelector("#appearance-file");
-  const preview = document.querySelector("#appearance-preview");
-  const appearanceMode = document.querySelector("#appearance-mode");
-  const descriptionInput = document.querySelector("#appearance-description");
-  const appearanceInputArea = document.querySelector("#appearance-input-area");
-  const pasteAppearance = document.querySelector("#paste-appearance");
-  const characterInputArea = document.querySelector("#character-input-area");
-  const characterUpload = document.querySelector("#character-upload");
-  const characterFileInput = document.querySelector("#character-file");
-  const characterPreview = document.querySelector("#character-preview");
-  const imageTypes = ["image/png", "image/jpeg", "image/webp"];
-  const appearanceEditor = document.querySelector("#appearance-editor");
-  const editText = document.querySelector("#appearance-edit-text");
-  let appearanceEditing = false, savedDescription = "", editOriginal = "", savedSpecies = null;
-  const profileFields = ["personality", "behavior", "preferences", "fetishes", "boundaries"];
-  const emptyProfile = () => Object.fromEntries(profileFields.map(name => [name, ""]));
-  const profileDraft = () => Object.fromEntries(profileFields.map(name => [name, document.querySelector(`#delta-${name}`).value.trim()]));
-  let savedProfile = emptyProfile(), characterBusy = false, settingsBusy = false, characterSnapshot = "";
-  let savedTopicText = "Распознанные темы: пока нет.";
-  const updateAppearanceTopicHint = () => {
-    document.querySelector("#delta-fetish-topics").textContent = document.querySelector("#delta-fetishes").value.trim() === savedProfile.fetishes ? savedTopicText : "Распознанные темы обновятся после сохранения.";
-  };
-  let appearanceBusy = false, clipboardBusy = false, appearanceEnabled = false, customAppearance = false, selectedFile = null, previewUrl = null, selectionRevision = 0;
-  let selectedCharacterFile = null, characterPreviewUrl = null, characterSelectionRevision = 0, imagePasteTarget = "delta";
-  const updateAppearanceButtons = () => {
-    const busy = appearanceBusy || clipboardBusy || appearanceEditing || characterBusy || settingsBusy;
-    document.querySelector("#edit-appearance").hidden = !customAppearance || appearanceEditing;
-    document.querySelector("#edit-appearance").disabled = busy || !appearanceEnabled;
-    document.querySelector("#save-appearance-edit").disabled = appearanceBusy || !editText.value.trim() || editText.value.trim() === editOriginal;
-    document.querySelector("#cancel-appearance-edit").disabled = appearanceBusy;
-    editText.disabled = appearanceBusy;
-    document.querySelector("#choose-appearance").disabled = busy || !appearanceEnabled;
-    document.querySelector("#apply-appearance").disabled = busy || !appearanceEnabled || !(selectedFile || (appearanceMode.value === "text" && descriptionInput.value.trim()));
-    document.querySelector("#reset-appearance").disabled = busy || !customAppearance;
-    pasteAppearance.hidden = appearanceMode.value !== "image";
-    pasteAppearance.disabled = busy || !appearanceEnabled;
-    appearanceInputArea.setAttribute("aria-busy", String(busy));
-    fileInput.disabled = busy || !appearanceEnabled;
-    appearanceMode.disabled = busy;
-    descriptionInput.disabled = busy || !appearanceEnabled;
-    document.querySelector("#appearance-species").disabled = busy || !appearanceEnabled;
-    const speciesValue = document.querySelector("#appearance-species").value.trim();
-    document.querySelector("#save-appearance-species").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || !speciesValue || (savedSpecies?.source === "user" && speciesValue === savedSpecies.name);
-    document.querySelector("#appearance-notes").disabled = busy || !appearanceEnabled;
-    document.querySelector("#appearance-same-character").disabled = busy || !appearanceEnabled || !customAppearance;
-    for (const name of profileFields) document.querySelector(`#delta-${name}`).disabled = busy || !appearanceEnabled || !customAppearance;
-    updateAppearanceTopicHint();
-    document.querySelector("#save-delta-profile").disabled = busy || !appearanceEnabled || !customAppearance || Boolean(selectedFile) || JSON.stringify(profileDraft()) === JSON.stringify(savedProfile);
-    updateCharacterButtons();
-  };
-  const renderAppearance = (p, preserveProfileDraft=false) => {
-    const nextDescription = p.delta_appearance || "";
-    const nextProfile = {...emptyProfile(), ...(p.delta_appearance_profile || {})};
-    const topics = (p.delta_appearance_topics || []).map(topic => topic.name);
-    savedTopicText = topics.length ? `Распознанные темы: ${topics.join(", ")}.` : "Распознанные темы: пока нет.";
-    const keepDraft = preserveProfileDraft && nextDescription === savedDescription && JSON.stringify(nextProfile) === JSON.stringify(savedProfile);
-    savedDescription = nextDescription; savedProfile = nextProfile;
-    if (!keepDraft) {
-      for (const name of profileFields) document.querySelector(`#delta-${name}`).value = savedProfile[name];
-      document.querySelector("#delta-profile-status").textContent="";
-    }
-    document.querySelector("#delta-profile-hint").textContent = savedDescription ? "Для текущего облика. Заполни вручную: эти сведения не определяются по картинке." : "Сначала задай облик Дельты, затем заполни его характер и поведение.";
-    customAppearance = Boolean(p.delta_appearance);
-    appearanceEnabled = Boolean(p.appearance_upload_enabled && initData);
-    const species = p.delta_species;
-    savedSpecies = species || null;
-    // Keep the stored text unchanged for editing and optimistic concurrency.
-    // Only remove the application-generated header from its presentation.
-    let visibleDescription = savedDescription;
-    if (species && typeof species.name === "string") {
-      const header = species.source === "user" ? `Вид со слов пользователя: ${species.name}. ` : species.status === "probable" ? `Вероятно, ${species.name}. ` : `${species.name}. `;
-      if (visibleDescription.startsWith(header)) visibleDescription = visibleDescription.slice(header.length);
-    }
-    document.querySelector("#appearance").textContent = visibleDescription || (customAppearance ? savedDescription : "Базовый облик");
-    document.querySelector("#appearance-empty-hint").hidden = customAppearance;
-    if (p.delta_reference_restricted) appearanceStatus.textContent = "Этот референс используется только для нейтрального общения.";
-    const thumbnail = p.delta_appearance && p.delta_appearance_thumbnail;
-    const savedImage = document.querySelector("#saved-appearance-image");
-    // The server produces only bounded JPEG data URLs; do not load external URLs.
-    const hasThumbnail = typeof thumbnail === "string" && thumbnail.length <= 90000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(thumbnail);
-    if (hasThumbnail) savedImage.src = thumbnail; else savedImage.removeAttribute("src");
-    document.querySelector("#saved-appearance").hidden = !hasThumbnail;
-    const speciesStatus = document.querySelector("#appearance-species-status");
-    speciesStatus.hidden = !customAppearance || !species;
-    speciesStatus.textContent = !species ? "" : species.status === "unknown" ? "Вид пока не определён" : species.source === "user" ? `Вид: ${species.name} · указан тобой` : species.status === "hybrid" ? "Смешанный или авторский дизайн · по изображению" : `Вид: ${species.name} · по изображению`;
-    const checkLabels = {match:"Видимые признаки согласуются с указанным видом.",unconfirmed:"По этому ракурсу указанный вид пока не подтверждён.",conflict:"Распознавание расходится с указанным видом. Проверь описание или добавь более ясный референс."};
-    const speciesCheck = document.querySelector("#appearance-species-check");
-    const checkLabel = species && species.source === "user" ? checkLabels[species.visual_check] || "" : "";
-    speciesCheck.textContent = checkLabel;
-    speciesCheck.hidden = !customAppearance || !checkLabel;
-    updateAppearanceButtons();
-  };
-  const updateCharacterButtons = () => {
-    const busy = characterBusy || appearanceBusy || clipboardBusy || appearanceEditing || settingsBusy;
-    characterFileInput.disabled = busy || !appearanceEnabled;
-    document.querySelector("#choose-character").disabled = busy || !appearanceEnabled;
-    document.querySelector("#paste-character").disabled = busy || !appearanceEnabled;
-    characterInputArea.setAttribute("aria-busy", String(busy));
-    document.querySelector("#character-file-name").textContent = selectedCharacterFile?.name || "";
-    document.querySelector("#analyze-character").disabled = busy || !appearanceEnabled || !selectedCharacterFile;
-    document.querySelector("#save-character-description").disabled = busy || document.querySelector("#character").value.trim() === characterSnapshot;
-    for (const id of ["character", "character-species", "character-notes"]) document.querySelector(`#${id}`).disabled = busy;
-    document.querySelector("#save").disabled = busy;
-  };
-  const renderCharacter = p => {
-    characterSnapshot = p.roleplay_character || "";
-    document.querySelector("#rp-state").textContent = p.roleplay_active ? "Активна" : "Выключена";
-    document.querySelector("#character").value = characterSnapshot;
-    const thumbnail = characterSnapshot && p.roleplay_character_thumbnail;
-    const hasThumbnail = typeof thumbnail === "string" && thumbnail.length <= 90000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(thumbnail);
-    const image = document.querySelector("#saved-character-image");
-    if (hasThumbnail) image.src = thumbnail; else image.removeAttribute("src");
-    document.querySelector("#saved-character").hidden = !hasThumbnail;
-    updateCharacterButtons();
-  };
-  const characterStatus = document.querySelector("#character-status");
-  document.querySelector("#character").addEventListener("input", () => { updateCharacterButtons(); characterStatus.className=""; characterStatus.textContent=document.querySelector("#character").value.trim() === characterSnapshot ? "" : "Есть несохранённые изменения."; });
-  const characterFail = error => { characterStatus.className="error"; characterStatus.textContent=error.message; };
-  const clearCharacterSelection = () => {
-    characterSelectionRevision++;
-    if (characterPreviewUrl) URL.revokeObjectURL(characterPreviewUrl);
-    characterPreviewUrl=null; selectedCharacterFile=null; characterFileInput.value="";
-    characterPreview.removeAttribute("src"); characterPreview.hidden=true;
-  };
-  const imageFileError = file => file.size > 20 * 1024 * 1024 ? "Картинка должна быть до 20 МБ." : !imageTypes.includes(file.type) && !(file.type === "" && /\.(jpe?g|png|webp)$/i.test(file.name)) ? "Выбери картинку JPEG, PNG или WebP." : "";
-  const selectCharacterFile = file => {
-    if (!file || characterBusy || appearanceBusy || appearanceEditing || settingsBusy || !appearanceEnabled) return false;
-    const error=imageFileError(file);
-    if (error) { characterFail(new Error(error)); return false; }
-    clearCharacterSelection(); selectedCharacterFile=file; characterPreviewUrl=URL.createObjectURL(file);
-    characterPreview.src=characterPreviewUrl; characterPreview.hidden=false; imagePasteTarget="character";
-    characterStatus.className=""; characterStatus.textContent=""; updateAppearanceButtons(); return true;
-  };
-  document.querySelector("#choose-character").addEventListener("click", () => characterFileInput.click());
-  characterFileInput.addEventListener("change", () => selectCharacterFile(characterFileInput.files[0]));
-  characterUpload.addEventListener("toggle", () => {
-    if (characterUpload.open) imagePasteTarget="character";
-    else { characterSelectionRevision++; if (imagePasteTarget === "character") imagePasteTarget="delta"; }
-  });
-  document.querySelector("#save-character-description").addEventListener("click", async () => {
-    if (document.querySelector("#save-character-description").disabled) return;
-    characterBusy = true; updateAppearanceButtons(); characterStatus.className=""; characterStatus.textContent="Сохраняю описание…";
-    try {
-      const profile = await api("PATCH", {roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot});
-      renderCharacter(profile); characterStatus.className="ok"; characterStatus.textContent="Описание твоего персонажа сохранено.";
-    } catch(error) { characterStatus.className="error"; characterStatus.textContent=error.message; }
-    finally { characterBusy=false; updateAppearanceButtons(); }
-  });
-  document.querySelector("#analyze-character").addEventListener("click", async () => {
-    if (document.querySelector("#analyze-character").disabled) return;
-    const file = selectedCharacterFile;
-    characterBusy=true; updateAppearanceButtons(); characterStatus.className=""; characterStatus.textContent="Разбираю твоего персонажа…";
-    try {
-      const headers = {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#character-species").value.trim(),notes:document.querySelector("#character-notes").value.trim()}))};
-      const profile=await api("POST",file,"/api/profile/character/appearance",headers);
-      renderCharacter(profile); clearCharacterSelection(); document.querySelector("#character-species").value=""; document.querySelector("#character-notes").value="";
-      characterStatus.className="ok"; characterStatus.textContent="Твой облик сохранён. Проверь описание и исправь детали при необходимости.";
-    } catch(error) { characterStatus.className="error"; characterStatus.textContent=error.message; }
-    finally { characterBusy=false; updateAppearanceButtons(); }
-  });
-  for (const name of profileFields) document.querySelector(`#delta-${name}`).addEventListener("input", () => { updateAppearanceButtons(); const output=document.querySelector("#delta-profile-status"); output.className=""; output.textContent=JSON.stringify(profileDraft()) === JSON.stringify(savedProfile) ? "" : "Есть несохранённые изменения."; });
-  document.querySelector("#save-delta-profile").addEventListener("click", async () => {
-    if (document.querySelector("#save-delta-profile").disabled) return;
-    const output=document.querySelector("#delta-profile-status"); appearanceBusy=true; updateAppearanceButtons(); output.className=""; output.textContent="Сохраняю профиль…";
-    try {
-      const profile=await api("PATCH",{profile:profileDraft(),expected_appearance:savedDescription,expected_profile:savedProfile},"/api/profile/appearance/behavior");
-      renderAppearance(profile); output.className="ok"; output.textContent="Характер и поведение Дельты сохранены.";
-    } catch(error) { output.className="error"; output.textContent=error.message; }
-    finally { appearanceBusy=false; updateAppearanceButtons(); }
-  });
-  const clearSelection = () => {
-    selectionRevision++;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = null; selectedFile = null; fileInput.value = "";
-    preview.removeAttribute("src"); preview.hidden = true;
-    document.querySelector("#appearance-file-name").textContent = "";
-  };
-  const appearanceFail = error => { appearanceStatus.className="error"; appearanceStatus.textContent = initData ? `Ошибка: ${error.message}` : "Открой панель кнопкой внутри Telegram."; };
-  document.querySelector("#appearance-species").addEventListener("input", updateAppearanceButtons);
-  document.querySelector("#save-appearance-species").addEventListener("click", async () => {
-    if (document.querySelector("#save-appearance-species").disabled) return;
-    const name = document.querySelector("#appearance-species").value.trim();
-    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Сохраняю вид…";
-    try {
-      const profile = await api("PATCH", {species:name,expected_appearance:savedDescription,expected_species:savedSpecies}, "/api/profile/appearance/species");
-      renderAppearance(profile); appearanceStatus.className="ok"; appearanceStatus.textContent="Вид сохранён. Это твоё уточнение.";
-    } catch(error) { appearanceFail(error); }
-    finally { appearanceBusy=false; updateAppearanceButtons(); }
-  });
-  document.querySelector("#edit-appearance").addEventListener("click", () => {
-    if (appearanceBusy || clipboardBusy || !customAppearance || !appearanceEnabled) return;
-    editOriginal = savedDescription; editText.value = savedDescription;
-    appearanceEditing = true; appearanceEditor.hidden = false;
-    appearanceStatus.textContent = ""; updateAppearanceButtons(); editText.focus();
-  });
-  editText.addEventListener("input", updateAppearanceButtons);
-  document.querySelector("#cancel-appearance-edit").addEventListener("click", () => {
-    if (appearanceBusy) return;
-    appearanceEditing = false; appearanceEditor.hidden = true; editText.value = "";
-    appearanceStatus.textContent = ""; updateAppearanceButtons();
-  });
-  document.querySelector("#save-appearance-edit").addEventListener("click", async () => {
-    if (appearanceBusy || !appearanceEditing || !editText.value.trim()) return;
-    appearanceBusy = true; updateAppearanceButtons();
-    appearanceStatus.className = ""; appearanceStatus.textContent = "Сохраняю исправления…";
-    try {
-      const profile = await api("PATCH", {appearance:editText.value, expected_appearance:editOriginal}, "/api/profile/appearance");
-      appearanceEditing = false; appearanceEditor.hidden = true; editText.value = "";
-      renderAppearance(profile); appearanceStatus.className = "ok";
-      appearanceStatus.textContent = "Описание исправлено. Дельта будет учитывать изменения.";
-    } catch (error) { appearanceFail(error); }
-    finally { appearanceBusy = false; updateAppearanceButtons(); }
-  });
-  document.querySelector("#choose-appearance").addEventListener("click", () => fileInput.click());
-  appearanceMode.addEventListener("change", () => {
-    clearSelection(); appearanceStatus.textContent = "";
-    const text = appearanceMode.value === "text";
-    document.querySelector("#appearance-text-panel").hidden = !text;
-    document.querySelector("#appearance-image-hint").hidden = text;
-    document.querySelector("#appearance-species-panel").hidden = text;
-    document.querySelector("#appearance-clipboard-hint").hidden = text;
-    appearanceInputArea.querySelector(".appearance-actions").classList.toggle("text-source", text);
-    document.querySelector("#choose-appearance").textContent = text ? "Загрузить TXT/JSON" : "Выбрать картинку";
-    fileInput.accept = text ? ".txt,.json,text/plain,application/json" : "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
-    updateAppearanceButtons();
-  });
-  descriptionInput.addEventListener("input", () => { if (selectedFile) clearSelection(); updateAppearanceButtons(); });
-  const selectAppearanceFile = file => {
-    if (!file || appearanceBusy || characterBusy || appearanceEditing || settingsBusy || !appearanceEnabled) return false;
-    if (appearanceMode.value === "text") {
-      if (!/\.(txt|json)$/i.test(file.name) || file.size > 64 * 1024) { appearanceFail(new Error("Выбери TXT/JSON до 64 КБ.")); return false; }
-    } else {
-      const error=imageFileError(file);
-      if (error) { appearanceFail(new Error(error)); return false; }
-    }
-    clearSelection(); imagePasteTarget="delta"; appearanceStatus.className=""; appearanceStatus.textContent="";
-    if (appearanceMode.value === "text") {
-      selectedFile = new File([file], file.name, {type:/\.json$/i.test(file.name) ? "application/json" : "text/plain"});
-    } else {
-      selectedFile = file; previewUrl = URL.createObjectURL(file); preview.src = previewUrl; preview.hidden = false;
-    }
-    document.querySelector("#appearance-file-name").textContent = file.name;
-    updateAppearanceButtons();
-    return true;
-  };
-  fileInput.addEventListener("change", () => selectAppearanceFile(fileInput.files[0]));
-  const imageInputs = {
-    delta:{area:appearanceInputArea,button:pasteAppearance,status:appearanceStatus,available:() => appearanceMode.value === "image",revision:() => selectionRevision,select:selectAppearanceFile,fail:appearanceFail,success:"Картинка добавлена. Проверь превью и нажми «Применить облик»."},
-    character:{area:characterInputArea,button:document.querySelector("#paste-character"),status:characterStatus,available:() => characterUpload.open,revision:() => characterSelectionRevision,select:selectCharacterFile,fail:characterFail,success:"Картинка добавлена. Проверь превью и нажми «Распознать мой облик»."}
-  };
-  const inputAvailable = input => appearanceEnabled && !document.querySelector("#rp-panel").hidden && input.available();
-  const canPasteImage = input => inputAvailable(input) && !appearanceBusy && !characterBusy && !clipboardBusy && !appearanceEditing && !settingsBusy;
-  const pasteImageFile = (input, file) => {
-    if (input.select(file)) { input.status.className="ok"; input.status.textContent=input.success; }
-  };
-  const readImageClipboard = async input => {
-    if (!canPasteImage(input)) return;
-    const fallback = "Этот клиент не разрешил прочитать буфер. Нажми Ctrl+V в блоке картинки или выбери файл.";
-    if (!navigator.clipboard?.read) { input.fail(new Error(fallback)); input.area.focus({preventScroll:true}); return; }
-    const revision = input.revision();
-    clipboardBusy=true; updateAppearanceButtons(); input.status.className=""; input.status.textContent="Читаю картинку из буфера…";
-    try {
-      const items = await navigator.clipboard.read();
-      let image = null;
-      for (const item of items) {
-        const type = imageTypes.find(type => item.types.includes(type));
-        if (type) { image = {blob:await item.getType(type),type}; break; }
-      }
-      if (revision !== input.revision() || !inputAvailable(input)) {
-        if (revision === input.revision() || !inputAvailable(input)) { input.status.className=""; input.status.textContent="Вставка отменена. Вернись к облику и повтори её."; }
-        return;
-      }
-      if (!image) throw new Error("В буфере нет картинки JPEG, PNG или WebP. Скопируй само изображение, а не ссылку на него.");
-      const extension = {"image/png":"png","image/jpeg":"jpg","image/webp":"webp"}[image.type];
-      pasteImageFile(input, new File([image.blob], `Картинка из буфера.${extension}`, {type:image.type}));
-    } catch(error) {
-      if (!inputAvailable(input)) {
-        input.status.className=""; input.status.textContent="Вставка отменена. Вернись к облику и повтори её.";
-      } else if (revision === input.revision()) {
-        input.fail(new Error(error.name === "NotAllowedError" || error.name === "SecurityError" ? fallback : error.message));
-        input.area.focus({preventScroll:true});
-      }
-    } finally { clipboardBusy=false; updateAppearanceButtons(); }
-  };
-  for (const [name, input] of Object.entries(imageInputs)) {
-    for (const event of ["focusin", "pointerdown"]) input.area.addEventListener(event, () => { imagePasteTarget=name; });
-    input.button.addEventListener("click", () => readImageClipboard(input));
-    input.area.addEventListener("dragover", event => {
-      if (Array.from(event.dataTransfer?.types || []).includes("Files")) {
-        event.preventDefault();
-        if (canPasteImage(input)) input.area.classList.add("drag-over");
-      }
-    });
-    input.area.addEventListener("dragleave", event => {
-      if (!input.area.contains(event.relatedTarget)) input.area.classList.remove("drag-over");
-    });
-    input.area.addEventListener("drop", event => {
-      input.area.classList.remove("drag-over");
-      const files=Array.from(event.dataTransfer?.files || []);
-      if (!files.length) return;
-      event.preventDefault();
-      if (canPasteImage(input)) pasteImageFile(input, files.find(file => file.type.startsWith("image/")) || files[0]);
-    });
-  }
-  document.addEventListener("paste", event => {
-    if (!document.querySelector("#translate-panel").hidden) return;
-    if (event.defaultPrevented || event.target?.closest?.("input,textarea,[contenteditable]")) return;
-    const input=Object.values(imageInputs).find(input => input.area.contains(event.target)) || imageInputs[imagePasteTarget];
-    if (!canPasteImage(input)) return;
-    const items = Array.from(event.clipboardData?.items || []);
-    const file = items.find(item => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile()
-      || Array.from(event.clipboardData?.files || []).find(file => file.type.startsWith("image/"));
-    if (file) { event.preventDefault(); pasteImageFile(input, file); }
-  });
-  document.querySelector("#apply-appearance").addEventListener("click", async () => {
-    if (appearanceBusy || (!selectedFile && !descriptionInput.value.trim())) return;
-    appearanceBusy = true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent=appearanceMode.value === "text" ? "Сохраняю описание…" : "Разбираю внешность…";
-    try {
-      const headers = appearanceMode.value === "image" ? {"X-Appearance-Options":encodeURIComponent(JSON.stringify({species:document.querySelector("#appearance-species").value.trim(),notes:document.querySelector("#appearance-notes").value.trim(),update_existing:document.querySelector("#appearance-same-character").checked}))} : {};
-      const profile = await api(appearanceMode.value === "text" ? "PUT" : "POST", selectedFile || {appearance:descriptionInput.value}, "/api/profile/appearance", headers);
-      renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Облик сохранён. Теперь можно вернуться в чат.";
-      document.querySelector("#appearance-species").value="";
-      document.querySelector("#appearance-notes").value="";
-      tg?.HapticFeedback?.notificationOccurred("success");
-    } catch(error) { appearanceFail(error); }
-    finally { appearanceBusy=false; updateAppearanceButtons(); }
-  });
-  document.querySelector("#reset-appearance").addEventListener("click", async () => {
-    if (appearanceBusy) return;
-    appearanceBusy=true; updateAppearanceButtons(); appearanceStatus.className=""; appearanceStatus.textContent="Возвращаю базовый облик…";
-    try {
-      const profile = await api("DELETE", null, "/api/profile/appearance");
-      renderAppearance(profile); clearSelection(); descriptionInput.value=""; appearanceStatus.className="ok"; appearanceStatus.textContent="Базовый облик возвращён.";
-      document.querySelector("#appearance-species").value=""; document.querySelector("#appearance-same-character").checked=false;
-      document.querySelector("#appearance-notes").value="";
-      tg?.HapticFeedback?.notificationOccurred("success");
-    } catch(error) { appearanceFail(error); }
-    finally { appearanceBusy=false; updateAppearanceButtons(); }
-  });
-  for (const name of ["rp", "tools", "translate"]) document.querySelector(`#tab-${name}`).addEventListener("click", () => {
-    for (const tab of ["rp", "tools", "translate"]) { document.querySelector(`#tab-${tab}`).setAttribute("aria-selected", String(tab === name)); document.querySelector(`#${tab}-panel`).hidden = tab !== name; }
-    document.body.classList.toggle("translation-view", name === "translate");
-  });
-  const translationLanguages=[['ru','Русский'],['en','Английский'],['uk','Украинский'],['be','Белорусский'],['de','Немецкий'],['fr','Французский'],['es','Испанский'],['it','Итальянский'],['pt','Португальский'],['pl','Польский'],['nl','Нидерландский'],['cs','Чешский'],['tr','Турецкий'],['kk','Казахский'],['zh','Китайский'],['ja','Японский'],['ko','Корейский'],['ar','Арабский'],['hi','Хинди'],['ka','Грузинский']];
-  const translationPanel=document.querySelector('#translate-panel'), translationInput=document.querySelector('#translation-input'), translationOutput=document.querySelector('#translation-output'), translationSource=document.querySelector('#translation-source'), translationTarget=document.querySelector('#translation-target'), translationStatus=document.querySelector('#translation-status'), translationUpload=document.querySelector('#translation-upload'), translationFileInput=document.querySelector('#translation-file'), translationPreview=document.querySelector('#translation-preview');
-  for (const [select, items] of [[translationSource,[['auto','Определить язык'],...translationLanguages]],[translationTarget,translationLanguages]]) for(const [code,label] of items) {const option=document.createElement('option'); option.value=code; option.textContent=label; select.append(option);}
-  translationSource.value='auto'; translationTarget.value='ru';
-  let translationMode='text', translationBusy=false, translationExportBusy=false, translationRevision=0, translationDetected=null, translationPreviewUrl=null, translationDraft='';
-  const translationFiles={image:null,document:null};
-  const translationLanguageName=code=>translationLanguages.find(item=>item[0]===code)?.[1] || '';
-  const updateTranslationButtons=()=>{
-    const validText=translationInput.value.trim() && translationInput.value.length<=5000;
-    document.querySelector('#translation-submit').disabled=translationBusy || (translationMode==='text' ? !validText : !translationFiles[translationMode]);
-    document.querySelector('#translation-swap').disabled=translationBusy || translationMode!=='text' || (translationSource.value==='auto' && !translationDetected) || translationOutput.value.length>5000;
-    for(const id of ['translation-copy','translation-txt','translation-docx']) document.querySelector(`#${id}`).disabled=translationBusy || translationExportBusy || !translationOutput.value;
-    for(const id of ['translation-choose','translation-paste']) document.querySelector(`#${id}`).disabled=translationBusy;
-    document.querySelector('#translation-count').textContent=translationMode==='text' ? `${translationInput.value.length} / 5000` : (translationInput.value ? `${translationInput.value.length} символов` : '');
-  };
-  const invalidateTranslation=()=>{
-    translationRevision++; translationDetected=null; translationOutput.value=''; document.querySelector('#translation-detected').textContent='';
-    translationStatus.className='tool-status'; translationStatus.textContent=translationBusy ? 'Запрос ещё выполняется. Изменённый текст переведи повторно.' : '';
-    updateTranslationButtons();
-  };
-  const renderTranslationFile=()=>{
-    if(translationPreviewUrl) {URL.revokeObjectURL(translationPreviewUrl); translationPreviewUrl=null;}
-    const file=translationFiles[translationMode]; translationPreview.hidden=true; translationPreview.removeAttribute('src');
-    document.querySelector('#translation-file-name').textContent=file ? `${file.name} · ${(file.size/1024/1024).toFixed(2)} МБ` : '';
-    if(file && translationMode==='image') {translationPreviewUrl=URL.createObjectURL(file); translationPreview.src=translationPreviewUrl; translationPreview.hidden=false;}
-  };
-  const chooseTranslationFile=file=>{
-    if(!file || translationMode==='text' || translationBusy) return;
-    if(!file.size || file.size>20*1024*1024) {translationStatus.className='tool-status error'; translationStatus.textContent='Выбери файл размером до 20 МБ.'; return;}
-    if(translationMode==='image' && !['image/jpeg','image/png','image/webp'].includes(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {translationStatus.className='tool-status error'; translationStatus.textContent='Поддерживаются JPEG, PNG и WebP.'; return;}
-    translationFiles[translationMode]=file; translationInput.value=''; invalidateTranslation(); renderTranslationFile();
-  };
-  for(const button of document.querySelectorAll('[data-translation-mode]')) button.addEventListener('click',()=>{
-    if(translationMode==='text') translationDraft=translationInput.value;
-    translationMode=button.dataset.translationMode; invalidateTranslation();
-    for(const other of document.querySelectorAll('[data-translation-mode]')) other.setAttribute('aria-pressed',String(other===button));
-    translationInput.readOnly=translationMode!=='text'; translationInput.value=translationMode==='text' ? translationDraft : '';
-    translationInput.placeholder=translationMode==='text' ? 'Введите текст' : 'Здесь появится прочитанный текст';
-    document.querySelector('#translation-input-label').textContent=translationMode==='text' ? 'Исходный текст' : 'Текст из файла';
-    translationUpload.hidden=translationMode==='text'; document.querySelector('#translation-paste').hidden=translationMode!=='image';
-    translationFileInput.accept=translationMode==='image' ? 'image/jpeg,image/png,image/webp' : '.pdf,.docx,.xlsx,.txt,.md,.csv,.json,.html,.xml,.yaml,.yml,.log,.py,.js,.ts';
-    document.querySelector('#translation-upload-hint').textContent=translationMode==='image' ? 'Перетащите картинку или вставьте из буфера. JPEG, PNG, WebP до 20 МБ.' : 'Перетащите документ. PDF, DOCX, XLSX и текстовые файлы до 20 МБ; до 60000 символов, 40 страниц PDF или 4 страниц скана. Результат — текст перевода.';
-    renderTranslationFile(); updateTranslationButtons();
-  });
-  translationInput.addEventListener('input',()=>{if(translationMode==='text') translationDraft=translationInput.value; invalidateTranslation();});
-  for(const select of [translationSource,translationTarget]) select.addEventListener('change',invalidateTranslation);
-  document.querySelector('#translation-clear').addEventListener('click',()=>{translationInput.value=''; if(translationMode==='text') translationDraft=''; else translationFiles[translationMode]=null; invalidateTranslation(); renderTranslationFile();});
-  document.querySelector('#translation-swap').addEventListener('click',()=>{
-    const source=translationSource.value==='auto' ? translationDetected : translationSource.value;
-    if(!source || translationBusy || translationMode!=='text' || translationOutput.value.length>5000) return;
-    translationInput.value=translationOutput.value || translationInput.value; translationDraft=translationInput.value;
-    translationSource.value=translationTarget.value; translationTarget.value=source; invalidateTranslation();
-  });
-  document.querySelector('#translation-choose').addEventListener('click',()=>{translationFileInput.value=''; translationFileInput.click();});
-  translationFileInput.addEventListener('change',()=>chooseTranslationFile(translationFileInput.files[0]));
-  translationUpload.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer?.types || []).includes('Files')) {event.preventDefault(); if(!translationBusy) translationUpload.classList.add('drag-over');}});
-  translationUpload.addEventListener('dragleave',()=>translationUpload.classList.remove('drag-over'));
-  translationUpload.addEventListener('drop',event=>{translationUpload.classList.remove('drag-over'); const file=event.dataTransfer?.files?.[0]; if(file) {event.preventDefault(); chooseTranslationFile(file);}});
-  translationPanel.addEventListener('paste',event=>{if(translationMode!=='image' || translationBusy) return; const file=Array.from(event.clipboardData?.files || []).find(item=>item.type.startsWith('image/')) || Array.from(event.clipboardData?.items || []).find(item=>item.kind==='file' && item.type.startsWith('image/'))?.getAsFile(); if(file) {event.preventDefault(); chooseTranslationFile(file);}});
-  document.querySelector('#translation-paste').addEventListener('click',async()=>{
-    const revision=translationRevision;
-    try {
-      if(!navigator.clipboard?.read) throw new Error('Используй Ctrl+V в области загрузки или выбери файл.');
-      const items=await navigator.clipboard.read(); const item=items.find(item=>item.types.some(type=>['image/png','image/jpeg','image/webp'].includes(type)));
-      if(!item) throw new Error('В буфере нет картинки.');
-      const type=item.types.find(type=>['image/png','image/jpeg','image/webp'].includes(type)); const blob=await item.getType(type);
-      if(translationMode==='image' && translationRevision===revision) chooseTranslationFile(new File([blob],`clipboard.${type.split('/')[1]}`,{type}));
-    } catch(error) {if(translationMode==='image' && translationRevision===revision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message || 'Не удалось прочитать буфер. Выбери файл.';}}
-  });
-  document.querySelector('#translation-submit').addEventListener('click',async()=>{
-    if(translationBusy) return;
-    const revision=translationRevision, mode=translationMode, source=translationSource.value, target=translationTarget.value, text=translationInput.value, file=translationFiles[mode];
-    translationBusy=true; updateTranslationButtons(); translationStatus.className='tool-status'; translationStatus.textContent=mode==='text' ? 'Перевожу…' : 'Читаю файл и перевожу… Большой документ может занять несколько минут.';
-    try {
-      if(!initData) throw new Error('Открой переводчик внутри Telegram.');
-      const result=mode==='text' ? await api('POST',{text,source,target},'/api/tools/translate') : await api('POST',file,'/api/tools/translate/file',{'X-Translation-Options':encodeURIComponent(JSON.stringify({mode,source,target,file_name:file.name.slice(0,160)}))});
-      if(revision!==translationRevision) return;
-      translationOutput.value=result.text; translationDetected=result.detected_source;
-      if(mode!=='text') translationInput.value=result.source_text || '';
-      document.querySelector('#translation-detected').textContent=source==='auto' && translationDetected ? `Определён язык: ${translationLanguageName(translationDetected)}` : '';
-      translationStatus.textContent='Готово.'; translationStatus.className='tool-status ok';
-    } catch(error) {if(revision===translationRevision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message;}}
-    finally {translationBusy=false; if(revision!==translationRevision) translationStatus.textContent='Данные изменились. Нажми «Перевести» для нового запроса.'; updateTranslationButtons();}
-  });
-  document.querySelector('#translation-copy').addEventListener('click',async()=>{try {await navigator.clipboard.writeText(translationOutput.value); translationStatus.className='tool-status ok'; translationStatus.textContent='Перевод скопирован.';} catch {translationOutput.focus(); translationOutput.select(); translationStatus.textContent='Перевод выделен. Скопируй его вручную.';}});
-  const downloadTranslation=(blob,extension)=>{const url=URL.createObjectURL(blob), link=document.createElement('a'); link.href=url; link.download=`translation-${translationTarget.value}.${extension}`; document.body.append(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000);};
-  document.querySelector('#translation-txt').addEventListener('click',()=>{if(translationOutput.value) downloadTranslation(new Blob(['\ufeff',translationOutput.value],{type:'text/plain;charset=utf-8'}),'txt');});
-  document.querySelector('#translation-docx').addEventListener('click',async()=>{
-    if(!translationOutput.value || translationExportBusy) return;
-    const text=translationOutput.value, revision=translationRevision; translationExportBusy=true; updateTranslationButtons(); translationStatus.textContent='Создаю DOCX…';
-    try {
-      const response=await fetch('/api/tools/translate/export',{method:'POST',headers:{'X-Telegram-Init-Data':initData,'Content-Type':'application/json'},body:JSON.stringify({text})});
-      if(!response.ok) throw new Error(await response.text());
-      const blob=await response.blob(); if(revision===translationRevision) {downloadTranslation(blob,'docx'); translationStatus.className='tool-status ok'; translationStatus.textContent='DOCX готов к скачиванию.';}
-    } catch(error) {if(revision===translationRevision) {translationStatus.className='tool-status error'; translationStatus.textContent=error.message;}}
-    finally {translationExportBusy=false; updateTranslationButtons();}
-  });
-  updateTranslationButtons();
-  const toolCall = async (button, statusId, tool, body, done) => {
-    const output=document.querySelector(statusId); button.disabled=true; output.className="tool-status"; output.textContent="Обрабатываю…";
-    try { if (!initData) throw new Error("Открой панель внутри Telegram."); const result=await api("POST", body, `/api/tools/${tool}`); done(result, output); }
-    catch(error) { output.className="tool-status error"; output.textContent=error.message; }
-    finally { button.disabled=false; }
-  };
-  let copiedId=null;
-  const showId = (result, output) => { copiedId=result.id ?? null; document.querySelector("#copy-id").hidden=copiedId===null; output.textContent=result.message || `${result.title}\nID: ${result.id}`; };
-  for (const [selector, target] of [["#my-id","self"],["#bot-id","bot"],["#select-id","select"],["#lookup-id",null]]) document.querySelector(selector).addEventListener("click", e => toolCall(e.currentTarget,"#id-status","id",{target:target || document.querySelector("#id-target").value.trim()},showId));
-  document.querySelector("#copy-id").addEventListener("click", async () => { try { await navigator.clipboard.writeText(String(copiedId)); document.querySelector("#id-status").textContent=`ID ${copiedId} скопирован.`; } catch { document.querySelector("#id-status").textContent=`ID: ${copiedId}. Выдели текст и скопируй.`; } });
-  document.querySelector("#download-video").addEventListener("click", e => toolCall(e.currentTarget,"#download-status","download",{url:document.querySelector("#download-url").value},(result,output)=>{output.textContent=result.message;}));
-  const fail = e => { status.className="error"; status.textContent = initData ? `Ошибка: ${e.message}` : "Открой панель кнопкой внутри Telegram."; };
-  updateAppearanceButtons();
-  api().then(render).catch(error => {
-    fail(error);
-    document.querySelector("#appearance").textContent = "Не удалось загрузить облик.";
-    appearanceFail(error);
-  });
-  document.querySelector("#save").addEventListener("click", async e => { const button=e.currentTarget; settingsBusy=true; updateAppearanceButtons(); status.textContent="Сохраняю…"; status.className=""; try { const p=await api("PATCH",{content_mode:document.querySelector("#content-mode").value,roleplay_configuration:document.querySelector("#configuration").value,roleplay_character:document.querySelector("#character").value,expected_character:characterSnapshot,roleplay_preferences:document.querySelector("#preferences").value,roleplay_boundaries:document.querySelector("#boundaries").value,roleplay_stopword:document.querySelector("#stopword").value}); render(p); status.className="ok"; status.textContent="Сохранено."; tg?.HapticFeedback?.notificationOccurred("success"); } catch(err) { fail(err); } finally { settingsBusy=false; updateAppearanceButtons(); } });
-  document.querySelector("#clear-rp").addEventListener("click", async e => { if (!window.confirm("Удалить персонажа, предпочтения, границы и распознанные RP-темы?")) return; const button=e.currentTarget; button.disabled=true; try { const p=await api("DELETE",null,"/api/profile/roleplay"); render(p); status.className="ok"; status.textContent="RP-профиль очищен. Остальная память сохранена."; } catch(err) { fail(err); } finally { button.disabled=false; } });
-</script>
+<script src="/static/app.js" defer></script>
+<script src="/static/markets.js" defer></script>
 </body>
 </html>

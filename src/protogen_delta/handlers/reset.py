@@ -12,11 +12,13 @@ from aiogram.types import (
     Message,
 )
 
+from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.input_operations import InputOperations
 from protogen_delta.core.telegram_commands import ModeChange
 from protogen_delta.repositories.user_statistics import UserStatisticsRepository
 from protogen_delta.repositories.users import UsersRepository
 from protogen_delta.services.memory import MemoryService
+from protogen_delta.services.reminders import ReminderService
 from protogen_delta.services.response_engine import ResponseEngine
 
 _RESET_CONFIRMATION_TTL_SECONDS = 300.0
@@ -32,11 +34,18 @@ RESET_CONFIRMATION_TEXT = (
     "• RP-состояния и облики во всех чатах;\n"
     "• накопленные эмоции;\n"
     "• отношения и степень знакомства;\n"
-    "• всё сохранённое пользовательское состояние.\n\n"
+    "• личные напоминания;\n"
+    "• избранные сообщения;\n"
+    "• сохранённые разговорные настройки.\n\n"
+    "Счётчики расходов API и отдельный признак возрастного ограничения сохранятся. "
+    "Резервные копии могут содержать прежние данные до удаления самих копий.\n\n"
     "Это действие нельзя будет отменить."
 )
 
-RESET_SUCCESS_TEXT = "Память о тебе полностью очищена.\n" "Начинаем с нуля."
+RESET_SUCCESS_TEXT = (
+    "Разговорная память и настройки очищены.\n"
+    "Счётчики расходов API и возрастное ограничение, если оно было, сохраняются."
+)
 
 RESET_CANCELLED_TEXT = "Сброс отменён. Ничего не изменилось."
 
@@ -142,6 +151,7 @@ def create_reset_router(
     on_mode_change: ModeChange | None = None,
     user_statistics: UserStatisticsRepository | None = None,
     input_operations: InputOperations | None = None,
+    reminders: ReminderService | None = None,
 ) -> Router:
     """Создать роутер безопасного полного сброса."""
     router = Router(name=__name__)
@@ -154,8 +164,15 @@ def create_reset_router(
 
         created_at = int(time())
 
+        shared_notice = (
+            "\n\nОбщая память связанных аккаунтов тоже будет удалена: архив, факты, эпизоды, "
+            "избранное и короткая история. Настройки и права второго аккаунта сохранятся."
+            if memory is not None
+            and len(memory.dialogue_members(message.from_user.id)) > 1
+            else ""
+        )
         await message.answer(
-            RESET_CONFIRMATION_TEXT,
+            RESET_CONFIRMATION_TEXT + shared_notice,
             reply_markup=_build_reset_keyboard(
                 message.from_user.id,
                 created_at,
@@ -205,6 +222,8 @@ def create_reset_router(
         reset_requester = asyncio.current_task()
 
         async def delete_related_memory() -> None:
+            if reminders is not None:
+                await reminders.delete_user(expected_user_id)
             if memory is not None:
                 await memory.delete_user(expected_user_id)
             if user_statistics is not None:
@@ -220,7 +239,26 @@ def create_reset_router(
                 ):
                     await delete_related_memory()
 
-        await response_engine.reset_user(expected_user_id, cleanup=clear_related_memory)
+        async def reset_linked_memory() -> None:
+            assert input_operations is not None
+            async with input_operations.resetting(
+                expected_user_id, exempt=reset_requester
+            ):
+                await response_engine.reset_user(
+                    expected_user_id, cleanup=delete_related_memory
+                )
+
+        if (
+            input_operations is not None
+            and memory is not None
+            and len(memory.dialogue_members(expected_user_id)) > 1
+        ):
+            # Остановить оба аккаунта до входа в общий барьер состояния.
+            await finish_operation(reset_linked_memory())
+        else:
+            await response_engine.reset_user(
+                expected_user_id, cleanup=clear_related_memory
+            )
         if on_mode_change is not None:
             await on_mode_change(expected_user_id, "unselected")
 

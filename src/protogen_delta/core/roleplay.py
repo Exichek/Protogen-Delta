@@ -2,8 +2,15 @@
 
 import re
 
+_SCENE = r"(?:rp|рп|сцен[ау]|сценк[ау]|ролку|ролевую\s+игру)"
 STOP_PATTERN = re.compile(
-    r"^\s*(?:стоп|хватит|выйди из|закончим|закончи)\s+(?:rp|рп)"
+    r"^\s*(?:давай\s+)?(?:стоп\s*[,!;:—–-]\s*)?(?:"
+    r"(?:стоп|хватит|выйди\s+из|выходим\s+из|закончим|закончи|закончили|"
+    r"заверши|завершим|завершили|закрыли|закроем|закрой|останови|не\s+продолжай)\s+"
+    + _SCENE
+    + r"|"
+    + _SCENE
+    + r"\s+(?:закончили|закрыли|закончена|окончена|завершена|завершили))"
     r"(?=$|[\s,.!?…;:—–-])\s*[,!.?…;:—–-]*\s*",
     re.IGNORECASE,
 )
@@ -84,7 +91,10 @@ def split_roleplay_stop(text: str) -> str | None:
     if match is None:
         return None
     start = match.end()
-    return text[start:].strip()
+    remaining = text[start:].strip()
+    if re.match(r"(?:вчера|раньше|тогда|или|если|когда)\b", remaining, re.I):
+        return None
+    return remaining
 
 
 def scene_configuration(text: str) -> str | None:

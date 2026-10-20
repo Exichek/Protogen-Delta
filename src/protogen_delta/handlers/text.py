@@ -5,6 +5,7 @@ from aiogram.types import Message
 
 from protogen_delta.core.chat_scope import ChatScopeOptions, chat_scope_options
 from protogen_delta.core.rate_limiter import UserRateLimiter
+from protogen_delta.core.reply_capture import current_reply_capture
 from protogen_delta.handlers.delivery import create_reply_delivery, show_typing
 from protogen_delta.handlers.rp import (
     RP_ALREADY_DISABLED_REPLY,
@@ -15,6 +16,7 @@ from protogen_delta.services.appearance_preferences_query import (
     is_appearance_preferences_query,
 )
 from protogen_delta.services.capabilities import is_capability_overview
+from protogen_delta.services.message_reactions import MessageReactionService
 from protogen_delta.services.response_engine import ResponseBusyError, ResponseEngine
 from protogen_delta.services.stickers import ContextualStickerService
 
@@ -32,6 +34,8 @@ def create_text_router(
     rate_limiter: UserRateLimiter | None = None,
     bot: Bot | None = None,
     sticker_service: ContextualStickerService | None = None,
+    *,
+    reaction_service: MessageReactionService | None = None,
 ) -> Router:
     """Создать роутер обычных текстовых сообщений."""
     router = Router(name=__name__)
@@ -52,7 +56,7 @@ def create_text_router(
         user_id = message.from_user.id
         scope = chat_scope_options(message.chat.id, message.chat.type)
 
-        if is_roleplay_stop_message(message.text):
+        if message.forward_origin is None and is_roleplay_stop_message(message.text):
             was_active = await response_engine.disable_roleplay(
                 user_id,
                 **scope,
@@ -66,10 +70,14 @@ def create_text_router(
             return
 
         safety_signal = (
-            response_engine.is_safety_signal(user_id, message.text, **scope) is True
+            message.forward_origin is None
+            and response_engine.is_safety_signal(user_id, message.text, **scope) is True
         )
-        if not safety_signal and not limiter.allow(user_id):
-            await message.answer(RATE_LIMIT_REPLY)
+        if (
+            not safety_signal
+            and current_reply_capture.get() is None
+            and not limiter.allow(user_id)
+        ):
             return
 
         if sticker_service is not None and sticker_service.is_request(
@@ -115,6 +123,7 @@ def create_text_router(
                             else sticker_service
                         ),
                         user_id=user_id,
+                        reaction_service=reaction_service,
                         format_capabilities=is_capability_overview(message.text),
                     ),
                     **input_context,

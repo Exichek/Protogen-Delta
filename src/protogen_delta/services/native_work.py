@@ -25,6 +25,7 @@ from protogen_delta.services.documents import (
 )
 
 MAX_NATIVE_INPUT = 20 * 1024 * 1024
+MAX_ARCHIVE_INPUT = 50 * 1024 * 1024
 MAX_NATIVE_OUTPUT = 16 * 1024 * 1024
 MAX_SPEECH_OUTPUT = 20 * 1024 * 1024
 _OPERATIONS = {
@@ -33,6 +34,7 @@ _OPERATIONS = {
         "make_translated_docx",
     ): "translation_docx",
     ("protogen_delta.services.documents", "extract_document"): "document",
+    ("protogen_delta.services.archive_documents", "extract_zip"): "archive",
     (
         "protogen_delta.services.animation_frames",
         "extract_animation_frames",
@@ -113,10 +115,14 @@ class NativeWorkPool:
         if operation is None:
             raise ValueError("Неизвестный дочерний обработчик")
         if not data:
-            if operation == "document":
+            if operation in {"document", "archive"}:
                 raise DocumentReadError("Документ пуст")
             raise NativeWorkError("Файл пуст.")
-        if len(data) > MAX_NATIVE_INPUT:
+        if len(data) > (
+            MAX_ARCHIVE_INPUT if operation == "archive" else MAX_NATIVE_INPUT
+        ):
+            if operation == "archive":
+                raise DocumentTooLargeError("ZIP превышает 50 МБ")
             if operation == "document":
                 raise DocumentTooLargeError("Документ превышает 20 МБ")
             raise NativeWorkError("Файл превышает 20 МБ.")
@@ -203,7 +209,21 @@ class NativeWorkPool:
         if error:
             if not isinstance(error, str):
                 raise NativeWorkError("Некорректный ответ обработчика файла.")
-            if operation == "document":
+            if operation in {"document", "archive"}:
+                if error == "archive_limit":
+                    from protogen_delta.services.archive_documents import (
+                        ArchiveLimitError,
+                    )
+
+                    reason, actual = value.get("reason"), value.get("actual")
+                    if (
+                        not isinstance(reason, str)
+                        or reason not in {"compressed", "expanded", "entries"}
+                        or type(actual) is not int
+                        or not 0 <= actual < 2**63
+                    ):
+                        raise NativeWorkError("Некорректная причина отказа ZIP.")
+                    raise ArchiveLimitError(reason, actual)
                 errors = {
                     "too_large": DocumentTooLargeError,
                     "unsupported": UnsupportedDocumentError,
@@ -297,7 +317,7 @@ class NativeWorkPool:
                 for i in images
             ):
                 raise ValueError("images")
-            if operation == "document":
+            if operation in {"document", "archive"}:
                 if (
                     not isinstance(value.get("text"), str)
                     or len(value["text"]) > 60000

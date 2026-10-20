@@ -27,6 +27,7 @@ dependencies = [
     "yt-dlp-ejs (==0.8.0)",
     "deno (==2.9.7)",
     "pypdfium2 (>=5,<6)",
+    "shazamio @ https://github.com/shazamio/ShazamIO/archive/f94faafdabff9cdec258f3ac024a6402989e9040.tar.gz",
 ]
 
 
@@ -52,6 +53,7 @@ include = [
     "src/protogen_delta/config/prompts/*.txt",
     "src/protogen_delta/config/prompts/personality/*.txt",
     "src/protogen_delta/miniapp/static/*.html",
+    "src/protogen_delta/miniapp/static/*.js",
 ]
 
 

@@ -81,7 +81,7 @@ def youtube_options() -> dict[str, Any]:
 
 
 def limit_extraction_process() -> None:
-    """V8 reserves large address space; limit writable data rather than AS."""
+    """V8 резервирует большое адресное пространство; ограничить данные, допускающие запись, вместо AS."""
     if sys.platform.startswith("linux"):
         import resource
 

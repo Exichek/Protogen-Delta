@@ -38,6 +38,7 @@ class StickerPackImporter:
             .read_text(encoding="utf-8")
         )
         definitions = {item.file_unique_id: item for item in parse_sticker_entries(raw)}
+        self._repository.import_contexts(list(definitions.values()))
         pack = await self._bot.get_sticker_set(DEFAULT_STICKER_SET)
         entries = [
             replace(

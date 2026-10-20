@@ -26,6 +26,7 @@ async def _call(router: Router, name: str, message: Message) -> None:
 def _message(user_id: int, text: str) -> tuple[Message, AsyncMock]:
     message = Mock(spec=Message)
     message.from_user = SimpleNamespace(id=user_id)
+    message.forward_origin = None
     message.text = text
     message.answer = AsyncMock()
     return cast(Message, message), message.answer

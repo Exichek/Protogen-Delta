@@ -8,6 +8,47 @@ import protogen_delta.config.settings as settings_module
 from protogen_delta.config.settings import load_settings
 
 
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("MESSAGE_REACTIONS_ENABLED", "invalid"),
+        ("REPLY_SUPPLEMENTS_ENABLED", "invalid"),
+        ("MESSAGE_REACTION_CHANCE", "1.1"),
+        ("MESSAGE_REACTION_CHANCE", "-1"),
+        ("MESSAGE_REACTION_CHANCE", "nan"),
+        ("MESSAGE_REACTION_COOLDOWN_SECONDS", "-1"),
+        ("MESSAGE_REACTION_COOLDOWN_SECONDS", "inf"),
+    ],
+)
+def test_message_reaction_configuration_validation(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        load_settings()
+
+
+def test_message_reactions_can_be_disabled_without_disabling_stickers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv("MESSAGE_REACTIONS_ENABLED", "false")
+    monkeypatch.setenv("MESSAGE_REACTION_CHANCE", "0.6")
+    monkeypatch.setenv("MESSAGE_REACTION_COOLDOWN_SECONDS", "90")
+    settings = load_settings()
+    assert not settings.message_reactions_enabled
+    assert settings.message_reaction_chance == 0.6
+    assert settings.message_reaction_cooldown_seconds == 90
+    assert settings.sticker_pack_enabled
+
+
 def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     """Не позволять тестам читать настоящий файл .env."""
     monkeypatch.setattr(
@@ -15,6 +56,32 @@ def _disable_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
         "load_dotenv",
         lambda: None,
     )
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "9223372036854775808"])
+@pytest.mark.parametrize(
+    "name", ["CREATOR_IDS", "CODE_REVIEW_USER_IDS", "FAVORITES_USER_IDS"]
+)
+def test_creator_ids_reject_invalid_accounts(
+    monkeypatch: pytest.MonkeyPatch, value: str, name: str
+) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        load_settings()
+
+
+def test_creator_ids_preserve_legacy_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv("CREATOR_ID", "10")
+    monkeypatch.setenv("CREATOR_IDS", "20,20,30")
+    assert load_settings().recognized_creator_ids == frozenset({10, 20, 30})
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "invalid"])
@@ -84,6 +151,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LLM_DISABLE_THINKING", raising=False)
+    monkeypatch.delenv("LLM_ADAPTIVE_THINKING", raising=False)
     monkeypatch.delenv("MINI_APP_URL", raising=False)
     monkeypatch.delenv("MINI_APP_SERVER_ENABLED", raising=False)
     monkeypatch.delenv("MINI_APP_HOST", raising=False)
@@ -102,6 +170,7 @@ def test_load_settings_with_defaults(
     monkeypatch.delenv("E621_REQUEST_INTERVAL_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_CHECK_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_IDLE_SECONDS", raising=False)
+    monkeypatch.delenv("PROACTIVE_IDLE_MAX_SECONDS", raising=False)
     monkeypatch.delenv("PROACTIVE_COOLDOWN_SECONDS", raising=False)
     monkeypatch.delenv("WHISPER_MODEL_SIZE", raising=False)
     monkeypatch.delenv("WHISPER_DEVICE", raising=False)
@@ -133,6 +202,7 @@ def test_load_settings_with_defaults(
     assert settings.deepseek_model == "deepseek-flash"
     assert settings.llm_provider == "deepseek"
     assert settings.llm_disable_thinking is True
+    assert settings.llm_adaptive_thinking is True
     assert settings.mini_app_url is None
     assert settings.mini_app_server_enabled is False
     assert settings.mini_app_host == "127.0.0.1"
@@ -150,9 +220,10 @@ def test_load_settings_with_defaults(
     assert settings.brave_search_api_key is None
     assert settings.e621_user_agent.startswith("ProtogenDelta/0.1")
     assert settings.e621_request_interval_seconds == 1.0
-    assert settings.proactive_check_seconds == 300.0
-    assert settings.proactive_idle_seconds == 14400.0
-    assert settings.proactive_cooldown_seconds == 86400.0
+    assert settings.proactive_check_seconds == 30.0
+    assert settings.proactive_idle_seconds == 5400.0
+    assert settings.proactive_idle_max_seconds == 10800.0
+    assert settings.proactive_cooldown_seconds == 72000.0
     assert settings.rate_limit_seconds == 2.0
     assert settings.rate_limit_retention_seconds == 300.0
     assert settings.conversation_history_limit == 8

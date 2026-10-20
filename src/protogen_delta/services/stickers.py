@@ -3,21 +3,28 @@
 import logging
 import random
 import re
+from collections import deque
 from collections.abc import Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
 from protogen_delta.core.conversation_safety import reference_is_child
+from protogen_delta.core.reply_outcome import reply_error
 from protogen_delta.core.user_state import UserState, UserStateStore
 from protogen_delta.repositories.stickers import StickerEntry, StickersRepository
 from protogen_delta.services.sticker_capabilities import correct_sticker_capability
+from protogen_delta.services.sticker_reaction_context import reaction_context
 
 logger = logging.getLogger(__name__)
 
 _CONTEXT_PATTERNS = {
+    "confused": (
+        r"\b(?:спорно|не\s+согласен|не\s+согласна|это\s+неверно|"
+        r"что[- ]то\s+не\s+так|ты\s+ошибся|ты\s+ошиблась)\b"
+    ),
     "greeting": r"^\s*(?:привет\w*|здравствуй\w*|доброе утро|hi|hello|йоу)\b",
     "boop": r"\b(?:буп\w*|boop\w*)\b",
     "bite": r"\b(?:укус\w*|кусь|кус(?:аю|аешь|ает|аем|аете|ают|ал[аи]?|ай|ать|аться)|прикус\w*|bite|biting)\b",
@@ -153,6 +160,7 @@ class _ReactionState:
     replies_since_sticker: int = 0
     last_sent_at: float | None = None
     last_file_unique_id: str | None = None
+    recent: deque[tuple[str, float]] = field(default_factory=lambda: deque(maxlen=5))
 
 
 class ContextualStickerService:
@@ -198,14 +206,17 @@ class ContextualStickerService:
         if self._chance == 0 or not available:
             return "Отправка стикеров сейчас отключена или нет доступных реакций."
         return (
-            f"Приложение умеет отправлять настоящие Telegram-стикеры: доступны "
-            f"{available} размеченных реакций. После текстового ответа приложение "
-            "само выбирает и отправляет подходящую реакцию; это отдельный механизм. "
+            f"У тебя есть настоящие Telegram-стикеры: доступны "
+            f"{available} размеченных реакций. Можешь отвечать ими и сам начинать общение. "
             "Не отрицай возможность отправки стикеров. Это твоя возможность в Telegram, а не чужая функция: не пиши "
             "«я не могу отправлять стикеры/картинки», «только мысленно» или "
             "«максимум словесно» и не заменяй её рассказом о визоре. "
-            "По просьбе показать стикер приложение попробует отправить пример. "
+            "По прямой просьбе показать стикер можешь прислать пример. "
             "Не утверждай, что стикер уже отправлен, до фактической отправки."
+            " Если пользователь реагирует на уже присланный стикер, отвечай как собеседник "
+            "по контексту и текущему настроению: что хотел выразить или предложить. "
+            "Не заменяй ответ объяснением механизма выбора и не говори «это приложение, а не я». "
+            "Технические подробности нужны только по прямой просьбе об устройстве отправки."
         )
 
     def is_available(self, user_id: int) -> bool:
@@ -227,6 +238,80 @@ class ContextualStickerService:
             previous_user_message=previous.user_message if previous else "",
             previous_reply=previous.assistant_message if previous else "",
         )
+
+    def proactive_available(self) -> bool:
+        return self._chance > 0 and any(
+            entry.rating == "safe" for entry in self._repository.get_all()
+        )
+
+    async def send_proactive(self, user_id: int, context_text: str = "") -> str | None:
+        """Одна безопасная самостоятельная реакция; не изображать её пользовательской репликой."""
+        if not self.proactive_available() or declines_stickers(context_text):
+            return None
+        state = self._user_states.get(user_id)
+        tags = sticker_context_tags(context_text) | {state.mood}
+        if not state.history and not context_text.strip():
+            tags.add("greeting")
+        if state.emotions.memory.joy >= 0.60:
+            tags.add("happy")
+        category = reaction_context(
+            tags, "", joyful=state.mood == "happy" or state.emotions.memory.joy >= 0.60
+        )
+        entries = [
+            entry
+            for entry in self._repository.get_all()
+            if entry.rating == "safe"
+            and category in entry.context_categories
+            and ("greeting" not in entry.tags or "greeting" in tags)
+        ]
+        if not entries:
+            return None
+        reaction = self._reactions.setdefault(user_id, _ReactionState())
+        now = self._clock()
+        recent = {key for key, at in reaction.recent if 0 <= now - at < 1800}
+        entries = [entry for entry in entries if entry.file_unique_id not in recent]
+        if not entries:
+            return None
+        best = max(len(tags.intersection(entry.tags)) for entry in entries)
+        entries = [
+            entry for entry in entries if len(tags.intersection(entry.tags)) == best
+        ]
+        selected = self._choose(entries)
+        try:
+            await self._bot.send_sticker(chat_id=user_id, sticker=selected.file_id)
+        except TelegramAPIError:
+            logger.warning("Proactive sticker outcome=delivery_failed")
+            return None
+        reaction.recent.append((selected.file_unique_id, self._clock()))
+        reaction.last_file_unique_id = selected.file_unique_id
+        reaction.last_sent_at = self._clock()
+        reaction.replies_since_sticker = 0
+        label = selected.name or selected.emoji or ", ".join(selected.tags[:3])
+        return f"[Дельта самостоятельно отправил стикер: {label[:120]}]"
+
+    async def send_error(self, *, chat_id: int, user_id: int) -> bool:
+        """404 следует за настоящим сбоем; не выбирать его случайной реакцией."""
+        if self._chance == 0:
+            return False
+        entries = [
+            entry
+            for entry in self._repository.get_all()
+            if entry.file_unique_id == "AgADmrIAAjqdEUo" and entry.rating == "safe"
+        ]
+        if not entries:
+            return False
+        selected = entries[0]
+        try:
+            await self._bot.send_sticker(chat_id=chat_id, sticker=selected.file_id)
+        except TelegramAPIError:
+            logger.warning("Не удалось доставить стикер ошибки")
+            return False
+        reaction = self._reactions.setdefault(user_id, _ReactionState())
+        reaction.last_sent_at = self._clock()
+        reaction.last_file_unique_id = selected.file_unique_id
+        reaction.recent.append((selected.file_unique_id, reaction.last_sent_at))
+        reaction.replies_since_sticker = 0
+        return True
 
     def correct_reply(self, user_id: int, reply: str) -> str:
         """Не отправлять ложное отрицание и не закреплять его в истории."""
@@ -251,6 +336,8 @@ class ContextualStickerService:
         if declines_stickers(context_text):
             logger.debug("Sticker reaction outcome=declined")
             return False
+        if reply_error.get():
+            return await self.send_error(chat_id=chat_id, user_id=user_id)
         reaction = self._reactions.setdefault(user_id, _ReactionState())
         reaction.replies_since_sticker += 1
         requested = self.is_request(user_id, context_text, chat_id=scope_chat_id)
@@ -280,11 +367,28 @@ class ContextualStickerService:
         tags.add(state.mood)
         if state.roleplay_active:
             tags.add("rp")
+        category = reaction_context(
+            semantic_tags,
+            reply_text,
+            joyful=state.mood == "happy" or state.emotions.memory.joy >= 0.60,
+        )
 
         entries = [
             entry
             for entry in self._repository.get_all()
-            if (tags.intersection(entry.tags) or requested and entry.rating == "safe")
+            if (
+                tags.intersection(entry.tags)
+                or requested
+                and entry.rating == "safe"
+                or category in entry.context_categories
+            )
+            and (
+                entry.rating == "adult"
+                or category in entry.context_categories
+                or requested
+                and "error" not in entry.context_categories
+            )
+            and ("greeting" not in entry.tags or greeting or requested)
             and (_adult_stickers_allowed(state) or entry.rating == "safe")
             and (entry.rating == "safe" or (tags - {"rp"}).intersection(entry.tags))
         ]
@@ -313,15 +417,14 @@ class ContextualStickerService:
                 tags.intersection(entry.tags)
             )
 
+        recent = {key for key, at in reaction.recent if 0 <= now - at < 1800}
+        fresh = [entry for entry in entries if entry.file_unique_id not in recent]
+        if not fresh and not requested and not greeting:
+            return False
+        entries = fresh or entries
         best_score = max(map(score, entries))
         entries = [entry for entry in entries if score(entry) == best_score]
-
-        without_repeat = [
-            entry
-            for entry in entries
-            if entry.file_unique_id != reaction.last_file_unique_id
-        ]
-        selected = self._choose(without_repeat or entries)
+        selected = self._choose(entries)
         try:
             await self._bot.send_sticker(chat_id=chat_id, sticker=selected.file_id)
         except TelegramAPIError:
@@ -330,6 +433,7 @@ class ContextualStickerService:
 
         reaction.replies_since_sticker = 0
         reaction.last_sent_at = now
+        reaction.recent.append((selected.file_unique_id, now))
         reaction.last_file_unique_id = selected.file_unique_id
         logger.info(
             "Sticker reaction outcome=sent explicit=%s rating=%s requested=%s",

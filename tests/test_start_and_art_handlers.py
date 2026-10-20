@@ -89,7 +89,9 @@ def _assert_first_start_reply(
 
     assert prefix in FIRST_START_PREFIXES
     assert separator == "\n\n"
-    assert body == expected_body
+    from protogen_delta.services.privacy_notice import DATA_NOTICE
+
+    assert body == expected_body + "\n\n" + DATA_NOTICE
     age_call = answer_mock.await_args_list[1]
     assert age_call.args == (AGE_PROMPT_TEXT,)
     assert age_call.kwargs["reply_markup"].inline_keyboard[0][0].text == (
@@ -237,7 +239,11 @@ def test_start_generates_new_message_for_existing_user() -> None:
         system_prompt="REPEAT START PROMPT",
         user_message=ANY,
     )
-    assert answer_mock.await_args_list[0].args == ("Снова привет. Что сегодня делаем?",)
+    from protogen_delta.services.privacy_notice import DATA_NOTICE
+
+    assert answer_mock.await_args_list[0].args == (
+        "Снова привет. Что сегодня делаем?\n\n" + DATA_NOTICE,
+    )
     assert answer_mock.await_args_list[1].args == (AGE_PROMPT_TEXT,)
 
 
@@ -269,7 +275,11 @@ def test_repeat_start_uses_fallback_when_generation_fails() -> None:
     )
 
     deepseek_mock.chat.assert_awaited_once()
-    assert answer_mock.await_args_list[0].args == (REPEAT_START_FALLBACK,)
+    from protogen_delta.services.privacy_notice import DATA_NOTICE
+
+    assert answer_mock.await_args_list[0].args == (
+        REPEAT_START_FALLBACK + "\n\n" + DATA_NOTICE,
+    )
     assert answer_mock.await_args_list[1].args == (AGE_PROMPT_TEXT,)
 
 
@@ -291,7 +301,11 @@ def test_start_does_not_repeat_age_prompt_after_selection() -> None:
 
     asyncio.run(_call_handler(router, 0, message))
 
-    answer_mock.assert_awaited_once_with("Сгенерированное приветствие.")
+    from protogen_delta.services.privacy_notice import DATA_NOTICE
+
+    answer_mock.assert_awaited_once_with(
+        "Сгенерированное приветствие.\n\n" + DATA_NOTICE
+    )
 
 
 def test_start_ignores_message_without_user() -> None:

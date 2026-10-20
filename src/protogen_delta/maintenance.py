@@ -29,6 +29,10 @@ def copy_snapshot(source: Path, destination: Path) -> None:
         ("users.json", "USERS", int),
         ("images.json", "IMAGES", str),
     ):
+        if filename == "users.json" and not (source / filename).exists():
+            if not (source / "users.db").exists():
+                raise FileNotFoundError("Нужен users.db или прежний users.json")
+            continue
         payload = (source / filename).read_bytes()
         data = json.loads(payload)
         if (
@@ -44,8 +48,13 @@ def copy_snapshot(source: Path, destination: Path) -> None:
     if memories_database.exists():
         databases.append((memories_database, "memories"))
     for filename, table in (
+        ("users.db", "registered_users"),
+        ("llm_usage.db", "llm_daily"),
         ("user_facts.db", "user_facts"),
         ("user_statistics.db", "stats_users"),
+        ("dialogue_archive.db", "dialogue_messages"),
+        ("favorites.db", "favorite_messages"),
+        ("delivery_ledger.db", "delivery_ledger"),
     ):
         database = source / filename
         if database.exists():

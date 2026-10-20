@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from protogen_delta.repositories.web_api_usage import WebApiLimitError
+
 logger = logging.getLogger(__name__)
 ToolHandler = Callable[[dict[str, str]], Awaitable[dict[str, Any]]]
 
@@ -76,7 +78,17 @@ class ToolExecutor:
                 not isinstance(args, dict)
                 or set(args) - set(tool.parameters)
                 or set(tool.required) - set(args)
-                or any(not isinstance(v, str) or len(v) > 200 for v in args.values())
+                or any(
+                    not isinstance(value, str)
+                    or len(value)
+                    > (
+                        2048
+                        if key == "url"
+                        and (name == "fetch_web_page" or name.startswith("github_"))
+                        else 200
+                    )
+                    for key, value in args.items()
+                )
             ):
                 raise ValueError("Некорректные аргументы инструмента")
             result = await asyncio.wait_for(tool.handler(args), self.timeout)
@@ -85,6 +97,8 @@ class ToolExecutor:
                 raise ValueError("Ответ источника слишком большой")
             outcome = "ok"
             return output
+        except WebApiLimitError:
+            return json.dumps({"ok": False, "error": "web_api_limit_exceeded"})
         except ValueError, KeyError, TypeError:
             return json.dumps({"ok": False, "error": "invalid_arguments_or_data"})
         except Exception:
