@@ -1542,7 +1542,13 @@ class ResponseEngine:
                     "</document_content>"
                 )
             tool_names = self._prompt_composer.select_tools(
-                user_message, history.recent
+                user_message,
+                history.recent,
+                allow_web_fallback=(
+                    not gates.is_rp
+                    and not gates.capability_overview
+                    and bool(request.controls)
+                ),
             )
             if web_followup is not None:
                 model_user_message = web_followup.model_message(user_message)

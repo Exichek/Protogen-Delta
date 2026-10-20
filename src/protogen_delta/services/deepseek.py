@@ -33,7 +33,7 @@ from protogen_delta.services.llm_accounting import (
     accounted_completion,
     record_response_usage,
 )
-from protogen_delta.services.prompt_composer import PromptComposer
+from protogen_delta.services.prompt_composer import PromptComposer, web_search_forbidden
 from protogen_delta.services.public_github import github_links
 from protogen_delta.services.source_access import current_source_owner
 from protogen_delta.services.tools import ToolExecutor, get_current_time
@@ -63,14 +63,10 @@ _CLASSIFY_TIMEOUT = 5.0
 _CLASSIFY_MAX_RETRIES = 0
 _WEB_REQUEST_RE = re.compile(
     r"(?:(?:найди|поищи|посмотри|проверь|глянь|глянуть|загугли|search|look\s+up|find)"
-    r".{0,80}(?:в\s+интернете|в\s+сети|онлайн|web|internet)|"
-    r"(?:в\s+интернете|в\s+сети|онлайн|web|internet).{0,80}"
+    r".{0,80}(?:в\s+интернете|в\s+инете|в\s+сети|онлайн|web|internet)|"
+    r"(?:в\s+интернете|в\s+инете|в\s+сети|онлайн|web|internet).{0,80}"
     r"(?:найди|поищи|посмотри|проверь|глянь|глянуть|загугли|search|look\s+up|find))",
     re.IGNORECASE | re.DOTALL,
-)
-_WEB_NEGATION_RE = re.compile(
-    r"(?:не|без)\s+(?:ищи|искать|поиска).{0,30}(?:интернет|сеть|web)",
-    re.IGNORECASE,
 )
 _URL_RE = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 
@@ -124,7 +120,7 @@ class ImageInput:
 
 def _forced_web_tool(user_message: str, available: set[str]) -> str | None:
     """Выбрать обязательный web-инструмент для явной просьбы пользователя."""
-    if _WEB_NEGATION_RE.search(user_message):
+    if web_search_forbidden(user_message):
         return None
     if "get_weather" in available and (
         re.search(r"\bпогод\w*.{0,60}\bв\b", user_message, re.I)
@@ -644,7 +640,21 @@ class DeepSeekService:
             "что-либо в интернете обязательно используй web_search. Для чтения точной "
             "ссылки используй fetch_web_page. Для актуальных новостей, цен, версий и "
             "событий используй поиск, а не память модели. В финальном ответе давай "
-            "прямые URL использованных источников и дату проверки."
+            "прямые URL использованных источников и дату проверки. "
+            "Сам выбирай поиск, если для ответа нужен внешний факт, которого ты "
+            "не знаешь или в котором не уверен: редкий термин, точная характеристика, "
+            "спорное утверждение. Не жди отдельного разрешения и не заменяй проверку "
+            "фразой «могу поискать». Для приветствия, шутки, мнения, RP и фактов "
+            "личной переписки поиск сам по себе не нужен. Не отправляй в поисковые "
+            "запросы личную переписку, Telegram ID, секреты и содержимое приватных "
+            "документов; используй только необходимую общую формулировку вопроса. "
+            "Не устанавливай личность человека по лицу на изображении или видео, "
+            "в том числе через поиск. Источник медиа можно искать по явной подписи, "
+            "ссылке или названию передачи. "
+            "Перед уверенным фактическим ответом проверь подходящий источник: "
+            "поисковый сниппет не равен прочитанной странице. При пустой выдаче, "
+            "ошибке или противоречиях обозначь, что подтвердить факт не удалось; "
+            "не заполняй пробел догадкой."
             if "web_search" in available_tools
             else (
                 "Схема поиска не выбрана для этого запроса. "
