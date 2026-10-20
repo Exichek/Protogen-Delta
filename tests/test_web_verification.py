@@ -199,8 +199,42 @@ def test_live_loop_reads_source_then_checks_species_and_rewrites_draft(
     assert "tools" not in audit
     assert audit["response_format"] == {"type": "json_object"}
     material = json.loads(audit["messages"][1]["content"])
-    assert material["pages"][0]["text"] == QUOTE
+    assert material["pages"][0]["passages"][0]["text"] == QUOTE
     assert "PRIVATE OLD TEXT" not in json.dumps(audit["messages"])
+
+
+@pytest.mark.parametrize(
+    "source,passages,reference",
+    [
+        (1, [1], "[S1]"),
+        (2, [1], "[S2]"),
+        (1, [99], "[S1]"),
+        (True, [1], "[S1]"),
+        (1, [True], "[S1]"),
+        (1, [], "[S1]"),
+        (1, [1], "[S2]"),
+    ],
+)
+def test_numbered_passages_are_validated_before_rendering_links(
+    source: object, passages: list, reference: str
+) -> None:
+    raw = json.dumps(
+        {
+            "answer": "Исследование касается цихлид. " + reference,
+            "evidence": [{"source": source, "passages": passages}],
+        }
+    )
+    result = _evidence().accept(raw)
+    if (
+        type(source) is int
+        and source == 1
+        and passages == [1]
+        and type(passages[0]) is int
+        and reference == "[S1]"
+    ):
+        assert result == "Исследование касается цихлид. [источник](" + URL + ")"
+    else:
+        assert result == UNVERIFIED_WEB_REPLY
 
 
 @pytest.mark.parametrize("result", [{"results": []}, {"results": [{"url": URL}]}])

@@ -67,12 +67,25 @@ class WebEvidence:
         }
 
     def request(self, question: str, draft: str) -> str:
+        pages = []
+        for index, page in enumerate(self.pages.values(), 1):
+            text = page["text"]
+            pages.append(
+                {
+                    **{key: value for key, value in page.items() if key != "text"},
+                    "source": index,
+                    "passages": [
+                        {"id": number, "text": text[start:][:800]}
+                        for number, start in enumerate(range(0, len(text), 700), 1)
+                    ],
+                }
+            )
         return json.dumps(
             {
                 "checked_now_utc": datetime.now(timezone.utc).isoformat(),
                 "question": question[:4000],
                 "draft": draft[:10000],
-                "pages": list(self.pages.values()),
+                "pages": pages,
             },
             ensure_ascii=False,
         )
@@ -90,15 +103,35 @@ class WebEvidence:
             not isinstance(answer, str)
             or not 1 <= len(answer.strip()) <= 10000
             or not isinstance(evidence, list)
-            or not 1 <= len(evidence) <= 6
+            or not 1 <= len(evidence) <= 24
         ):
             return UNVERIFIED_WEB_REPLY
         if contains_unquoted_tool_markup(answer):
             return UNVERIFIED_WEB_REPLY
         supported: set[str] = set()
+        source_urls = list(self.pages)
+        supported_ids: set[int] = set()
         for item in evidence:
             if not isinstance(item, dict):
                 return UNVERIFIED_WEB_REPLY
+            if "source" in item:
+                source, passages = item.get("source"), item.get("passages")
+                if (
+                    type(source) is not int
+                    or not 1 <= source <= len(source_urls)
+                    or not isinstance(passages, list)
+                    or not 1 <= len(passages) <= 8
+                ):
+                    return UNVERIFIED_WEB_REPLY
+                page_url = source_urls[source - 1]
+                count = len(range(0, len(self.pages[page_url]["text"]), 700))
+                if any(
+                    type(part) is not int or not 1 <= part <= count for part in passages
+                ):
+                    return UNVERIFIED_WEB_REPLY
+                supported.add(page_url)
+                supported_ids.add(source)
+                continue
             url, quote = item.get("url"), item.get("quote")
             if (
                 not isinstance(url, str)
@@ -109,6 +142,15 @@ class WebEvidence:
             ):
                 return UNVERIFIED_WEB_REPLY
             supported.add(url)
+            supported_ids.add(source_urls.index(url) + 1)
+        references = {int(value) for value in re.findall(r"\[S(\d+)\]", answer)}
+        if not references <= supported_ids:
+            return UNVERIFIED_WEB_REPLY
+        answer = re.sub(
+            r"\[S(\d+)\]",
+            lambda match: "[источник](" + source_urls[int(match[1]) - 1] + ")",
+            answer,
+        )
         urls = set()
         for value in re.findall(r"https?://[^\s<>]+", answer):
             value = value.rstrip(".,;!?]}")
