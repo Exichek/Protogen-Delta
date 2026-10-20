@@ -300,6 +300,7 @@ def create_admin_router(
                 "converter": "Конвертер медиа",
                 "reminders": "Напоминания",
                 "archives": "ZIP-архивы",
+                "supplements": "Дополнения к ответам",
             }
             outcomes = {
                 "unknown": "ещё нет запросов",

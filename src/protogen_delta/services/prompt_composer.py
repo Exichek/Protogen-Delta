@@ -44,6 +44,13 @@ _WEB_PATTERN = re.compile(
     r"сводк\w*|инф(?:а|у|ы|е|ой|ою)|информац\w*|сведени\w*|обновлен\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_VERIFY_FACT_PATTERN = re.compile(
+    r"\b(?:правда\s*(?:ли)?\s*[,?:]?\s*что|насколько\s+(?:(?:это|он|она|оно)\s+)?доказан\w*|"
+    r"(?:умеет|поддерживает|может)\s+ли|(?:умеет|поддерживает|способен)\b.{0,80}\?)|"
+    r"\b(?:есть\s+ли|работает\s+ли|можно\s+ли)\b.{0,100}"
+    r"\b(?:приложени\w*|сервис\w*|функци\w*|api|верси\w*)\b",
+    re.I | re.S,
+)
 _CLARIFICATION_PATTERN = re.compile(
     r"уточн|подтверди|какой|какая|выбери|вариант|скажи|дай ответ", re.I
 )
@@ -324,7 +331,10 @@ class PromptComposer:
             selected.update(GITHUB_TOOLS)
         if _URL_PATTERN.search(user_message):
             selected.add("fetch_web_page")
-        if _WEB_PATTERN.search(user_message):
+        if _WEB_PATTERN.search(user_message) or (
+            _VERIFY_FACT_PATTERN.search(unquoted_control_text(user_message))
+            and not re.search(r"\b(?:ты|тебя|тебе|тво\w*)\b", user_message, re.I)
+        ):
             selected.add("web_search")
         if _WEATHER_PATTERN.search(user_message):
             selected.add("get_weather")
