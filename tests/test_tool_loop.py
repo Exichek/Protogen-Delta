@@ -311,8 +311,10 @@ def test_loop_caps_execution_and_stops_ignoring_model_requests(
         ("Найди в интернете новости про Python", "web_search"),
         ("В интернете найди новости про Python", "web_search"),
         ("Посмотри в сети свежую цену", "web_search"),
+        ("В инете посмотри, откуда эта цитата", "web_search"),
         ("Открой https://example.org/article", "fetch_web_page"),
         ("Не ищи в интернете, просто предположи", None),
+        ("Без поиска, объясни DNS", None),
         ("Что такое TCP?", None),
     ],
 )
@@ -351,6 +353,57 @@ def test_loop_forces_web_search_for_explicit_request(
         "type": "function",
         "function": {"name": "web_search"},
     }
+
+
+@pytest.mark.parametrize("search_needed", [False, True])
+def test_optional_search_can_verify_unfamiliar_fact_without_forcing_every_reply(
+    monkeypatch: pytest.MonkeyPatch, search_needed: bool
+) -> None:
+    """Проверить полный assistant/tool обмен и обычный ответ без сетевого вызова."""
+    request = "Что означает флоккуляция?" if search_needed else "Как дела?"
+    selected = PromptComposer.select_tools(request, allow_web_fallback=True)
+    search = AsyncMock(return_value={"results": [{"url": "https://example.org/fact"}]})
+    read = AsyncMock(return_value={"text": "Подтверждение термина из источника"})
+    forbidden = AsyncMock()
+    results = []
+    if search_needed:
+        for name, arguments in [
+            ("web_search", {"query": "флоккуляция определение"}),
+            ("fetch_web_page", {"url": "https://example.org/fact"}),
+        ]:
+            result = response(1, json.dumps(arguments))
+            result.choices[0].message.tool_calls[0].function.name = name
+            results.append(result)
+    results.append(response())
+    client = Mock()
+    client.chat.completions.create = AsyncMock(side_effect=results)
+    monkeypatch.setattr(module, "AsyncOpenAI", Mock(return_value=client))
+    service = DeepSeekService(
+        "key",
+        "https://test.local",
+        "test",
+        tools=ToolExecutor(
+            ToolRegistry(
+                [
+                    Tool(
+                        "web_search", "search", {"query": "query"}, ("query",), search
+                    ),
+                    Tool("fetch_web_page", "read", {"url": "url"}, ("url",), read),
+                    Tool("read_source", "private source", {}, (), forbidden),
+                ]
+            )
+        ),
+    )
+    assert asyncio.run(service.chat("system", request, tool_names=selected)) == "Итог"
+    first = client.chat.completions.create.await_args_list[0].kwargs
+    assert first["tool_choice"] == "auto"
+    assert {item["function"]["name"] for item in first["tools"]} == selected
+    assert client.chat.completions.create.await_count == (3 if search_needed else 1)
+    assert search.await_count == read.await_count == int(search_needed)
+    forbidden.assert_not_awaited()
+    context = first["messages"][1]["content"]
+    assert "не знаешь или в котором не уверен" in context
+    assert "не заполняй пробел догадкой" in context
 
 
 def test_chat_skips_tool_schemas_when_composer_selects_none(

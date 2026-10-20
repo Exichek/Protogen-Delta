@@ -50,6 +50,30 @@ from protogen_delta.services.response_engine import (
 TEST_USER_ID = 123456
 
 
+@pytest.mark.parametrize("route", ["ordinary", "rp", "forbidden", "forwarded"])
+def test_optional_web_verification_respects_reply_scope(route: str) -> None:
+    """Незнакомый факт получает поиск, игра и чужая пересылка — прежний маршрут."""
+    from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
+
+    engine, _, model, *_ = _create_engine()
+    message = "Что означает флоккуляция?"
+    if route == "rp":
+        engine._user_states.get(TEST_USER_ID).roleplay_active = True
+        message = "*машу тебе рукой*"
+    elif route == "forbidden":
+        message = "Без поиска, объясни DNS"
+    token = current_reply_sources.set(
+        (ReplySource(message, message, False, False),) if route == "forwarded" else None
+    )
+    try:
+        assert asyncio.run(engine.respond(TEST_USER_ID, message)) == "Ответ"
+    finally:
+        current_reply_sources.reset(token)
+    assert model.chat.await_args.kwargs["tool_names"] == (
+        {"web_search", "fetch_web_page"} if route == "ordinary" else set()
+    )
+
+
 def test_confirmed_reaction_is_remembered_only_for_its_own_turn() -> None:
     from protogen_delta.core.reaction_receipt import reaction_receipt
 
@@ -208,7 +232,7 @@ def test_response_engine_routes_greeting_through_chat() -> None:
         system_prompt=ANY,
         user_message="Привет!",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     assert list(engine._user_states.get(TEST_USER_ID).history) == [
@@ -584,7 +608,7 @@ def test_response_engine_updates_mood_and_calls_chat() -> None:
         system_prompt=ANY,
         user_message="Как дела?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     role_mock.classify.assert_not_awaited()
@@ -928,7 +952,7 @@ def test_response_engine_does_not_classify_fetish_role_outside_rp() -> None:
         system_prompt=ANY,
         user_message="Ты меня связал?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
 
@@ -1192,7 +1216,7 @@ def test_response_engine_does_not_add_context_for_neutral_message() -> None:
         system_prompt=ANY,
         user_message="Как установить Docker?",
         history=(),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
 
@@ -1319,7 +1343,7 @@ def test_response_engine_passes_user_history_to_deepseek() -> None:
         system_prompt=ANY,
         user_message="Как меня зовут?",
         history=(previous_turn,),
-        tool_names=frozenset(),
+        tool_names=frozenset({"web_search", "fetch_web_page"}),
     )
 
     assert list(user_state.history) == [

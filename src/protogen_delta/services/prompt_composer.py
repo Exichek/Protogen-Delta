@@ -33,7 +33,7 @@ _BODY_PATTERN = re.compile(
 )
 _URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 _WEB_PATTERN = re.compile(
-    r"\b(?:интернет\w*|онлайн|загугл\w*|погугл\w*|web|internet|search)\b|"
+    r"\b(?:интернет\w*|инет\w*|онлайн|загугл\w*|погугл\w*|web|internet|search)\b|"
     r"\b(?:найди|поищи|проверь|посмотри|глянь|глянуть)\b.{0,80}\b(?:сет[ьи]|сайт)|"
     r"\b(?:найди|поищи|отыщи)\b.{0,80}"
     r"\b(?:инф(?:а|у|ы|е|ой|ою)|информац\w*|сведени\w*)\b|"
@@ -47,6 +47,23 @@ _WEB_PATTERN = re.compile(
 _CLARIFICATION_PATTERN = re.compile(
     r"уточн|подтверди|какой|какая|выбери|вариант|скажи|дай ответ", re.I
 )
+_NO_WEB_SEARCH = re.compile(
+    r"\b(?:не\s+(?:ищи|искать)(?=\s*(?:$|[,;.!?]))|"
+    r"не\s+(?:ищи|искать)(?!\s+в\s+(?:памят|истори|архив|код|файл))"
+    r"[^,;.!?\n]{0,60}(?:интернет\w*|инет\w*|сет[ьи]|онлайн)|"
+    r"не\s+(?:гугли|гуглить|загугли|погугли)|"
+    r"без\s+(?:поиска|интернета|инета)|не\s+(?:нужен|надо)\s+(?:веб[- ]?)?поиск|"
+    r"не\s+(?:используй|пользуйся)\s+(?:поиск\w*|интернет\w*|инет\w*)|"
+    r"(?:do\s+not|don't)\s+(?:search|browse)|no\s+(?:web\s+)?search)\b",
+    re.I,
+)
+
+
+def web_search_forbidden(message: str) -> bool:
+    """Учитывать запрет поиска из собственной реплики, а не цитаты."""
+    return bool(_NO_WEB_SEARCH.search(unquoted_control_text(message)))
+
+
 _FOLLOWUP_PATTERN = re.compile(
     r"^\s*(?:\d+[\s,.!]*$|да\b|нет\b|перв\w*\b|втор\w*\b|"
     r"трет\w*\b|именно\b|верно\b|город\b|москва\b|springfield\b)",
@@ -294,7 +311,10 @@ class PromptComposer:
 
     @staticmethod
     def select_tools(
-        user_message: str, history: Sequence[ConversationTurn] = ()
+        user_message: str,
+        history: Sequence[ConversationTurn] = (),
+        *,
+        allow_web_fallback: bool = False,
     ) -> frozenset[str]:
         """Выбрать только инструменты, нужные текущему запросу."""
         selected: set[str] = set()
@@ -340,6 +360,12 @@ class PromptComposer:
                 selected.update(PromptComposer.select_tools(turn.user_message))
                 if selected:
                     break
+        if web_search_forbidden(user_message):
+            selected.discard("web_search")
+        elif allow_web_fallback:
+            # Доступность схемы не делает сетевой запрос обязательным. Модель
+            # может проверить незнакомый факт даже без ключевого слова «найди».
+            selected.add("web_search")
         if "web_search" in selected:
             # Найденные источники нужно разрешать читать в том же ходе.
             selected.add("fetch_web_page")

@@ -114,6 +114,7 @@ def test_prompt_composer_selects_only_relevant_tools(
         "Актуальную инфу о релизе, пожалуйста",
         "Поищи мне информацию о Call of Duty",
         "Найди сведения о новой игре",
+        "В инете посмотри, откуда фраза «Всё идёт по плану»",
     ],
 )
 def test_information_requests_allow_search_and_reading_sources(message: str) -> None:
@@ -131,6 +132,64 @@ def test_information_requests_allow_search_and_reading_sources(message: str) -> 
 )
 def test_ordinary_information_mentions_do_not_enable_search(message: str) -> None:
     assert not _composer().select_tools(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Что означает флоккуляция?", "Как дела?", "Объясни DNS"],
+)
+def test_optional_search_does_not_require_keyword(message: str) -> None:
+    """Обычный ответ может проверить незнакомый факт без отдельной просьбы."""
+    assert _composer().select_tools(message, allow_web_fallback=True) == {
+        "web_search",
+        "fetch_web_page",
+    }
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Не ищи в интернете, объясни DNS своими словами",
+        "Без поиска: что такое DNS?",
+        "Не гугли последнюю версию Python",
+        "Не используй интернет, расскажи о TCP",
+        "Don't search, explain TCP",
+    ],
+)
+def test_user_can_disable_optional_and_keyword_search(message: str) -> None:
+    assert "web_search" not in _composer().select_tools(
+        message, allow_web_fallback=True
+    )
+
+
+def test_quoted_search_ban_does_not_disable_user_request() -> None:
+    assert _composer().select_tools(
+        "Проверь в интернете фразу «не ищи»", allow_web_fallback=True
+    ) == {"web_search", "fetch_web_page"}
+
+
+def test_ban_on_searching_memory_does_not_ban_web() -> None:
+    assert _composer().select_tools(
+        "Не ищи в памяти, в интернете посмотри определение термина",
+        allow_web_fallback=True,
+    ) == {"web_search", "fetch_web_page"}
+
+
+def test_search_ban_does_not_disable_explicit_page_reading() -> None:
+    assert _composer().select_tools(
+        "Без поиска, прочитай https://example.org/page", allow_web_fallback=True
+    ) == {"fetch_web_page"}
+
+
+def test_optional_search_keeps_weather_clarification() -> None:
+    from protogen_delta.core.user_state import ConversationTurn
+
+    history = [ConversationTurn("Погода в Springfield", "Какой вариант? 1 или 2?")]
+    assert _composer().select_tools("1", history, allow_web_fallback=True) == {
+        "get_weather",
+        "web_search",
+        "fetch_web_page",
+    }
 
 
 def test_prompt_composer_summarizes_old_history_and_keeps_recent_turns() -> None:
