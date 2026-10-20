@@ -168,6 +168,13 @@ def test_quoted_search_ban_does_not_disable_user_request() -> None:
     ) == {"web_search", "fetch_web_page"}
 
 
+def test_ban_on_searching_memory_does_not_ban_web() -> None:
+    assert _composer().select_tools(
+        "Не ищи в памяти, в интернете посмотри определение термина",
+        allow_web_fallback=True,
+    ) == {"web_search", "fetch_web_page"}
+
+
 def test_search_ban_does_not_disable_explicit_page_reading() -> None:
     assert _composer().select_tools(
         "Без поиска, прочитай https://example.org/page", allow_web_fallback=True
