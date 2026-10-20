@@ -478,6 +478,7 @@ def test_main_builds_application_and_starts_polling(
         model="test-model",
         disable_thinking=True,
         adaptive_thinking=provider == "deepseek",
+        verify_web_answers=True,
         tools=ANY,
     )
 

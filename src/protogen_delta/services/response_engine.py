@@ -114,6 +114,7 @@ from protogen_delta.services.public_github import GITHUB_TOOLS, PublicGithubRead
 from protogen_delta.services.reasoning_policy import needs_reasoning
 from protogen_delta.services.recent_visuals import RecentVisuals
 from protogen_delta.services.release_journal import ReleaseJournal, is_release_question
+from protogen_delta.services.reply_supplements import ReplySupplements
 from protogen_delta.services.rp_profile_context import saved_character_context
 from protogen_delta.services.rp_speech_style import roleplay_speech_style
 from protogen_delta.services.scene_continuity import scene_continuity_context
@@ -358,6 +359,7 @@ class ResponseEngine:
         self.cancel_pending_inputs: Callable[..., Awaitable[None]] | None = None
         self._delivering_users: set[StateKey] = set()
         self._recent_visuals = RecentVisuals()
+        self.supplements: ReplySupplements | None = None
 
     def is_safety_signal(
         self, user_id: int, text: str, *, chat_id: int | None = None
@@ -374,6 +376,8 @@ class ResponseEngine:
     async def _interrupt_reply(
         self, user_id: int, chat_id: int | None = None, *, all_chats: bool = False
     ) -> None:
+        if self.supplements is not None:
+            self.supplements.cancel(user_id)
         key: StateKey = user_id if chat_id is None else (chat_id, user_id)
         current = asyncio.current_task()
         if self.cancel_pending_inputs is not None:
@@ -491,6 +495,9 @@ class ResponseEngine:
         chat_id: int | None = None,
     ) -> str:
         """Сформировать ответ; без deliver считать прямой вызов завершённым."""
+        supplement_activity = (
+            self.supplements.cancel(user_id) if self.supplements is not None else None
+        )
         with bind_log_context(user_id=user_id), reaction_receipt_scope():
             minor_declared = any(
                 source.allow_controls and declares_minor(source.model_text)
@@ -637,6 +644,31 @@ class ResponseEngine:
                             await self._release_journal.acknowledge(user_id)
                         except Exception:
                             logger.warning("Не удалось отметить журнал сборки")
+                if (
+                    self.supplements is not None
+                    and supplement_activity is not None
+                    and deliver is not None
+                    and prepared.user_message is not None
+                    and prepared.remember_history
+                    and not prepared.error
+                    and not prepared.forgotten
+                    and use_personal_facts
+                    and chat_id is None
+                    and user_state.history
+                    and not user_state.roleplay_active
+                    and not user_state.age_restricted
+                    and not images
+                    and attachment_text is None
+                    and model_message_override is None
+                    and not is_capability_overview(user_message)
+                    and all(
+                        source.allow_controls
+                        for source in _reply_sources(user_id, user_message)
+                    )
+                ):
+                    self.supplements.schedule(
+                        user_id, user_state.history[-1], supplement_activity
+                    )
                 return reply
 
     async def reset_user_context(
@@ -646,6 +678,8 @@ class ResponseEngine:
         chat_id: int | None = None,
     ) -> None:
         """Безопасно сбросить контекст конкретного пользователя."""
+        if self.supplements is not None:
+            self.supplements.cancel(user_id)
         async with self._user_states.use_conversation(user_id, chat_id) as user_state:
             user_state.reset_context()
             if chat_id is None:
@@ -658,6 +692,8 @@ class ResponseEngine:
         cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Полностью забыть состояние конкретного пользователя."""
+        if self.supplements is not None:
+            self.supplements.cancel(user_id)
         await self._user_states.reset_user(user_id, cleanup=cleanup)
         self._recent_visuals.forget(user_id)
 

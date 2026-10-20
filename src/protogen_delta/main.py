@@ -81,6 +81,7 @@ from protogen_delta.repositories.initiative_followups import (
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
 from protogen_delta.repositories.reminders import RemindersRepository
+from protogen_delta.repositories.reply_supplements import ReplySupplementLimits
 from protogen_delta.repositories.stickers import StickersRepository
 from protogen_delta.repositories.user_facts import UserFactsRepository
 from protogen_delta.repositories.user_state import UserStateRepository
@@ -113,6 +114,7 @@ from protogen_delta.services.proactive import ProactiveConfig, ProactiveMessenge
 from protogen_delta.services.public_github import PublicGithubReader
 from protogen_delta.services.release_journal import ReleaseJournal
 from protogen_delta.services.reminders import ReminderService
+from protogen_delta.services.reply_supplements import ReplySupplements
 from protogen_delta.services.response_configuration import load_response_configuration
 from protogen_delta.services.response_engine import ResponseEngine
 from protogen_delta.services.shazam_music import create_music_recognizer
@@ -198,6 +200,7 @@ async def main() -> None:
     code_reviews: CodeReviewService | None = None
     input_batches: InputBatchMiddleware | None = None
     budget_alerts: LlmBudgetAlerts | None = None
+    reply_supplements: ReplySupplements | None = None
 
     try:
         usage_repository = LlmUsageRepository(
@@ -289,7 +292,8 @@ async def main() -> None:
         )
         input_operations = InputOperations(shared_dialogue)
         dispatcher.message.outer_middleware(DeliveryLedgerMiddleware(delivery_ledger))
-        dispatcher.message.outer_middleware(ReceiveInputsMiddleware(input_operations))
+        receive_inputs = ReceiveInputsMiddleware(input_operations)
+        dispatcher.message.outer_middleware(receive_inputs)
         dispatcher.message.outer_middleware(SenderMiddleware())
         dispatcher.message.outer_middleware(
             ProactiveIncomingMiddleware(
@@ -299,9 +303,7 @@ async def main() -> None:
         dispatcher.message.outer_middleware(
             ArchiveIncomingMiddleware(dialogue_archive, input_operations)
         )
-        dispatcher.edited_message.outer_middleware(
-            ReceiveInputsMiddleware(input_operations)
-        )
+        dispatcher.edited_message.outer_middleware(receive_inputs)
         dispatcher.edited_message.outer_middleware(
             ArchiveIncomingMiddleware(dialogue_archive, input_operations)
         )
@@ -364,6 +366,7 @@ async def main() -> None:
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
+            verify_web_answers=True,
             disable_thinking=settings.llm_disable_thinking,
             adaptive_thinking=(
                 settings.llm_adaptive_thinking and settings.llm_provider == "deepseek"
@@ -496,6 +499,19 @@ async def main() -> None:
                 favorite_prompt=load_prompt("favorite_selection"),
             ),
         )
+        if settings.reply_supplements_enabled:
+            reply_supplements = ReplySupplements(
+                bot,
+                deepseek,
+                user_states,
+                input_operations,
+                ReplySupplementLimits(settings.data_dir),
+                style_prompt=core_prompt,
+                shared=shared_dialogue,
+            )
+            response_engine.supplements = reply_supplements
+            receive_inputs.on_input = reply_supplements.cancel
+            health.add_diagnostics("supplements", reply_supplements.snapshot)
         sticker_importer = StickerPackImporter(bot, stickers_repository)
         if settings.sticker_pack_enabled:
             try:
@@ -775,6 +791,8 @@ async def main() -> None:
             await budget_alerts.close()
         if input_batches is not None:
             await input_batches.close()
+        if reply_supplements is not None:
+            await reply_supplements.close()
         if code_reviews is not None:
             await code_reviews.close()
         if reminders is not None:

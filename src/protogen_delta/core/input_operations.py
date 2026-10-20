@@ -117,6 +117,7 @@ class ReceiveInputsMiddleware(BaseMiddleware):
 
     def __init__(self, operations: InputOperations) -> None:
         self._operations = operations
+        self.on_input: Callable[[int], object] | None = None
 
     async def __call__(
         self,
@@ -130,6 +131,8 @@ class ReceiveInputsMiddleware(BaseMiddleware):
             or event.from_user.is_bot
         ):
             return await handler(event, data)
+        if self.on_input is not None:
+            self.on_input(event.from_user.id)
         async with self._operations.receive(event.from_user.id) as ticket:
             previous = data.get(_TICKET_KEY)
             data[_TICKET_KEY] = ticket
