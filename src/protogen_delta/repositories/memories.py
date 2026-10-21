@@ -12,6 +12,10 @@ from random import uniform
 from typing import Literal
 
 from protogen_delta.core.async_completion import finish_operation
+from protogen_delta.core.initiative_limits import (
+    QUIET_RESUME_MAX_SECONDS,
+    QUIET_RESUME_MIN_SECONDS,
+)
 from protogen_delta.core.memory_search import (
     SEARCH_VERSION,
     memory_index_text,
@@ -171,6 +175,7 @@ class MemoriesRepository:
         idle_max_seconds: float | None = None,
         sticker_delay: tuple[float, float] | None = None,
         initiative_limits: bool = False,
+        quiet_end_at: float | None = None,
     ) -> list[ProactiveCandidate]:
         """Сохранить срок первого приглашения и найти готовые отправления."""
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
@@ -197,6 +202,7 @@ class MemoriesRepository:
             maximum,
             sticker_delay,
             initiative_limits,
+            quiet_end_at,
         )
 
     async def note_proactive_sent(
@@ -230,6 +236,7 @@ class MemoriesRepository:
         idle_max_seconds: float | None = None,
         activity_version: int | None = None,
         sticker_delay: tuple[float, float] | None = None,
+        quiet_end_at: float | None = None,
     ) -> bool:
         """Проверить активность и настройку ещё раз после генерации сообщения."""
         candidates = await asyncio.to_thread(
@@ -241,6 +248,7 @@ class MemoriesRepository:
             user_id,
             idle_seconds if idle_max_seconds is None else idle_max_seconds,
             sticker_delay,
+            quiet_end_at=quiet_end_at,
         )
 
         return bool(candidates) and (
@@ -424,6 +432,7 @@ class MemoriesRepository:
         idle_max_seconds: float | None = None,
         sticker_delay: tuple[float, float] | None = None,
         initiative_limits: bool = False,
+        quiet_end_at: float | None = None,
     ) -> list[ProactiveCandidate]:
         maximum = idle_seconds if idle_max_seconds is None else idle_max_seconds
         with closing(self._connect()) as connection, connection:
@@ -471,6 +480,38 @@ class MemoriesRepository:
                     connection.execute(
                         "UPDATE engagement SET next_sticker_at=?,proactive_kind='undecided' WHERE user_id=?",
                         (max(last_user, last_dialogue) + delay, owner),
+                    )
+            if (
+                quiet_end_at is not None
+                and 0 <= now - quiet_end_at < QUIET_RESUME_MAX_SECONDS
+            ):
+                overnight = connection.execute(
+                    "SELECT user_id FROM engagement WHERE proactive_enabled=1 "
+                    "AND delivery_suspended=0 AND unanswered_count<2 "
+                    "AND (? IS NULL OR user_id=?) "
+                    "AND (next_proactive_at<=? OR next_sticker_at<=?)",
+                    (user_id, user_id, quiet_end_at, quiet_end_at),
+                ).fetchall()
+                for (owner,) in overnight:
+                    delay = self._random_delay(
+                        QUIET_RESUME_MIN_SECONDS, QUIET_RESUME_MAX_SECONDS
+                    )
+                    if (
+                        not isfinite(delay)
+                        or not QUIET_RESUME_MIN_SECONDS
+                        <= delay
+                        <= QUIET_RESUME_MAX_SECONDS
+                    ):
+                        raise ValueError(
+                            "Срок после тихих часов вне допустимого промежутка"
+                        )
+                    resume = quiet_end_at + delay
+                    connection.execute(
+                        "UPDATE engagement SET "
+                        "next_proactive_at=CASE WHEN next_proactive_at<=? THEN ? ELSE next_proactive_at END,"
+                        "next_sticker_at=CASE WHEN next_sticker_at<=? THEN ? ELSE next_sticker_at END "
+                        "WHERE user_id=?",
+                        (quiet_end_at, resume, quiet_end_at, resume, owner),
                     )
             gate = ""
             gate_args: tuple[object, ...] = ()

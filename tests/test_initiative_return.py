@@ -25,7 +25,7 @@ def test_reply_after_ten_hours_rearms_text_and_photo_across_restart(
     tmp_path: Path, photo: bool, restart: bool
 ) -> None:
     async def run() -> None:
-        now = [at(9)]
+        now = [at(9) + 600]
         memories, _, _, states, bot, model, service = build(tmp_path, now)
         service._local_datetime = lambda: datetime.fromtimestamp(now[0], MSK)
         await memories.note_user_activity(7, now[0] - 10800)
@@ -90,6 +90,8 @@ def test_evening_reply_survives_quiet_hours_and_rearms_next_morning(
         now[0] = at(23) + 3600
         assert await service.run_once() == 0
         now[0] = at(9) + 86400
+        assert await service.run_once() == 0
+        now[0] += 600
         assert await service.run_once() == 1
         assert bot.send_message.await_count == 2
         assert (
@@ -101,7 +103,7 @@ def test_evening_reply_survives_quiet_hours_and_rearms_next_morning(
 
 def test_answer_does_not_cancel_opt_out_or_reset_daily_cap(tmp_path: Path) -> None:
     async def run() -> None:
-        now = [at(9)]
+        now = [at(9) + 600]
         memories, _, _, _, bot, model, service = build(tmp_path, now)
         service._local_datetime = lambda: datetime.fromtimestamp(now[0], MSK)
         await memories.note_user_activity(7, now[0] - 10800)

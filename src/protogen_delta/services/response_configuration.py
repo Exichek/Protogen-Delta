@@ -8,6 +8,8 @@ from protogen_delta.core.initiative_limits import (
     DAILY_LIMIT,
     MIN_INTERVAL_SECONDS,
     QUIET_END_HOUR,
+    QUIET_RESUME_MAX_SECONDS,
+    QUIET_RESUME_MIN_SECONDS,
     QUIET_START_HOUR,
 )
 from protogen_delta.services.capabilities import build_capabilities
@@ -39,6 +41,11 @@ def load_response_configuration(
             f"через {settings.proactive_cooldown_seconds / 3600:g} часов допускается "
             "одно последнее повторное сообщение; затем нужно ждать нового сообщения пользователя."
         )
+    )
+    schedule += (
+        " Срок, истёкший к концу тихих часов, переносится на случайное время "
+        f"через {QUIET_RESUME_MIN_SECONDS // 60}–{QUIET_RESUME_MAX_SECONDS // 60} минут "
+        "после их окончания; выбранный срок сохраняется, отправление может состояться позже."
     )
     core += "\n\n" + loader("initiative_system").format(
         minimum_hours=settings.proactive_idle_seconds / 3600,

@@ -349,6 +349,7 @@ class ProactiveMessenger:
             limit=self._config.batch_size,
             sticker_delay=self._sticker_delay(),
             initiative_limits=self._initiative is not None,
+            quiet_end_at=self._quiet_end_at(),
         )
         sent = 0
         for candidate in candidates:
@@ -367,6 +368,7 @@ class ProactiveMessenger:
                         cooldown_seconds=self._config.cooldown_seconds,
                         activity_version=candidate.activity_version,
                         sticker_delay=self._sticker_delay(),
+                        quiet_end_at=self._quiet_end_at(),
                     ):
                         continue
                     window = None
@@ -401,6 +403,7 @@ class ProactiveMessenger:
                             cooldown_seconds=self._config.cooldown_seconds,
                             activity_version=candidate.activity_version,
                             sticker_delay=self._sticker_delay(),
+                            quiet_end_at=self._quiet_end_at(),
                         ):
                             continue
                     if kind == "sticker":
@@ -623,6 +626,7 @@ class ProactiveMessenger:
                         idle_max_seconds=self._config.idle_max_seconds,
                         activity_version=candidate.activity_version,
                         sticker_delay=self._sticker_delay(),
+                        quiet_end_at=self._quiet_end_at(),
                     )
                     if (
                         self._stop.is_set()
@@ -712,6 +716,18 @@ class ProactiveMessenger:
     def stop(self) -> None:
         """Запросить остановку фонового цикла."""
         self._stop.set()
+
+    def _quiet_end_at(self) -> float | None:
+        """Определять конец последней ночной паузы в тех же часах, что и таймер."""
+        if self._config.quiet_start_hour == self._config.quiet_end_hour:
+            return None
+        local = self._local_datetime()
+        end = local.replace(
+            hour=self._config.quiet_end_hour, minute=0, second=0, microsecond=0
+        )
+        if end > local:
+            end -= timedelta(days=1)
+        return self._clock() - (local - end).total_seconds()
 
     def _is_quiet_hour(self, hour: int) -> bool:
         start = self._config.quiet_start_hour
