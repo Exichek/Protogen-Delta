@@ -77,3 +77,29 @@ def test_real_generation_keeps_plan_and_previous_initiatives_without_changing_rp
         assert model.chat.await_args.kwargs["tool_names"] == ()
 
     asyncio.run(run())
+
+
+def test_mood_request_does_not_receive_the_rejected_candidate_changes(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        requests = []
+        for previous in (False, True):
+            now = [20000.0]
+            memories, _, _, states, _, model, service = build(
+                tmp_path / str(previous), now, value=0.999
+            )
+            if previous:
+                states.get(7).history.append(
+                    ConversationTurn(
+                        "", "Давай придумаем профессии для овощей.", proactive=True
+                    )
+                )
+            await memories.note_user_activity(7, 100)
+            assert await service.run_once() == 1
+            requests.append(model.chat.await_args.kwargs["user_message"])
+        assert requests[0] == requests[1]
+        assert "Вырази текущее настроение" in requests[0]
+        assert "Прежние доставленные инициативы" not in requests[0]
+
+    asyncio.run(run())

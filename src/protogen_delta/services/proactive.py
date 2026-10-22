@@ -35,6 +35,7 @@ from protogen_delta.services.conversation_grounding import current_time_context
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.initiative_context import initiative_mood_context
 from protogen_delta.services.initiative_planner import (
+    CONVERSATIONAL_KINDS,
     SILENCE,
     InitiativePlan,
     choose_initiative,
@@ -532,7 +533,7 @@ class ProactiveMessenger:
             invitation = _NEUTRAL_INVITATION
             if plan is not None:
                 request = plan.request()
-                if not snapshot.roleplay_active:
+                if not snapshot.roleplay_active and plan.kind in CONVERSATIONAL_KINDS:
                     request += _previous_initiatives(snapshot.history)
             if snapshot.roleplay_active:
                 if plan is not None:
