@@ -33,7 +33,11 @@ class _TextExtractor(HTMLParser):
                 or metadata.get("itemprop")
                 or ""
             ).casefold()
-            if field in {"article:published_time", "datepublished", "pubdate"}:
+            if not self.published and field in {
+                "article:published_time",
+                "datepublished",
+                "pubdate",
+            }:
                 self.published = (metadata.get("content") or "")[:80]
         if tag in {"script", "style", "noscript", "svg", "canvas", "template"}:
             self._ignored_depth += 1

@@ -60,3 +60,18 @@ def test_news_can_be_disabled_without_disabling_discussions(
     settings = load_settings()
     assert not settings.proactive_news_enabled
     assert settings.proactive_lively_enabled
+
+
+def test_related_publication_does_not_replace_the_page_publication_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = b'<head><meta property="article:published_time" content="2026-10-20T10:00:00Z"></head><body>Article<aside><meta itemprop="datePublished" content="2026-10-23T10:00:00Z">Related story</aside></body>'
+    monkeypatch.setattr(
+        web_module,
+        "fetch_public_page",
+        AsyncMock(return_value=(html, "https://news.xbox.com/article", "text/html")),
+    )
+    result = asyncio.run(
+        web_module.fetch_web_page({"url": "https://news.xbox.com/article"})
+    )
+    assert result["published"] == "2026-10-20T10:00:00Z"
