@@ -491,7 +491,7 @@ _BASELINE = json.loads(
 def test_runtime_prompt_matches_reviewed_snapshot(
     case: dict[str, Any],
 ) -> None:
-    """Сверять со снимком, утверждённым после исправления описания инициативы."""
+    """Сверять со снимком после явной пользовательской замены двух промптов."""
     model = AsyncMock(spec=DeepSeekService)
     config = replace(
         load_response_configuration(_settings(), fetish_triggers={}, fetish_names={}),

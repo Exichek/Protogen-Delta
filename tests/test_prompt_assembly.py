@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import Settings
 from protogen_delta.core.state import BotState
 from protogen_delta.core.user_state import UserStateStore
@@ -84,6 +85,32 @@ def test_map_covers_the_exact_reviewed_prompt(case: dict[str, Any]) -> None:
         assert prompt[start:end] == block.text
         if index:
             assert measures[index - 1]["end"] == measure["start"]
+
+
+def test_user_prompt_update_changes_only_the_two_authorized_sections() -> None:
+    """Восстановить прежние SHA заменой только двух пользовательских секций."""
+    previous = json.loads(
+        (
+            Path(__file__).parent / "fixtures/adult_prompt_update_baseline.json"
+        ).read_text("utf-8")
+    )
+    assert set(previous["sections"]) == {
+        "adult_conversation_style",
+        "personality/adult_rp",
+    }
+    assert [case["arguments"] for case in previous["cases"]] == [
+        case["arguments"] for case in _BASELINE["cases"]
+    ]
+    engine = make_engine()
+    for case in previous["cases"]:
+        reconstructed = engine._build_prompt(**case["arguments"])
+        for name, text in previous["sections"].items():
+            current = load_prompt(name)
+            if current in reconstructed:
+                assert reconstructed.count(current) == 1
+                reconstructed = reconstructed.replace(current, text, 1)
+        assert len(reconstructed) == case["chars"]
+        assert hashlib.sha256(reconstructed.encode()).hexdigest() == case["sha256"]
 
 
 @pytest.mark.parametrize(

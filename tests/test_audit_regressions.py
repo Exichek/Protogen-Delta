@@ -248,6 +248,9 @@ def test_prompt_update_preserves_all_text_outside_initiative_description() -> No
     folder = Path(__file__).parent / "fixtures"
     old = json.loads((folder / "behavior_prompt_baseline.json").read_text("utf-8"))
     current = json.loads((folder / "behavior_prompt_current.json").read_text("utf-8"))
+    adult_previous = json.loads(
+        (folder / "adult_prompt_update_baseline.json").read_text("utf-8")
+    )["sections"]
     assert [case["arguments"] for case in old["cases"]] == [
         case["arguments"] for case in current["cases"]
     ]
@@ -273,6 +276,13 @@ def test_prompt_update_preserves_all_text_outside_initiative_description() -> No
         prompt = engine._build_prompt(**case["arguments"])
         assert prompt.count(new_section) == 1
         reconstructed = prompt.replace(new_section, old_section, 1)
+        # Пользователь отдельно заменил эти два файла. Для исторического SHA
+        # вернуть именно прежние секции, не переписывая исходный эталон.
+        for name, previous in adult_previous.items():
+            section = load_prompt(name)
+            if section in reconstructed:
+                assert reconstructed.count(section) == 1
+                reconstructed = reconstructed.replace(section, previous, 1)
         assert len(reconstructed) == case["chars"]
         assert hashlib.sha256(reconstructed.encode()).hexdigest() == case["sha256"]
 
