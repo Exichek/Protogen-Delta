@@ -10,13 +10,18 @@ from protogen_delta.core.initiative_followup import (
     extract_followup_plan,
     followup_preference,
 )
+from protogen_delta.core.initiative_topics import (
+    DISCUSSION_DIRECTIONS,
+    DISCUSSION_KINDS,
+    TOPIC_LABELS,
+)
 from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.repositories.initiative_followups import DueFollowup
 from protogen_delta.repositories.memories import Memory
 from protogen_delta.services.prompt_composer import PromptComposer
 
 SILENCE = "[[SILENCE]]"
-CONVERSATIONAL_KINDS = frozenset({"thought", "play", "callback"})
+CONVERSATIONAL_KINDS = frozenset({"thought", "play", "callback"}) | DISCUSSION_KINDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +80,8 @@ def choose_initiative(
     history: Sequence[ConversationTurn],
     value: float,
     followup: DueFollowup | None = None,
+    discussion_topics: Sequence[str] = (),
+    news_available: bool = False,
 ) -> InitiativePlan:
     """Чередовать поводы; сохранённая реплика подтверждает текст, а не его истинность."""
     if not 0 <= value < 1:
@@ -114,6 +121,34 @@ def choose_initiative(
         ),
     ]
     technical_closed = PromptComposer.technical_topic_closed(history, ())
+    if discussion_topics:
+        if any(topic not in TOPIC_LABELS for topic in discussion_topics):
+            raise ValueError("Неизвестная тема инициативы")
+        topics = tuple(dict.fromkeys(discussion_topics))
+        if technical_closed:
+            topics = tuple(topic for topic in topics if topic == "games")
+        choices = [
+            (
+                1.0,
+                InitiativePlan(
+                    "discussion_" + topic,
+                    "Предложить обсудить: " + TOPIC_LABELS[topic],
+                    "Предложи обсудить один конкретный вопрос о "
+                    + DISCUSSION_DIRECTIONS[topic]
+                    + ". Пусть на него можно ответить своим мнением или опытом. "
+                    "Не начинай игру, викторину или задание придумать девиз, имя, "
+                    "профессию для вещи. Не сочиняй странную бытовую метафору. "
+                    "Не приписывай пользователю интересы, устройства и события, "
+                    "которые он не называл. Без поиска не заявляй о новых релизах, "
+                    "ценах и сегодняшних событиях. Достаточно одного приглашения.",
+                ),
+            )
+            for topic in topics
+        ]
+        if news_available and topics:
+            choices.append(
+                (3.0, InitiativePlan("news", "Поделиться проверенной новостью", ""))
+            )
     episode = next(
         (
             item.text[:350]
@@ -126,7 +161,7 @@ def choose_initiative(
         ),
         "",
     )
-    if episode:
+    if episode and not discussion_topics:
         choices.append(
             (
                 1.0,
@@ -158,7 +193,10 @@ def choose_initiative(
                 ),
             )
         )
-    choices = [(weight, plan) for weight, plan in choices if plan.kind != last_kind]
+    different = [(weight, plan) for weight, plan in choices if plan.kind != last_kind]
+    choices = different or choices
+    if not choices:
+        return InitiativePlan("silence", "Нет подходящей темы", "")
     remaining = value * sum(weight for weight, _ in choices)
     for weight, plan in choices:
         remaining -= weight
