@@ -2,7 +2,8 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock
+from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from test_input_batches import Harness, message
@@ -10,6 +11,7 @@ from test_response_engine import _create_engine
 from test_source_access import source
 
 from protogen_delta.core.tool_markup import contains_tool_markup
+from protogen_delta.core.user_state import ConversationTurn
 from protogen_delta.handlers.reply_context import telegram_reply_context
 from protogen_delta.handlers.text import create_text_router
 from protogen_delta.repositories.code_reviews import (
@@ -145,9 +147,163 @@ def test_review_context_reaches_main_reply_without_fabricated_history(
         await engine.respond(10, "это что такое?")
         assert "REVIEW_MARKER" in model.chat.await_args.kwargs["system_prompt"]
         assert model.chat.await_args.kwargs["user_message"] == "это что такое?"
-        assert model.chat.await_args.kwargs["history"] == ()
+        history = model.chat.await_args.kwargs["history"]
+        assert len(history) == 1 and history[0].proactive
+        assert history[0].user_message == ""
+        assert (
+            history[0].assistant_message
+            == "Проверить REVIEW_MARKER в services/sample.py:1"
+        )
+        assert len(engine._user_states.get(10).history) == 1
         await engine.respond(10, "а это?", chat_id=-123)
         assert "REVIEW_MARKER" not in model.chat.await_args.kwargs["system_prompt"]
+
+    asyncio.run(run())
+
+
+def test_delivered_review_is_last_model_message_after_old_game_and_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Воспроизвести короткий отклик после игры и более нового автообзора."""
+
+    async def run() -> None:
+        repo = CodeReviewsRepository(tmp_path)
+        report = "Автообзор: REVIEW_LAST_MESSAGE. Предположение требует проверки."
+        await repo.record_delivery(10, report, 10000, automatic=True)
+        service = CodeReviewService(
+            AsyncMock(),
+            AsyncMock(),
+            source(tmp_path),
+            CodeReviewsRepository(tmp_path),
+            clock=lambda: 11000,
+        )
+        engine, _, model, *_ = _create_engine()
+        recall = Mock(side_effect=AssertionError("Старое фото не относится к обзору"))
+        monkeypatch.setattr(engine._recent_visuals, "recall", recall)
+        engine._code_reviews = service
+        engine._user_states._wall_clock = lambda: 11000
+        state = engine._user_states.get(10)
+        old_game = ConversationTurn(
+            "", "OLD_GAME: назначим табурету должность", proactive=True
+        )
+        state.history.append(old_game)
+        state.history_updated_at = 9000
+        await engine.respond(10, "Ого, разберёмся)")
+        request = model.chat.await_args.kwargs
+        assert request["history"] == (
+            old_game,
+            ConversationTurn("", report, proactive=True),
+        )
+        assert request["user_message"] == "Ого, разберёмся)"
+        assert "после последнего хода" in request["system_prompt"]
+        assert "Не возобновляй прежнюю игру" in request["system_prompt"]
+        assert (
+            "Продолжение живого разговора после инициативы"
+            not in request["system_prompt"]
+        )
+        assert tuple(state.history) == (
+            old_game,
+            ConversationTurn("Ого, разберёмся)", "Ответ"),
+        )
+        recall.assert_not_called()
+        monkeypatch.setattr(engine._recent_visuals, "recall", Mock(return_value=()))
+        # Ответ уже новее отчёта: не переставлять его в конец снова.
+        await engine.respond(10, "Теперь другая тема")
+        assert all(
+            turn.assistant_message != report
+            for turn in model.chat.await_args.kwargs["history"]
+        )
+        assert model.chat.await_count == 2
+        cast(AsyncMock, service.model.chat).assert_not_awaited()
+        cast(AsyncMock, service.bot.send_message).assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_review_precedes_short_reply_in_actual_api_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from test_deepseek_service import _create_response, _create_service
+
+    async def run() -> None:
+        backend, _, api, _ = _create_service(monkeypatch)
+        api.return_value = _create_response("Да, обсудим замечания по коду.")
+        service = CodeReviewService(
+            AsyncMock(),
+            AsyncMock(),
+            source(tmp_path),
+            CodeReviewsRepository(tmp_path),
+            clock=lambda: 10000,
+        )
+        report = "Автообзор: API_REPORT_MARKER; это гипотезы, не применённые правки."
+        await service.record_delivery(10, report, automatic=True)
+        engine, *_ = _create_engine()
+        engine._deepseek = backend
+        engine._code_reviews = service
+        engine._user_states.get(10).history.append(
+            ConversationTurn("", "Старая игра про табурет", proactive=True)
+        )
+        await engine.respond(10, "Ого, разберёмся)")
+        assert api.await_args is not None
+        assert api.await_args.kwargs["messages"][-2:] == [
+            {"role": "assistant", "content": report},
+            {"role": "user", "content": "Ого, разберёмся)", "name": "tg_10"},
+        ]
+        api.assert_awaited_once()
+        await backend.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "reason", ["group", "no_facts", "rp", "reply", "forward", "expired", "newer_turn"]
+)
+def test_review_cannot_replace_other_reply_scopes(tmp_path: Path, reason: str) -> None:
+    from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
+
+    async def run() -> None:
+        repo = CodeReviewsRepository(tmp_path)
+        await repo.record_delivery(10, "REVIEW_SCOPE_MARKER", 10000, automatic=True)
+        service = CodeReviewService(
+            AsyncMock(),
+            AsyncMock(),
+            source(tmp_path),
+            repo,
+            clock=lambda: 10000 + (86400 if reason == "expired" else 1000),
+        )
+        engine, _, model, *_ = _create_engine()
+        engine._code_reviews = service
+        state = engine._user_states.get(10)
+        state.roleplay_active = reason == "rp"
+        state.history_updated_at = 10001 if reason == "newer_turn" else 9000
+        token = current_reply_sources.set(
+            (
+                ReplySource(
+                    "Ого, разберёмся)",
+                    "Ого, разберёмся)",
+                    reason != "forward",
+                    True,
+                    reply_target_present=reason == "reply",
+                ),
+            )
+        )
+        try:
+            await engine.respond(
+                10,
+                "Ого, разберёмся)",
+                chat_id=-123 if reason == "group" else None,
+                use_personal_facts=reason != "no_facts",
+            )
+        finally:
+            current_reply_sources.reset(token)
+        request = model.chat.await_args.kwargs
+        assert "REVIEW_SCOPE_MARKER" not in request["system_prompt"]
+        assert all(
+            "REVIEW_SCOPE_MARKER" not in turn.assistant_message
+            for turn in request["history"]
+        )
+        cast(AsyncMock, service.model.chat).assert_not_awaited()
 
     asyncio.run(run())
 
