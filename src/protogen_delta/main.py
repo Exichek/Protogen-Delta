@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 from protogen_delta.config.json_loader import load_json
 from protogen_delta.config.prompt_loader import load_prompt
 from protogen_delta.config.settings import Settings, load_settings
+from protogen_delta.core.initiative_topics import DEFAULT_TOPICS
 from protogen_delta.core.input_operations import (
     InputOperations,
     MemoryInputsMiddleware,
@@ -98,6 +99,7 @@ from protogen_delta.services.e621 import E621Client
 from protogen_delta.services.favorites import FavoritesService
 from protogen_delta.services.fetishes import FetishRoleClassifier
 from protogen_delta.services.image_source import ImageSourceService
+from protogen_delta.services.initiative_news import InitiativeNewsService
 from protogen_delta.services.insults import InsultClassifier
 from protogen_delta.services.interaction_classification import InteractionClassifier
 from protogen_delta.services.llm_budget_alerts import LlmBudgetAlerts
@@ -763,6 +765,11 @@ async def main() -> None:
             system_prompt=core_prompt,
             stickers=sticker_service,
             release_journal=release_journal,
+            news=(
+                InitiativeNewsService(web_search_service)
+                if settings.proactive_news_enabled
+                else None
+            ),
             initiative=(
                 InitiativeRepository(settings.data_dir)
                 if settings.proactive_lively_enabled
@@ -770,6 +777,7 @@ async def main() -> None:
             ),
             followups=initiative_followups,
             config=ProactiveConfig(
+                discussion_topics=DEFAULT_TOPICS,
                 check_interval_seconds=settings.proactive_check_seconds,
                 idle_seconds=settings.proactive_idle_seconds,
                 idle_max_seconds=settings.proactive_idle_max_seconds,

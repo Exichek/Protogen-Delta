@@ -22,8 +22,19 @@ class _TextExtractor(HTMLParser):
         self.title = ""
         self._in_title = False
         self.parts: list[str] = []
+        self.published = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "meta":
+            metadata = dict(attrs)
+            field = (
+                metadata.get("property")
+                or metadata.get("name")
+                or metadata.get("itemprop")
+                or ""
+            ).casefold()
+            if field in {"article:published_time", "datepublished", "pubdate"}:
+                self.published = (metadata.get("content") or "")[:80]
         if tag in {"script", "style", "noscript", "svg", "canvas", "template"}:
             self._ignored_depth += 1
         if tag == "title":
@@ -126,6 +137,7 @@ async def fetch_web_page(
         decoded = raw.decode(charset, "replace")
     except LookupError:
         decoded = raw.decode("utf-8", "replace")
+    published = ""
     if content_type == "text/plain":
         title = ""
         text = " ".join(decoded.split())
@@ -134,10 +146,12 @@ async def fetch_web_page(
         extractor.feed(decoded)
         title = extractor.title
         text = "\n".join(extractor.parts)
+        published = extractor.published
     return {
         "url": final_url,
         "title": title[:300],
         "text": text[:12000],
         "truncated": len(text) > 12000,
         "checked_at": datetime.now(timezone.utc).isoformat(),
+        **({"published": published} if published else {}),
     }

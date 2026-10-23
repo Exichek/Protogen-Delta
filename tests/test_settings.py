@@ -13,6 +13,7 @@ from protogen_delta.config.settings import load_settings
     [
         ("MESSAGE_REACTIONS_ENABLED", "invalid"),
         ("REPLY_SUPPLEMENTS_ENABLED", "invalid"),
+        ("PROACTIVE_NEWS_ENABLED", "invalid"),
         ("MESSAGE_REACTION_CHANCE", "1.1"),
         ("MESSAGE_REACTION_CHANCE", "-1"),
         ("MESSAGE_REACTION_CHANCE", "nan"),

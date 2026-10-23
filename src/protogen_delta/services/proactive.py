@@ -6,16 +6,18 @@ import logging
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from random import random
 from time import time
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.types import LinkPreviewOptions
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.initiative_limits import QUIET_END_HOUR, QUIET_START_HOUR
+from protogen_delta.core.initiative_topics import DISCUSSION_KINDS, TOPIC_LABELS
 from protogen_delta.core.llm_budget import LlmBudgetError, llm_user
 from protogen_delta.core.reply_formatting import format_reply_text
 from protogen_delta.core.roleplay import has_roleplay_action
@@ -30,10 +32,14 @@ from protogen_delta.repositories.initiative import InitiativeRepository
 from protogen_delta.repositories.initiative_followups import (
     InitiativeFollowupsRepository,
 )
-from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.memories import MemoriesRepository, ProactiveCandidate
 from protogen_delta.services.conversation_grounding import current_time_context
 from protogen_delta.services.deepseek import DeepSeekError, DeepSeekService
 from protogen_delta.services.initiative_context import initiative_mood_context
+from protogen_delta.services.initiative_news import (
+    MAX_NEWS_CHARS,
+    InitiativeNewsService,
+)
 from protogen_delta.services.initiative_planner import (
     CONVERSATIONAL_KINDS,
     SILENCE,
@@ -145,6 +151,7 @@ class ProactiveConfig:
     batch_size: int = 10
     sticker_idle_seconds: float | None = None
     sticker_idle_max_seconds: float = 7200.0
+    discussion_topics: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +168,7 @@ class _ConversationSnapshot:
     curiosity: float = field(default=0.0, compare=False)
     playfulness: float = field(default=0.0, compare=False)
     warmth: float = field(default=0.0, compare=False)
+    news_emotion_context: str = field(default="", compare=False)
 
     @classmethod
     def from_state(cls, state: UserState) -> "_ConversationSnapshot":
@@ -190,6 +198,7 @@ class _ConversationSnapshot:
             state.emotions.memory.curiosity,
             state.emotions.playfulness,
             state.emotions.warmth,
+            initiative_mood_context(state),
         )
 
     def scene_excerpt(self) -> str:
@@ -235,6 +244,7 @@ class ProactiveMessenger:
         release_journal: ReleaseJournal | None = None,
         initiative: InitiativeRepository | None = None,
         followups: InitiativeFollowupsRepository | None = None,
+        news: InitiativeNewsService | None = None,
     ) -> None:
         self._bot = bot
         self._deepseek = deepseek
@@ -252,6 +262,9 @@ class ProactiveMessenger:
         self._release_journal = release_journal
         self._initiative = initiative
         self._followups = followups
+        self._news = news
+        if any(topic not in TOPIC_LABELS for topic in config.discussion_topics):
+            raise ValueError("Неизвестная тема инициативы")
 
     def _sticker_delay(self) -> tuple[float, float] | None:
         if (
@@ -297,7 +310,15 @@ class ProactiveMessenger:
                 text = label
             else:
                 visible, entities = format_reply_text(text)
-                if entities:
+                if plan is not None and plan.kind == "news":
+                    await self._bot.send_message(
+                        user_id,
+                        visible,
+                        entities=entities,
+                        parse_mode=None,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    )
+                elif entities:
                     await self._bot.send_message(
                         user_id, visible, entities=entities, parse_mode=None
                     )
@@ -322,7 +343,12 @@ class ProactiveMessenger:
                 had_sticker=kind == "sticker",
             )
             if self._initiative is not None and plan is not None:
-                await self._initiative.note_sent(user_id, self._clock(), plan.kind)
+                if plan.kind == "news":
+                    await self._initiative.note_sent(
+                        user_id, self._clock(), plan.kind, plan.source
+                    )
+                else:
+                    await self._initiative.note_sent(user_id, self._clock(), plan.kind)
             if kind != "sticker" and self._release_journal is not None and plan is None:
                 try:
                     await self._release_journal.acknowledge(user_id)
@@ -359,6 +385,23 @@ class ProactiveMessenger:
     async def run_once(self) -> int:
         async with self._run_lock:
             return await self._run_once()
+
+    async def _still_current(
+        self, candidate: ProactiveCandidate, snapshot: _ConversationSnapshot
+    ) -> bool:
+        if self._stop.is_set() or self._is_quiet_hour(self._local_datetime().hour):
+            return False
+        async with self._conversation(candidate.user_id) as current:
+            return current == snapshot and await self._repository.is_due(
+                candidate.user_id,
+                now=self._clock(),
+                idle_seconds=self._config.idle_seconds,
+                idle_max_seconds=self._config.idle_max_seconds,
+                cooldown_seconds=self._config.cooldown_seconds,
+                activity_version=candidate.activity_version,
+                sticker_delay=self._sticker_delay(),
+                quiet_end_at=self._quiet_end_at(),
+            )
 
     async def _run_once(self) -> int:
         """Выполнить один проход планировщика и вернуть число отправлений."""
@@ -480,7 +523,25 @@ class ProactiveMessenger:
                     history=snapshot.history,
                     value=self._random_value(),
                     followup=followup,
+                    discussion_topics=(
+                        self._config.discussion_topics
+                        if not snapshot.roleplay_active
+                        else ()
+                    ),
+                    news_available=(
+                        not snapshot.roleplay_active
+                        and window.news_available
+                        and self._news is not None
+                        and self._news.enabled
+                    ),
                 )
+                if plan.kind == "silence":
+                    await self._initiative.defer(
+                        candidate.user_id,
+                        self._clock() + 3600,
+                        candidate.activity_version,
+                    )
+                    continue
                 if plan.kind == "followup" and followup is not None:
                     assert self._followups is not None
                     if not await self._followups.select(
@@ -598,17 +659,54 @@ class ProactiveMessenger:
                 if candidate.user_id in self._creator_ids:
                     emotional_context += "\nПолучатель — подтверждённый создатель из настроек приложения."
                 with llm_user(candidate.user_id):
-                    text = (
-                        await self._deepseek.chat(
-                            system_prompt=self._system_prompt
-                            + "\n\n"
-                            + rules
-                            + "\n\n"
-                            + emotional_context,
-                            user_message=request,
-                            tool_names=(),
+                    if plan is not None and plan.kind == "news":
+                        assert self._initiative is not None and self._news is not None
+                        if not await self._initiative.claim_news(
+                            candidate.user_id, now, candidate.activity_version
+                        ):
+                            continue
+                        topics = self._config.discussion_topics
+                        if PromptComposer.technical_topic_closed(snapshot.history, ()):
+                            topics = tuple(
+                                topic for topic in topics if topic == "games"
+                            )
+                        article = await asyncio.wait_for(
+                            self._news.generate(
+                                user_id=candidate.user_id,
+                                at=now,
+                                topics=topics,
+                                excluded_urls=await self._initiative.seen_news(
+                                    candidate.user_id, now
+                                ),
+                                model=self._deepseek,
+                                system_prompt=self._system_prompt
+                                + "\n\n"
+                                + snapshot.news_emotion_context,
+                                alive=lambda: self._still_current(candidate, snapshot),
+                            ),
+                            timeout=25,
                         )
-                    ).strip()
+                        text = article.text if article is not None else SILENCE
+                        if article is not None:
+                            plan = replace(
+                                plan,
+                                source=article.url,
+                                reason="Поделиться проверенной новостью: "
+                                + TOPIC_LABELS[article.topic],
+                            )
+                            kind = "text"
+                    else:
+                        text = (
+                            await self._deepseek.chat(
+                                system_prompt=self._system_prompt
+                                + "\n\n"
+                                + rules
+                                + "\n\n"
+                                + emotional_context,
+                                user_message=request,
+                                tool_names=(),
+                            )
+                        ).strip()
                 if self._initiative is not None and (
                     not text
                     or SILENCE in text
@@ -640,8 +738,24 @@ class ProactiveMessenger:
                         continue
                     logger.info("Proactive generation outcome=pressure_fallback")
                     text = invitation
-                text = " ".join(text.split())
-                if len(text) > 240:
+                text = (
+                    text.strip()
+                    if plan is not None and plan.kind == "news"
+                    else " ".join(text.split())
+                )
+                if plan is not None and (
+                    plan.kind == "news" or plan.kind in DISCUSSION_KINDS
+                ):
+                    limit = MAX_NEWS_CHARS if plan.kind == "news" else 240
+                    if len(text) > limit:
+                        assert self._initiative is not None
+                        await self._initiative.defer(
+                            candidate.user_id,
+                            self._clock() + 3600,
+                            candidate.activity_version,
+                        )
+                        continue
+                elif len(text) > 240:
                     text = text[:239].rsplit(" ", 1)[0] + "…"
                 async with self._conversation(candidate.user_id) as current:
                     still_due = await self._repository.is_due(
