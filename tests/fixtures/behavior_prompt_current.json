@@ -1,7 +1,7 @@
 {
-  "previous_fixture": "behavior_prompt_baseline.json",
-  "base_revision": "91fb83373a2f3a63cc46015ab4598906b2939419",
-  "change": "Исправлено только техническое описание режима инициативы; старый эталон сохранён отдельно.",
+  "previous_fixture": "adult_prompt_update_baseline.json",
+  "base_revision": "e1fb62bf3cafb1cb6fd5853756dc8e2f7cee2661",
+  "change": "Пользователь заменил adult_conversation_style.txt и personality/adult_rp.txt; остальные секции и исторические снимки сохранены.",
   "cases": [
     {
       "id": "conversation",
@@ -223,8 +223,8 @@
         "content_mode": "adult",
         "adult_context": true
       },
-      "sha256": "83df56b7b37bee0eb13a1bd58057a8f91236f4db96ae757f6eaee40d4736b8ee",
-      "chars": 25651
+      "sha256": "75084ed12f9cf7724cef2c2f6bbe5654bffacda520a174b4d2da65bb1d01e617",
+      "chars": 25897
     },
     {
       "id": "adult_female",
@@ -247,8 +247,8 @@
         "adult_context": true,
         "female_configuration": true
       },
-      "sha256": "8a31d9812ba1dca084ed081e968f3d87327c9d1bd276d5fb51d311c69f55acaf",
-      "chars": 26303
+      "sha256": "8af62cf70ac50d4b0429f80116d672d89889e8bfee4aecbaba33a322921cdda8",
+      "chars": 26549
     },
     {
       "id": "custom_appearance",
@@ -294,8 +294,8 @@
         ],
         "content_mode": "adult"
       },
-      "sha256": "ae6d23a6565369488599e3319c75093a1904585c1b6d65b9d06d79c5408eb685",
-      "chars": 14692
+      "sha256": "49697b9e0582879ef6d0ffdc9dab9f8da29fdcbb5686c8b0c59e8775ed364e0c",
+      "chars": 14109
     },
     {
       "id": "direct_conflict",
