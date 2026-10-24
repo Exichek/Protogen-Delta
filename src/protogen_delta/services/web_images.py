@@ -239,11 +239,18 @@ class WebImages:
                 continue
         if loaded is None:
             return {"status": "not_sent", "reason": "public_image_unavailable"}
-        data, source, _title, width, height = loaded
+        data, source, title, width, height = loaded
         fingerprint = hashlib.sha256(data).hexdigest()
         if fingerprint in turn.sent:
             return {**turn.sent[fingerprint], "already_sent": True}
         caption = _caption(args.get("description", ""))
+        if url != args["url"]:
+            # Не переносить название игры с провалившейся страницы на чужое фото.
+            subject = re.findall(r"\b[A-Za-z][A-Za-z0-9]*\b|\b\d{2,}\b", caption)
+            if not subject or not all(
+                word.casefold() in title.casefold() for word in subject
+            ):
+                caption = _caption("")
         # После неопределённой доставки повторов в этом ходе не будет.
         turn.delivery_uncertain = True
         try:

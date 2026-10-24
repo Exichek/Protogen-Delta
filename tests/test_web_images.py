@@ -458,7 +458,13 @@ def test_fallback_sources_and_single_photo_limit(
         loader = AsyncMock(
             side_effect=[
                 ValueError("blocked"),
-                (picture(), PAGE + "/alternative", "English article title", 640, 360),
+                (
+                    picture(),
+                    PAGE + "/alternative",
+                    "Cyberpunk 2077 Screenshots",
+                    640,
+                    360,
+                ),
             ]
         )
         monkeypatch.setattr(module, "load_web_image", loader)
@@ -604,5 +610,35 @@ def test_explicit_multiple_images_have_bounded_separate_deliveries(
             await sender.send_tool({"url": PHOTO})
             assert module.web_image_delivery_complete()
             assert len(turn.receipts) == bot.send_photo.await_count == 2
+
+    asyncio.run(run())
+
+
+def test_alternative_image_does_not_inherit_another_game_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        monkeypatch.setattr(
+            module,
+            "load_web_image",
+            AsyncMock(
+                side_effect=[
+                    ValueError("blocked"),
+                    (picture(), PHOTO, "Elden Ring Screenshots", 640, 360),
+                ]
+            ),
+        )
+        bot = AsyncMock()
+        sender = WebImages(bot)
+        with sender.turn(10, allowed=True):
+            remember_web_image_sources(
+                json.dumps({"ok": True, "data": {"results": [{"url": PHOTO}]}})
+            )
+            await sender.send_tool(
+                {"url": PAGE, "description": "Скриншот Cyberpunk 2077."}
+            )
+        caption = bot.send_photo.await_args.kwargs["caption"]
+        assert caption == "Картинка по твоему запросу."
+        assert "Cyberpunk" not in caption and "http" not in caption
 
     asyncio.run(run())
