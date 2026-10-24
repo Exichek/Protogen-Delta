@@ -305,8 +305,9 @@ def test_real_bot_session_captures_background_services_and_excludes_normal_deliv
                 repository=AsyncMock(spec=MemoriesRepository),
                 system_prompt="Тест",
                 config=ProactiveConfig(),
+                user_states=engine._user_states,
             )
-            assert await proactive._deliver(10, "Самостоятельная тема", "text", 0)
+            assert await proactive._deliver(10, "Самостоятельная **тема**", "text", 0)
             from test_source_access import source
 
             from protogen_delta.repositories.code_reviews import CodeReviewsRepository
@@ -332,6 +333,14 @@ def test_real_bot_session_captures_background_services_and_excludes_normal_deliv
             assert rows[0].kind == "creator" and "встречу" in rows[1].text
             assert rows[2].text == "Самостоятельная тема"
             assert "Автообзор" in rows[3].text
+            assert len(engine._user_states.get(10).history) == 5
+            assert (
+                sum(
+                    t.assistant_message == "Самостоятельная **тема**"
+                    for t in engine._user_states.get(10).history
+                )
+                == 1
+            )
             assert engine._user_states.get(10).history[-1].outgoing_id == rows[-1].id
         finally:
             await bot.session.close()

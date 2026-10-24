@@ -30,6 +30,7 @@ from protogen_delta.core.reply_capture import (
     current_reply_capture,
     current_reply_sources,
 )
+from protogen_delta.core.reply_formatting import format_reply_text
 from protogen_delta.core.reply_outcome import error_reply
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -2220,20 +2221,24 @@ class ResponseEngine:
         # Дополнение, присоединённое к обычному ответу, остаётся частью этого хода.
         sent_texts = {message.text for message in messages}
         standalone = {
-            turn.assistant_message: turn
+            format_reply_text(turn.assistant_message)[0]: turn
             for turn in history
-            if turn.proactive and turn.assistant_message in sent_texts
+            if turn.proactive
+            and format_reply_text(turn.assistant_message)[0] in sent_texts
         }
         base = tuple(
             turn
             for turn in history
-            if not (turn.proactive and turn.assistant_message in sent_texts)
+            if not (
+                turn.proactive
+                and format_reply_text(turn.assistant_message)[0] in sent_texts
+            )
         )
         joined = tuple(
             message.text
             for message in messages
             if any(
-                message.text in turn.assistant_message
+                message.text in format_reply_text(turn.assistant_message)[0]
                 for turn in base
                 if not turn.proactive
             )
