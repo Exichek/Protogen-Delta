@@ -44,6 +44,9 @@ class ConversationTurn:
     sender_id: int | None = None
     technical_topic_closed: bool = False
     initiative_reason: str = ""
+    outgoing_id: int = 0
+    outgoing_chat_id: int = 0
+    outside_roleplay: bool = False
 
 
 @dataclass(slots=True)

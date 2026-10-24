@@ -363,6 +363,9 @@ class UserStateRepository:
                     "proactive": turn.proactive,
                     "sender_id": turn.sender_id,
                     "technical_topic_closed": turn.technical_topic_closed,
+                    "outgoing_id": turn.outgoing_id,
+                    "outgoing_chat_id": turn.outgoing_chat_id,
+                    "outside_roleplay": turn.outside_roleplay,
                     "initiative_reason": (
                         turn.initiative_reason[:300] if turn.proactive else ""
                     ),
@@ -713,6 +716,19 @@ class UserStateRepository:
                     else ""
                 ),
                 technical_topic_closed=item.get("technical_topic_closed") is True,
+                outside_roleplay=item.get("outside_roleplay") is True,
+                outgoing_chat_id=(
+                    item["outgoing_chat_id"]
+                    if type(item.get("outgoing_chat_id")) is int
+                    and 0 < item["outgoing_chat_id"] < 2**63
+                    else 0
+                ),
+                outgoing_id=(
+                    item["outgoing_id"]
+                    if type(item.get("outgoing_id")) is int
+                    and 0 < item["outgoing_id"] < 2**63
+                    else 0
+                ),
                 sender_id=(
                     item["sender_id"]
                     if type(item.get("sender_id")) is int

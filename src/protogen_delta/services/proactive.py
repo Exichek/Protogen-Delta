@@ -25,6 +25,7 @@ from protogen_delta.core.user_state import (
     UserStatePersistenceError,
     UserStateStore,
 )
+from protogen_delta.handlers.outgoing_context import outgoing_kind
 from protogen_delta.handlers.proactive_activity import proactive_delivery
 from protogen_delta.repositories.initiative import InitiativeRepository
 from protogen_delta.repositories.initiative_followups import (
@@ -115,6 +116,7 @@ def _previous_initiatives(history: tuple[ConversationTurn, ...]) -> str:
         turn
         for turn in history
         if turn.proactive
+        and not turn.outgoing_id
         and not turn.context_closed
         and not _PERSONAL_TOPIC_PATTERN.search(turn.assistant_message)
     ][-3:]
@@ -296,13 +298,17 @@ class ProactiveMessenger:
                     return False
                 text = label
             else:
-                visible, entities = format_reply_text(text)
-                if entities:
-                    await self._bot.send_message(
-                        user_id, visible, entities=entities, parse_mode=None
-                    )
-                else:
-                    await self._bot.send_message(user_id, text)
+                scene = bool(plan is not None and plan.kind == "roleplay")
+                if plan is None and self._user_states is not None:
+                    scene = self._user_states.get(user_id).roleplay_active
+                with outgoing_kind("scene" if scene else "bot"):
+                    visible, entities = format_reply_text(text)
+                    if entities:
+                        await self._bot.send_message(
+                            user_id, visible, entities=entities, parse_mode=None
+                        )
+                    else:
+                        await self._bot.send_message(user_id, text)
             if self._user_states is not None:
                 state = self._user_states.get(user_id)
                 state.history.append(
