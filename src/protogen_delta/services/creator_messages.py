@@ -13,6 +13,7 @@ from aiogram import Bot
 
 from protogen_delta.core.async_completion import finish_operation
 from protogen_delta.core.user_state import UserStateStore
+from protogen_delta.handlers.outgoing_context import outgoing_kind
 from protogen_delta.repositories.creator_messages import (
     CreatorMessageKind,
     CreatorMessagesRepository,
@@ -71,7 +72,8 @@ class CreatorMessageService:
             return await finish_operation(self._deliver(chat_id, text, kind))
 
     async def _deliver(self, chat_id: int, text: str, kind: CreatorMessageKind) -> bool:
-        delivered = await self._bot.send_message(chat_id, text)
+        with outgoing_kind("creator"):
+            delivered = await self._bot.send_message(chat_id, text)
         try:
             await self._repository.record(
                 # Local acknowledgement has subsecond precision like history.

@@ -257,7 +257,7 @@ def test_review_precedes_short_reply_in_actual_api_messages(
 
 
 @pytest.mark.parametrize(
-    "reason", ["group", "no_facts", "rp", "reply", "forward", "expired", "newer_turn"]
+    "reason", ["group", "no_facts", "reply", "forward", "expired", "newer_turn"]
 )
 def test_review_cannot_replace_other_reply_scopes(tmp_path: Path, reason: str) -> None:
     from protogen_delta.core.reply_capture import ReplySource, current_reply_sources

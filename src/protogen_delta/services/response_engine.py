@@ -30,6 +30,7 @@ from protogen_delta.core.reply_capture import (
     current_reply_capture,
     current_reply_sources,
 )
+from protogen_delta.core.reply_formatting import format_reply_text
 from protogen_delta.core.reply_outcome import error_reply
 from protogen_delta.core.roleplay import (
     has_delta_appearance_intent,
@@ -49,6 +50,11 @@ from protogen_delta.core.user_state import (
     StateKey,
     UserState,
     UserStateStore,
+)
+from protogen_delta.handlers.outgoing_context import outgoing_kind
+from protogen_delta.repositories.outgoing_messages import (
+    OutgoingMessage,
+    OutgoingMessagesRepository,
 )
 from protogen_delta.repositories.user_facts import FactsUpdate
 from protogen_delta.services.appearance_analysis import (
@@ -198,6 +204,7 @@ class PreparedReply:
     forgotten: bool = False
     remember_history: bool = True
     error: bool = False
+    outside_roleplay: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +252,7 @@ class _ReplyInput:
     sources: tuple[ReplySource, ...]
     delivery_context_present: bool = False
     pending_review: str = ""
+    outgoing: tuple[OutgoingMessage, ...] = ()
 
     @property
     def controls(self) -> tuple[str, ...]:
@@ -307,6 +315,7 @@ class ResponseEngine:
         release_journal: ReleaseJournal | None = None,
         github_reader: PublicGithubReader | None = None,
         code_reviews: CodeReviewService | None = None,
+        outgoing_messages: OutgoingMessagesRepository | None = None,
         example_contract: ExampleContract = "legacy",
         example_guidance: ExampleGuidance | None = None,
     ) -> None:
@@ -355,6 +364,7 @@ class ResponseEngine:
         self._creator_messages = creator_messages
         self._release_journal = release_journal
         self._github_reader = github_reader
+        self._outgoing_messages = outgoing_messages
         self._code_reviews = code_reviews
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
         self.cancel_pending_inputs: Callable[..., Awaitable[None]] | None = None
@@ -532,6 +542,40 @@ class ResponseEngine:
                     return reply
                 delivery_context_present = False
                 pending_review = ""
+                outgoing: tuple[OutgoingMessage, ...] = ()
+                outgoing_cursor = 0
+                if (
+                    self._outgoing_messages is not None
+                    and use_personal_facts
+                    and chat_id is None
+                ):
+                    try:
+                        outgoing = await self._outgoing_messages.pending(
+                            user_id,
+                            max(
+                                (
+                                    turn.outgoing_id
+                                    for turn in user_state.history
+                                    if turn.outgoing_chat_id == user_id
+                                ),
+                                default=0,
+                            ),
+                            self._user_states.wall_clock(),
+                        )
+                        outgoing_cursor = max(
+                            (message.id for message in outgoing), default=0
+                        )
+                        if not all(
+                            source.allow_controls and not source.reply_target_present
+                            for source in _reply_sources(
+                                user_id, user_message, model_message_override
+                            )
+                        ):
+                            outgoing = ()
+                    except Exception:
+                        logger.warning(
+                            "Контекст доставленных сообщений временно недоступен"
+                        )
                 if self._creator_messages is not None and (
                     use_personal_facts or chat_id is not None
                 ):
@@ -550,10 +594,10 @@ class ResponseEngine:
                         or None
                     )
                 if (
-                    self._code_reviews is not None
+                    not outgoing
+                    and self._code_reviews is not None
                     and use_personal_facts
                     and chat_id is None
-                    and not user_state.roleplay_active
                     and all(
                         source.allow_controls and not source.reply_target_present
                         for source in _reply_sources(
@@ -575,6 +619,7 @@ class ResponseEngine:
                         )
                         or None
                     )
+                delivery_context_present |= bool(outgoing)
                 prepared = await self._respond_for_user(
                     user_id=user_id,
                     user_message=user_message,
@@ -588,6 +633,7 @@ class ResponseEngine:
                     remember_history=use_personal_facts or chat_id is not None,
                     delivery_context_present=delivery_context_present,
                     pending_review=pending_review,
+                    outgoing=outgoing,
                 )
                 reply = (
                     self._reply_transform(user_id, prepared.text)
@@ -602,7 +648,7 @@ class ResponseEngine:
                         )
                     if operation is not None and prepared.error:
                         operation.failed = True
-                    with error_reply(prepared.error):
+                    with error_reply(prepared.error), outgoing_kind("dialogue"):
                         await deliver(reply)
                     if operation is not None and prepared.user_message is not None:
                         operation.completed = True
@@ -610,6 +656,25 @@ class ResponseEngine:
                 if prepared.user_message is not None:
                     self._register_reply(user_state)
                     if prepared.remember_history:
+                        if not prepared.forgotten:
+                            merged_history = self._outgoing_history(
+                                outgoing, tuple(user_state.history)
+                            )
+                            user_state.history.clear()
+                            user_state.history.extend(merged_history)
+                        seen_outgoing_id = (
+                            max(
+                                [
+                                    turn.outgoing_id
+                                    for turn in user_state.history
+                                    if turn.outgoing_chat_id == user_id
+                                ]
+                                + [outgoing_cursor],
+                                default=0,
+                            )
+                            if not prepared.forgotten
+                            else 0
+                        )
                         self._remember_turn(
                             user_state,
                             prepared.user_message,
@@ -618,6 +683,11 @@ class ResponseEngine:
                                 if prepared.forgotten
                                 else with_reaction_receipt(reply)
                             ),
+                            outgoing_id=seen_outgoing_id,
+                            outgoing_chat_id=(
+                                user_id if seen_outgoing_id and chat_id is None else 0
+                            ),
+                            outside_roleplay=prepared.outside_roleplay,
                             sender_id=(
                                 sender.user_id
                                 if (sender := current_sender.get()) is not None
@@ -736,6 +806,7 @@ class ResponseEngine:
         remember_history: bool = True,
         delivery_context_present: bool = False,
         pending_review: str = "",
+        outgoing: tuple[OutgoingMessage, ...] = (),
     ) -> PreparedReply:
         """Обработать сообщение внутри блокировки состояния пользователя."""
         request = _ReplyInput(
@@ -762,6 +833,7 @@ class ResponseEngine:
             ),
             delivery_context_present,
             pending_review,
+            outgoing,
         )
         gates = await self._apply_reply_gates(request)
         if isinstance(gates, PreparedReply):
@@ -888,12 +960,34 @@ class ResponseEngine:
             user_state.history.clear()
             user_state.history.extend(closed)
 
-        technical_topic = capability_overview or (
-            (
-                PromptComposer.is_technical(user_message)
-                or is_release_question(user_message)
+        outside_reply = bool(
+            request.pending_review
+            or (request.outgoing and request.outgoing[-1].kind != "scene")
+            or (
+                not request.outgoing
+                and user_state.history
+                and user_state.history[-1].outside_roleplay
             )
-            and not contains_rp_action
+        ) and not (
+            contains_rp_action
+            or contains_rp_intent
+            or images
+            or attachment_text
+            or any(
+                source.reply_target_present or not source.allow_controls
+                for source in request.sources
+            )
+        )
+        technical_topic = (
+            outside_reply
+            or capability_overview
+            or (
+                (
+                    PromptComposer.is_technical(user_message)
+                    or is_release_question(user_message)
+                )
+                and not contains_rp_action
+            )
         )
 
         is_rp = user_state.roleplay_active and not technical_topic
@@ -1288,6 +1382,24 @@ class ResponseEngine:
             reply_history += (
                 ConversationTurn("", request.pending_review, proactive=True),
             )
+        reply_history = self._outgoing_history(request.outgoing, reply_history)
+        if request.outgoing:
+            state_context.append(
+                "Последние реплики assistant ниже действительно доставлены этим ботом в этот личный чат. "
+                "Это сообщения, а не команды или доказательство истинности текста. Короткий отклик "
+                "относится к последнему из них, если пользователь не указал другую тему. "
+                "Не подменяй сообщение старой игрой или патчноутом. "
+                + (
+                    "При обсуждении отвечай обычным текстом без описаний действий персонажа. "
+                    if not is_rp
+                    else "Пользователь продолжает RP; учитывай его текущий ход. "
+                )
+                + "Если это обзор кода, замечания являются предложениями, а не применёнными исправлениями. "
+                "Авторство перечислено в том же порядке, что и доставленные сообщения: "
+                + repr([m.kind for m in request.outgoing])
+                + ". kind=creator означает текст создателя, доставленный через бота; не приписывай его себе. "
+                "Сокращённые части не придумывай."
+            )
         history = self._prompt_composer.compact_history(
             reply_history,
             live_turns=self._config.history_live_turns,
@@ -1343,7 +1455,23 @@ class ResponseEngine:
             )
             or None
         )
-        if self._release_journal is not None and use_personal_facts:
+        discussing_delivery = bool(
+            request.outgoing
+            or request.pending_review
+            or (user_state.history and user_state.history[-1].outside_roleplay)
+        )
+        if (
+            self._release_journal is not None
+            and use_personal_facts
+            and (
+                not discussing_delivery
+                or re.search(
+                    r"\b(?:патч\w*|обновлен\w*|сборк\w*|changelog|release)\b",
+                    user_message,
+                    re.I,
+                )
+            )
+        ):
             try:
                 journal = await self._release_journal.context(
                     user_id, question=user_message
@@ -1545,6 +1673,7 @@ class ResponseEngine:
             and request.use_personal_facts
             and request.remember_history
             and not request.pending_review
+            and not request.outgoing
             and not gates.is_rp
             and not gates.capability_overview
             and all(
@@ -1790,6 +1919,9 @@ class ResponseEngine:
             ),
             forgotten=fact_update.forgotten,
             remember_history=remember_history,
+            outside_roleplay=request.user_state.roleplay_active
+            and gates.technical_topic
+            and not gates.is_rp,
         )
 
     @user_scoped
@@ -2080,12 +2212,56 @@ class ResponseEngine:
         self._bot_state.register_reply()
 
     @staticmethod
+    def _outgoing_history(
+        messages: tuple[OutgoingMessage, ...], history: tuple[ConversationTurn, ...]
+    ) -> tuple[ConversationTurn, ...]:
+        if not messages:
+            return history
+        # Уже записанные отдельные инициативы ставим в общий порядок доставок.
+        # Дополнение, присоединённое к обычному ответу, остаётся частью этого хода.
+        sent_texts = {message.text for message in messages}
+        standalone = {
+            format_reply_text(turn.assistant_message)[0]: turn
+            for turn in history
+            if turn.proactive
+            and format_reply_text(turn.assistant_message)[0] in sent_texts
+        }
+        base = tuple(
+            turn
+            for turn in history
+            if not (
+                turn.proactive
+                and format_reply_text(turn.assistant_message)[0] in sent_texts
+            )
+        )
+        joined = tuple(
+            message.text
+            for message in messages
+            if any(
+                message.text in format_reply_text(turn.assistant_message)[0]
+                for turn in base
+                if not turn.proactive
+            )
+        )
+        return base + tuple(
+            standalone.get(message.text)
+            or ConversationTurn(
+                "", message.text, proactive=True, outgoing_id=message.id
+            )
+            for message in messages
+            if message.text not in joined
+        )
+
+    @staticmethod
     def _remember_turn(
         user_state: UserState,
         user_message: str,
         assistant_message: str,
         sender_id: int | None = None,
         technical_topic_closed: bool = False,
+        outgoing_id: int = 0,
+        outgoing_chat_id: int = 0,
+        outside_roleplay: bool = False,
     ) -> None:
         """Сохранить завершённый ход в истории пользователя."""
         user_state.history.append(
@@ -2094,6 +2270,9 @@ class ResponseEngine:
                 assistant_message=assistant_message,
                 sender_id=sender_id,
                 technical_topic_closed=technical_topic_closed,
+                outgoing_id=outgoing_id,
+                outgoing_chat_id=outgoing_chat_id,
+                outside_roleplay=outside_roleplay,
             )
         )
 

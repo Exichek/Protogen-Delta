@@ -50,6 +50,7 @@ from protogen_delta.handlers.llm_budget import LlmUserMiddleware
 from protogen_delta.handlers.media import create_media_router
 from protogen_delta.handlers.memory import create_memory_router
 from protogen_delta.handlers.menu import create_menu_router
+from protogen_delta.handlers.outgoing_context import OutgoingContextMiddleware
 from protogen_delta.handlers.proactive_activity import (
     ProactiveIncomingMiddleware,
     ProactiveOutgoingMiddleware,
@@ -80,6 +81,7 @@ from protogen_delta.repositories.initiative_followups import (
 )
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.repositories.memories import MemoriesRepository
+from protogen_delta.repositories.outgoing_messages import OutgoingMessagesRepository
 from protogen_delta.repositories.reminders import RemindersRepository
 from protogen_delta.repositories.reply_supplements import ReplySupplementLimits
 from protogen_delta.repositories.stickers import StickersRepository
@@ -271,6 +273,8 @@ async def main() -> None:
         bot.session.middleware.register(
             ProactiveOutgoingMiddleware(memories_repository)
         )
+        outgoing_messages = OutgoingMessagesRepository(settings.data_dir)
+        bot.session.middleware.register(OutgoingContextMiddleware(outgoing_messages))
         reminders = ReminderService(bot, RemindersRepository(settings.data_dir))
         health.add_diagnostics("reminders", reminders.snapshot)
         creator_messages_repository = CreatorMessagesRepository(settings.data_dir)
@@ -443,6 +447,7 @@ async def main() -> None:
             if market_advisor is not None:
                 await market_advisor.clear(user_id)
             await github_reader.clear_user(user_id)
+            await outgoing_messages.delete_user(user_id)
             if code_reviews is not None:
                 await code_reviews.repository.clear_delivery(user_id)
 
@@ -472,6 +477,7 @@ async def main() -> None:
         dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
             code_reviews=code_reviews,
+            outgoing_messages=outgoing_messages,
             github_reader=github_reader,
             deepseek=deepseek,
             appearance_model=(
