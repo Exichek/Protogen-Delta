@@ -80,10 +80,15 @@ _HOSTS = (
 _YOUTUBE_HOSTS = frozenset(
     {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 )
+_INSTAGRAM_HOSTS = frozenset({"instagram.com", "www.instagram.com"})
 
 
 def is_youtube_url(url: str) -> bool:
     return urlsplit(url).hostname in _YOUTUBE_HOSTS
+
+
+def is_instagram_url(url: str) -> bool:
+    return urlsplit(url).hostname in _INSTAGRAM_HOSTS
 
 
 def directory_bytes(directory: Path) -> int:
