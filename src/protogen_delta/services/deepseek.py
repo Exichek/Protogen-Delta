@@ -39,6 +39,10 @@ from protogen_delta.services.prompt_composer import PromptComposer, web_search_f
 from protogen_delta.services.public_github import github_links
 from protogen_delta.services.source_access import current_source_owner
 from protogen_delta.services.tools import ToolExecutor, get_current_time
+from protogen_delta.services.web_images import (
+    remember_web_image_sources,
+    web_image_delivery_complete,
+)
 from protogen_delta.services.web_verification import UNVERIFIED_WEB_REPLY, WebEvidence
 
 logger = logging.getLogger(__name__)
@@ -911,8 +915,8 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
-                if image_sent and not evidence.pages:
-                    return "Изображение отправлено в чат. Источник указан в подписи."
+                if image_sent:
+                    return "Фото отправлено."
                 return (
                     await self._verified_web_reply(
                         user_message,
@@ -1004,6 +1008,8 @@ class DeepSeekService:
                     evidence.observe(
                         call.function.name, call.function.arguments, outcome
                     )
+                    if call.function.name == "web_search":
+                        remember_web_image_sources(outcome)
                     if call.function.name == "send_web_image":
                         try:
                             image_sent |= (
@@ -1015,6 +1021,10 @@ class DeepSeekService:
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": outcome}
                 )
+            # Отправка файла подтверждается Telegram, а не проверкой текста сайтов.
+            # Повторная генерация не должна отрицать уже выполненное действие.
+            if image_sent and web_image_delivery_complete():
+                return "Фото отправлено."
         messages.append(
             {
                 "role": "system",
@@ -1043,8 +1053,8 @@ class DeepSeekService:
             _final_chat_reply(final)
             or "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
         )
-        if image_sent and not evidence.pages:
-            return "Изображение отправлено в чат. Источник указан в подписи."
+        if image_sent:
+            return "Фото отправлено."
         return (
             await self._verified_web_reply(user_message, draft, evidence, web_expected)
             + footer

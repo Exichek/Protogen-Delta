@@ -15,7 +15,7 @@ from test_tool_loop import response
 import protogen_delta.services.deepseek as deepseek_module
 import protogen_delta.services.web_images as module
 from protogen_delta.core.reply_capture import ReplySource, current_reply_sources
-from protogen_delta.core.web_image_request import is_web_image_request
+from protogen_delta.core.web_image_request import is_web_image_request, web_image_limit
 from protogen_delta.services.deepseek import DeepSeekService
 from protogen_delta.services.prompt_composer import PromptComposer
 from protogen_delta.services.tools import ToolExecutor, default_registry
@@ -24,6 +24,7 @@ from protogen_delta.services.web_images import (
     WebImages,
     _image,
     load_web_image,
+    remember_web_image_sources,
 )
 
 PAGE = "https://example.org/game"
@@ -175,7 +176,10 @@ def test_scope_success_dedup_and_delivery_failure(
             assert result["status"] == "sent" and len(turn.receipts) == 1
             call = bot.send_photo.await_args
             assert call.args[0] == 10 and call.args[1].data == picture()
-            assert PAGE in call.kwargs["caption"] and call.kwargs["parse_mode"] is None
+            assert (
+                "http" not in call.kwargs["caption"]
+                and call.kwargs["parse_mode"] is None
+            )
             assert (await service.send_tool({"url": PAGE}))["already_sent"]
             bot.send_photo.assert_awaited_once()
         bot.send_photo.side_effect = TimeoutError()
@@ -189,8 +193,8 @@ def test_scope_success_dedup_and_delivery_failure(
             ] == "image_delivery_not_available"
         loader.side_effect = ValueError("private detail")
         with service.turn(10, allowed=True):
-            for _ in range(3):
-                assert (await service.send_tool({"url": PAGE}))[
+            for index in range(3):
+                assert (await service.send_tool({"url": PAGE + str(index)}))[
                     "reason"
                 ] == "public_image_unavailable"
             assert (await service.send_tool({"url": PAGE}))[
@@ -279,13 +283,18 @@ def test_real_model_tool_loop_search_read_photo_then_answer(
             return result
 
         final = response()
-        final.choices[0].message.content = "Вот картинка."
+        final.choices[0].message.content = (
+            "Не могу приложить картинку. Вот ссылки: " + PAGE
+        )
         client = Mock()
         client.chat.completions.create = AsyncMock(
             side_effect=[
                 tool("web_search", {"query": "game screenshots"}),
                 tool("fetch_web_page", {"url": PAGE}),
-                tool("send_web_image", {"url": PAGE}),
+                tool(
+                    "send_web_image",
+                    {"url": PAGE, "description": "Скриншот Cyberpunk 2077."},
+                ),
                 final,
             ]
         )
@@ -297,15 +306,16 @@ def test_real_model_tool_loop_search_read_photo_then_answer(
             tools=ToolExecutor(registry),
             verify_web_answers=True,
         )
-        monkeypatch.setattr(
-            backend, "_verified_web_reply", AsyncMock(return_value="Вот картинка.")
-        )
         engine, *_ = _create_engine()
         engine._deepseek = backend
         engine._web_images = sender
-        await engine.respond(
-            10, "Скинь фотку из интернета по игре", deliver=AsyncMock()
+        delivered = AsyncMock()
+        result = await engine.respond(
+            10, "Скинь фотку из интернета по игре", deliver=delivered
         )
+        assert result == "Фото отправлено."
+        delivered.assert_awaited_once_with(result)
+        assert client.chat.completions.create.await_count == 3
         calls = client.chat.completions.create.await_args_list
         assert [c.kwargs["tool_choice"]["function"]["name"] for c in calls[:3]] == [
             "web_search",
@@ -360,7 +370,9 @@ def test_direct_image_actual_tool_loop_acknowledges_only_delivery(
         )
         sender = WebImages(AsyncMock())
         registry = default_registry(web_images=sender)
-        first = response(1, json.dumps({"url": PHOTO}))
+        first = response(
+            1, json.dumps({"url": PHOTO, "description": "Картинка по твоему запросу."})
+        )
         first.choices[0].message.tool_calls[0].function.name = "send_web_image"
         final = response()
         final.choices[0].message.content = (
@@ -381,7 +393,8 @@ def test_direct_image_actual_tool_loop_acknowledges_only_delivery(
             result = await backend.chat(
                 "system", "Скинь картинку " + PHOTO, tool_names={"send_web_image"}
             )
-        assert result == "Изображение отправлено в чат. Источник указан в подписи."
+        assert result == "Фото отправлено."
+        assert client.chat.completions.create.await_count == 1
         assert (
             client.chat.completions.create.await_args_list[0].kwargs["tool_choice"][
                 "function"
@@ -418,5 +431,214 @@ def test_cancelled_delivery_is_finished_once(monkeypatch: pytest.MonkeyPatch) ->
             assert len(turn.receipts) == 1
             assert (await sender.send_tool({"url": PAGE}))["status"] == "not_sent"
         bot.send_photo.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "text,limit",
+    [
+        ("Скинь скриншот из Cyberpunk 2077", 1),
+        ("Скинь какую-нибудь фотку по игре", 1),
+        ("Пришли две картинки из Cyberpunk", 2),
+        ("Скинь 10 скриншотов", 3),
+        ("Скинь картинку. Он сказал «пришли три картинки»", 1),
+        ("Пришли три скриншота", 3),
+        ("Пришли одну картинку", 1),
+    ],
+)
+def test_requested_image_count(text: str, limit: int) -> None:
+    assert web_image_limit(text) == limit
+
+
+def test_fallback_sources_and_single_photo_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        loader = AsyncMock(
+            side_effect=[
+                ValueError("blocked"),
+                (
+                    picture(),
+                    PAGE + "/alternative",
+                    "Cyberpunk 2077 Screenshots",
+                    640,
+                    360,
+                ),
+            ]
+        )
+        monkeypatch.setattr(module, "load_web_image", loader)
+        bot = AsyncMock()
+        sender = WebImages(bot)
+        with sender.turn(10, allowed=True) as turn:
+            remember_web_image_sources(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "data": {
+                            "results": [
+                                {"url": PAGE},
+                                {"url": PAGE + "/alternative"},
+                            ]
+                        },
+                    }
+                )
+            )
+            result = await sender.send_tool(
+                {"url": PAGE, "description": "Скриншот Cyberpunk 2077 — Найт-Сити."}
+            )
+            assert result["status"] == "sent" and turn.attempts == 2
+            assert [call.args[0] for call in loader.await_args_list] == [
+                PAGE,
+                PAGE + "/alternative",
+            ]
+            assert (
+                bot.send_photo.await_args.kwargs["caption"]
+                == "Скриншот Cyberpunk 2077 — Найт-Сити."
+            )
+            await sender.send_tool({"url": PHOTO})
+            bot.send_photo.assert_awaited_once()
+        with sender.turn(10, allowed=True) as fresh:
+            assert not fresh.candidates and not fresh.tried
+        assert len(turn.receipts) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Скриншот [Cyberpunk](https://example.org). https://example.org/article",
+        "English article title https://example.org",
+        "Скриншот Cyberpunk, example.org/article",
+        "",
+    ],
+)
+def test_captions_have_description_without_links(description: str) -> None:
+    caption = module._caption(description)
+    assert "http" not in caption and "example.org" not in caption
+    assert caption and len(caption) <= 200
+
+
+def test_successful_photo_cannot_be_denied_by_final_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        monkeypatch.setattr(
+            module,
+            "load_web_image",
+            AsyncMock(return_value=(picture(), PAGE, "English headline", 640, 360)),
+        )
+        sender = WebImages(AsyncMock())
+        engine, _, model, *_ = _create_engine()
+        engine._web_images = sender
+        engine.supplements = Mock()
+
+        async def answer(**kwargs: Any) -> str:
+            await sender.send_tool(
+                {"url": PAGE, "description": "Скриншот Cyberpunk 2077."}
+            )
+            return "Не могу прикрепить картинку. Источник: " + PAGE
+
+        model.chat.side_effect = answer
+        delivered = AsyncMock()
+        result = await engine.respond(
+            10, "Скинь скриншот из Cyberpunk 2077", deliver=delivered
+        )
+        assert result == "Фото отправлено."
+        delivered.assert_awaited_once_with(result)
+        history = engine._user_states.get(10).history[-1].assistant_message
+        assert "Скриншот Cyberpunk 2077" in history
+        assert "Не могу" not in history and "http" not in history
+        engine.supplements.schedule.assert_not_called()
+
+    asyncio.run(run())
+
+
+def test_fallback_stops_after_three_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> None:
+        loader = AsyncMock(side_effect=ValueError("unavailable"))
+        monkeypatch.setattr(module, "load_web_image", loader)
+        sender = WebImages(AsyncMock())
+        with sender.turn(10, allowed=True) as turn:
+            remember_web_image_sources(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "data": {"results": [{"url": PAGE + str(i)} for i in range(6)]},
+                    }
+                )
+            )
+            assert (await sender.send_tool({"url": PAGE}))["status"] == "not_sent"
+            assert turn.attempts == 3 and loader.await_count == 3
+            assert (await sender.send_tool({"url": PHOTO}))[
+                "reason"
+            ] == "image_delivery_not_available"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "payload", ["bad", "[]", '{"ok":true}', '{"ok":true,"data":{"results":null}}']
+)
+def test_invalid_search_does_not_authorize_fallback(payload: str) -> None:
+    remember_web_image_sources(payload)
+    with WebImages(AsyncMock()).turn(10, allowed=True) as turn:
+        remember_web_image_sources(payload)
+        assert not turn.candidates
+
+
+def test_explicit_multiple_images_have_bounded_separate_deliveries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        monkeypatch.setattr(
+            module,
+            "load_web_image",
+            AsyncMock(
+                side_effect=[
+                    (picture(), PAGE, "Game", 640, 360),
+                    (picture((800, 600)), PHOTO, "Game", 800, 600),
+                ]
+            ),
+        )
+        bot = AsyncMock()
+        sender = WebImages(bot)
+        with sender.turn(10, allowed=True, limit=2) as turn:
+            await sender.send_tool({"url": PAGE})
+            assert not module.web_image_delivery_complete()
+            await sender.send_tool({"url": PHOTO})
+            assert module.web_image_delivery_complete()
+            assert len(turn.receipts) == bot.send_photo.await_count == 2
+
+    asyncio.run(run())
+
+
+def test_alternative_image_does_not_inherit_another_game_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        monkeypatch.setattr(
+            module,
+            "load_web_image",
+            AsyncMock(
+                side_effect=[
+                    ValueError("blocked"),
+                    (picture(), PHOTO, "Elden Ring Screenshots", 640, 360),
+                ]
+            ),
+        )
+        bot = AsyncMock()
+        sender = WebImages(bot)
+        with sender.turn(10, allowed=True):
+            remember_web_image_sources(
+                json.dumps({"ok": True, "data": {"results": [{"url": PHOTO}]}})
+            )
+            await sender.send_tool(
+                {"url": PAGE, "description": "Скриншот Cyberpunk 2077."}
+            )
+        caption = bot.send_photo.await_args.kwargs["caption"]
+        assert caption == "Картинка по твоему запросу."
+        assert "Cyberpunk" not in caption and "http" not in caption
 
     asyncio.run(run())
