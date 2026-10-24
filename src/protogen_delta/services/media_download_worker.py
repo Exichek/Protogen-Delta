@@ -24,6 +24,7 @@ from protogen_delta.services.media_download import (
     MAX_DOWNLOAD_BYTES,
     MAX_DOWNLOAD_SECONDS,
     directory_bytes,
+    is_instagram_url,
     is_youtube_url,
     validate_media_url,
 )
@@ -121,6 +122,30 @@ def _check_animation(directory: Path) -> None:
             raise ValueError("Unsupported animation format")
 
 
+def _check_instagram_duration(directory: Path) -> None:
+    """Instagram может не отдавать длительность анонимно: проверить локальный файл."""
+    paths = [
+        path
+        for path in directory.iterdir()
+        if path.suffix.lower() in {".mp4", ".webm", ".mov", ".mkv"}
+        and path.is_file()
+        and not path.is_symlink()
+    ]
+    if len(paths) != 1 or paths[0].stat().st_size == 0:
+        raise DownloadFailure("formats")
+    if paths[0].stat().st_size > MAX_DOWNLOAD_BYTES:
+        raise DownloadFailure("too_large")
+    try:
+        with av.open(str(paths[0]), options={"protocol_whitelist": "file"}) as video:
+            duration = (video.duration or 0) / av.time_base
+            if not video.streams.video or not math.isfinite(duration) or duration <= 0:
+                raise DownloadFailure("formats")
+            if duration > MAX_DOWNLOAD_SECONDS:
+                raise DownloadFailure("too_long")
+    except av.FFmpegError:
+        raise DownloadFailure("formats") from None
+
+
 def download_one(
     directory: Path,
     url: str,
@@ -134,6 +159,7 @@ def download_one(
     url = validate_media_url(url)
     twitter = urlsplit(url).hostname in _TWITTER_HOSTS
     youtube = is_youtube_url(url)
+    instagram = is_instagram_url(url)
 
     def progress(status: dict[str, Any]) -> None:
         total = directory_bytes(directory)
@@ -147,14 +173,20 @@ def download_one(
     options = {
         "outtmpl": str(directory / "video.%(ext)s"),
         "format": (
-            # X's direct MP4 variants often omit codec metadata. Strict
-            # acodec/vcodec filters reject these files and silent videos.
+            # X и Instagram могут не назвать кодеки прямого MP4 или не иметь
+            # аудио. Реальный контейнер проверяется перед отправкой в Telegram.
             f"best[ext=mp4][protocol=https][filesize<=?{MAX_DOWNLOAD_BYTES}]"
             "[vcodec!=?none]/"
             f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=?none]"
             if twitter
             else (
-                f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]/"
+                (
+                    f"best[ext=mp4][protocol=https][filesize<=?{MAX_DOWNLOAD_BYTES}]"
+                    "[vcodec!=?none]/"
+                    if instagram
+                    else ""
+                )
+                + f"best[ext=mp4][filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]/"
                 f"bestvideo[ext=mp4][height<=720][filesize<=?{MAX_DOWNLOAD_BYTES}]"
                 f"+bestaudio[ext=m4a][filesize<=?{MAX_DOWNLOAD_BYTES}]/"
                 f"best[filesize<=?{MAX_DOWNLOAD_BYTES}][vcodec!=none][acodec!=none]"
@@ -197,7 +229,8 @@ def download_one(
         animation = twitter and _twitter_gif(info)
         duration = float(info.get("duration") or 0)
         missing_gif_duration = animation and info.get("duration") is None
-        if not missing_gif_duration and (
+        missing_instagram_duration = instagram and info.get("duration") is None
+        if not (missing_gif_duration or missing_instagram_duration) and (
             not math.isfinite(duration) or not 0 < duration <= MAX_DOWNLOAD_SECONDS
         ):
             raise DownloadFailure(
@@ -248,6 +281,8 @@ def download_one(
             downloader.process_info(info)
         if animation:
             _check_animation(directory)
+        if missing_instagram_duration:
+            _check_instagram_duration(directory)
         (directory / "result.json").write_text(
             json.dumps(
                 {
