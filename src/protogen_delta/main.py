@@ -127,6 +127,7 @@ from protogen_delta.services.stickers import ContextualStickerService
 from protogen_delta.services.tools import ToolExecutor, default_registry
 from protogen_delta.services.translation import TranslationService
 from protogen_delta.services.user_facts import UserFactsService
+from protogen_delta.services.web_images import WebImages
 from protogen_delta.services.web_search import WebSearchService
 
 logger = logging.getLogger(__name__)
@@ -366,6 +367,7 @@ async def main() -> None:
             brave_key=settings.brave_search_api_key,
             proxy_url=settings.telegram_proxy_url,
         )
+        web_images = WebImages(bot, proxy_url=settings.telegram_proxy_url)
         deepseek = DeepSeekService(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
@@ -378,6 +380,7 @@ async def main() -> None:
             tools=ToolExecutor(
                 default_registry(
                     github_reader=github_reader,
+                    web_images=web_images,
                     source_access=source_access,
                     favorites=favorites if settings.favorites_user_ids else None,
                     proxy_url=settings.telegram_proxy_url,
@@ -476,6 +479,7 @@ async def main() -> None:
         )
         dispatcher.workflow_data.update({"sticker_service": sticker_service})
         response_engine = ResponseEngine(
+            web_images=web_images,
             code_reviews=code_reviews,
             outgoing_messages=outgoing_messages,
             github_reader=github_reader,

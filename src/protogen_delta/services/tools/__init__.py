@@ -11,6 +11,7 @@ from protogen_delta.services.tools.base import Tool, ToolExecutor, ToolRegistry
 if TYPE_CHECKING:
     from protogen_delta.services.public_github import PublicGithubReader
     from protogen_delta.services.web_search import WebSearchService
+    from protogen_delta.services.web_images import WebImages
 from protogen_delta.services.tools.calculator import calculate_expression
 from protogen_delta.services.tools.live_data import (
     get_current_time,
@@ -41,6 +42,7 @@ def default_registry(
     source_access: SourceAccess | None = None,
     favorites: FavoritesService | None = None,
     github_reader: PublicGithubReader | None = None,
+    web_images: WebImages | None = None,
 ) -> ToolRegistry:
     """Создать стандартный набор доступных DeepSeek инструментов."""
     tools = [
@@ -93,6 +95,20 @@ def default_registry(
             partial(fetch_web_page, proxy_url=proxy_url),
         ),
     ]
+    if web_images is not None:
+        tools.append(
+            Tool(
+                "send_web_image",
+                "Прислать реальное изображение в текущий личный чат по явной просьбе пользователя. "
+                "Передай URL найденной страницы со скриншотом/картинкой или прямой URL изображения. "
+                "Извлекается основная картинка страницы, файл проверяется и отправляется. "
+                "Только status=sent подтверждает отправку. Не выдумывай URL и содержимое фото.",
+                {"url": "Полный публичный URL страницы из поиска или изображения"},
+                ("url",),
+                web_images.send_tool,
+                timeout=20,
+            )
+        )
     if source_access is not None and source_access.owners:
         tools.extend(
             [

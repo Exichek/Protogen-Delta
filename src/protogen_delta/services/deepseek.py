@@ -28,6 +28,7 @@ from protogen_delta.core.llm_budget import current_llm_user
 from protogen_delta.core.operation_metrics import OperationMetrics, OperationSnapshot
 from protogen_delta.core.tool_markup import contains_unquoted_tool_markup
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.core.web_image_request import is_web_image_request
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.link_review import compact_page_result, review_links
 from protogen_delta.services.llm_accounting import (
@@ -440,7 +441,8 @@ class DeepSeekService:
                     or current_source_owner.get() is not None
                 )
                 and (
-                    name not in {"search_dialogue", "search_favorites"}
+                    name
+                    not in {"search_dialogue", "search_favorites", "send_web_image"}
                     or tool_names is not None
                     and name in tool_names
                 )
@@ -685,6 +687,10 @@ class DeepSeekService:
             capabilities.append("чтение точной публичной ссылки")
         if "calculate" in available_tools:
             capabilities.append("арифметический калькулятор")
+        if "send_web_image" in available_tools:
+            capabilities.append(
+                "отправка реальной картинки из интернета в текущий личный чат"
+            )
         if "search_dialogue" in available_tools:
             capabilities.append("поиск своей личной переписки")
         messages.insert(
@@ -831,6 +837,8 @@ class DeepSeekService:
             )
             calls_used = len(selected_links)
             forced_tool = None
+        image_attempted = False
+        image_sent = False
         for step in range(4):
             tool_choice: Any = "none" if step == 3 or calls_used >= 6 else "auto"
             if step == 0 and forced_tool is not None:
@@ -849,6 +857,24 @@ class DeepSeekService:
                 tool_choice = {
                     "type": "function",
                     "function": {"name": "fetch_web_page"},
+                }
+            if (
+                is_web_image_request(user_message)
+                and "send_web_image" in available_tools
+                and not image_attempted
+                and calls_used < 6
+                and step < 3
+                and (step > 0 or _URL_RE.search(user_message))
+                and (
+                    not self._verify_web_answers
+                    or evidence.pages
+                    or step == 2
+                    or _URL_RE.search(user_message)
+                )
+            ):
+                tool_choice = {
+                    "type": "function",
+                    "function": {"name": "send_web_image"},
                 }
             started = perf_counter()
             if tool_choice == "none":
@@ -885,6 +911,8 @@ class DeepSeekService:
             )
             message = response.choices[0].message
             if not message.tool_calls:
+                if image_sent and not evidence.pages:
+                    return "Изображение отправлено в чат. Источник указан в подписи."
                 return (
                     await self._verified_web_reply(
                         user_message,
@@ -939,6 +967,7 @@ class DeepSeekService:
                     result = '{"ok":false,"error":"tool_budget_exhausted"}'
                 else:
                     calls_used += 1
+                    image_attempted |= call.function.name == "send_web_image"
                     # Только явно известные операции чтения независимы и могут идти вместе.
                     if parallel:
                         pending.append(
@@ -975,6 +1004,14 @@ class DeepSeekService:
                     evidence.observe(
                         call.function.name, call.function.arguments, outcome
                     )
+                    if call.function.name == "send_web_image":
+                        try:
+                            image_sent |= (
+                                json.loads(outcome).get("data", {}).get("status")
+                                == "sent"
+                            )
+                        except ValueError, AttributeError:
+                            pass
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": outcome}
                 )
@@ -1006,6 +1043,8 @@ class DeepSeekService:
             _final_chat_reply(final)
             or "Не удалось завершить проверку внешних данных. Попробуй уточнить запрос."
         )
+        if image_sent and not evidence.pages:
+            return "Изображение отправлено в чат. Источник указан в подписи."
         return (
             await self._verified_web_reply(user_message, draft, evidence, web_expected)
             + footer
