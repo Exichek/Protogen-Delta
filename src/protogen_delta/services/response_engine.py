@@ -52,7 +52,7 @@ from protogen_delta.core.user_state import (
     UserState,
     UserStateStore,
 )
-from protogen_delta.core.web_image_request import is_web_image_request
+from protogen_delta.core.web_image_request import is_web_image_request, web_image_limit
 from protogen_delta.handlers.outgoing_context import outgoing_kind
 from protogen_delta.repositories.outgoing_messages import (
     OutgoingMessage,
@@ -647,7 +647,20 @@ class ResponseEngine:
                     )
                 )
                 image_scope = (
-                    self._web_images.turn(user_id, allowed=image_allowed)
+                    self._web_images.turn(
+                        user_id,
+                        allowed=image_allowed,
+                        limit=max(
+                            (
+                                web_image_limit(source.text)
+                                for source in _reply_sources(
+                                    user_id, user_message, model_message_override
+                                )
+                                if source.allow_controls
+                            ),
+                            default=1,
+                        ),
+                    )
                     if self._web_images is not None
                     else nullcontext(ImageTurn(user_id))
                 )
@@ -667,7 +680,9 @@ class ResponseEngine:
                         pending_review=pending_review,
                         outgoing=outgoing,
                     )
-                if (
+                if image_turn.receipts and not prepared.error:
+                    prepared = replace(prepared, text="Фото отправлено.")
+                elif (
                     image_turn.attempts
                     and not image_turn.receipts
                     and not prepared.error
@@ -678,7 +693,8 @@ class ResponseEngine:
                             "Отправку картинки подтвердить не удалось. "
                             "Не повторяю её автоматически, чтобы не прислать дубль."
                             if image_turn.delivery_uncertain
-                            else "Картинку с этого источника скачать не получилось. Можно попробовать другую страницу."
+                            else "Подходящую картинку скачать не получилось. "
+                            "Попробовал доступные источники, но файл получить не удалось."
                         ),
                     )
                 reply = (
@@ -791,6 +807,7 @@ class ResponseEngine:
                     and not user_state.roleplay_active
                     and not user_state.age_restricted
                     and not images
+                    and not image_allowed
                     and attachment_text is None
                     and model_message_override is None
                     and not is_capability_overview(user_message)
@@ -1801,6 +1818,8 @@ class ResponseEngine:
                     "\nПользователь просит прислать реальное изображение. Используй web_search для страницы по теме "
                     "и send_web_image для отправки файла. Не заменяй выполнимую отправку одной ссылкой "
                     "и не заявляй, что не умеешь прикреплять картинки. Только status=sent подтверждает отправку; "
+                    "в description передай краткое русское описание по теме источника, без ссылок "
+                    "и заголовка статьи. По умолчанию нужна одна картинка. "
                     "при not_sent честно объясни сбой. Не заявляй, что рассмотрел детали изображения: "
                     "инструмент проверяет файл, но не выполняет vision-анализ."
                 )

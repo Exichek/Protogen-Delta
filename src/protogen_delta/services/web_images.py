@@ -2,7 +2,9 @@
 
 import asyncio
 import hashlib
+import json
 import logging
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -13,6 +15,7 @@ from urllib.parse import urljoin, urlsplit
 
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
+from aiohttp import ClientError
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from protogen_delta.core.async_completion import finish_operation
@@ -28,10 +31,13 @@ MAX_IMAGE_BYTES = 3 * 1024 * 1024
 @dataclass(slots=True)
 class ImageTurn:
     owner: int
+    limit: int = 1
     receipts: list[str] = field(default_factory=list)
     sent: dict[str, dict[str, object]] = field(default_factory=dict)
     attempts: int = 0
     delivery_uncertain: bool = False
+    candidates: list[str] = field(default_factory=list)
+    tried: set[str] = field(default_factory=set)
 
 
 _active: ContextVar[ImageTurn | None] = ContextVar("web_image_turn", default=None)
@@ -39,6 +45,43 @@ _active: ContextVar[ImageTurn | None] = ContextVar("web_image_turn", default=Non
 
 def web_image_delivery_available() -> bool:
     return _active.get() is not None
+
+
+def web_image_delivery_complete() -> bool:
+    turn = _active.get()
+    return turn is None or len(turn.sent) >= turn.limit or turn.attempts >= 3
+
+
+def remember_web_image_sources(result: str) -> None:
+    """Запомнить альтернативы из текущей выдачи, не из старой истории."""
+    turn = _active.get()
+    if turn is None:
+        return
+    try:
+        payload = json.loads(result)
+        results = payload["data"]["results"] if payload.get("ok") else []
+        for item in results[:6]:
+            url = item.get("url")
+            if isinstance(url, str) and url not in turn.candidates:
+                turn.candidates.append(url)
+        turn.candidates[:] = turn.candidates[:6]
+    except ValueError, TypeError, KeyError, AttributeError:
+        return
+
+
+def _caption(description: str) -> str:
+    description = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", description)
+    description = re.sub(
+        r"(?:https?://|www\.)\S+|\b(?:[\w-]+\.)+[a-z]{2,}(?:/\S*)?|\[S\d+\]",
+        "",
+        description,
+        flags=re.I,
+    )
+    description = " ".join(description.split()).strip(" -*#_:;—")[:200]
+    # Английский заголовок статьи не заменяет краткое описание для владельца.
+    if not re.search(r"[а-яё]", description, re.I):
+        return "Картинка по твоему запросу."
+    return description
 
 
 class _Images(HTMLParser):
@@ -157,7 +200,7 @@ async def load_web_image(
                 )
                 image, width, height = await asyncio.to_thread(_image, data)
                 return image, source, parser.title, width, height
-            except ValueError, OSError, TimeoutError:
+            except ValueError, OSError, TimeoutError, ClientError:
                 continue
     raise ValueError("На странице нет подходящего изображения")
 
@@ -168,8 +211,8 @@ class WebImages:
         self._slots = asyncio.Semaphore(2)
 
     @contextmanager
-    def turn(self, owner: int, *, allowed: bool) -> Iterator[ImageTurn]:
-        turn = ImageTurn(owner)
+    def turn(self, owner: int, *, allowed: bool, limit: int = 1) -> Iterator[ImageTurn]:
+        turn = ImageTurn(owner, limit=min(3, max(1, limit)))
         token = _active.set(turn if allowed and owner > 0 else None)
         try:
             yield turn
@@ -180,28 +223,27 @@ class WebImages:
         turn = _active.get()
         if turn is None or turn.delivery_uncertain or turn.attempts >= 3:
             return {"status": "not_sent", "reason": "image_delivery_not_available"}
-        turn.attempts += 1
-        try:
-            async with self._slots:
-                data, source, title, width, height = await load_web_image(
-                    args["url"], proxy_url=self._proxy
-                )
-        except Exception:
+        if len(turn.sent) >= turn.limit:
+            return {"status": "sent", "already_sent": True}
+        loaded = None
+        for url in dict.fromkeys([args["url"], *turn.candidates]):
+            if url in turn.tried or turn.attempts >= 3:
+                continue
+            turn.tried.add(url)
+            turn.attempts += 1
+            try:
+                async with self._slots:
+                    loaded = await load_web_image(url, proxy_url=self._proxy)
+                break
+            except Exception:
+                continue
+        if loaded is None:
             return {"status": "not_sent", "reason": "public_image_unavailable"}
+        data, source, _title, width, height = loaded
         fingerprint = hashlib.sha256(data).hexdigest()
         if fingerprint in turn.sent:
             return {**turn.sent[fingerprint], "already_sent": True}
-        title = " ".join(title.split())[:180]
-        caption = (
-            "Изображение со страницы"
-            + (": " + title if title and title != source else "")
-            + "\nИсточник: "
-            + source
-        )
-        if len(caption) > 1000:
-            caption = "Изображение со страницы: " + (
-                urlsplit(source).hostname or "источник"
-            )
+        caption = _caption(args.get("description", ""))
         # После неопределённой доставки повторов в этом ходе не будет.
         turn.delivery_uncertain = True
         try:
@@ -231,6 +273,7 @@ class WebImages:
             "source_url": source,
             "width": width,
             "height": height,
+            "description": caption,
             "notice": (
                 "Реальный файл отправлен в текущий личный чат. "
                 "Содержимое изображения модель не анализировала; не выдумывай детали."
