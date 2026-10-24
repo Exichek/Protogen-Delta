@@ -23,6 +23,7 @@ class Tool:
     parameters: dict[str, str]
     required: tuple[str, ...]
     handler: ToolHandler
+    timeout: float | None = None
 
 
 class ToolRegistry:
@@ -84,14 +85,20 @@ class ToolExecutor:
                     > (
                         2048
                         if key == "url"
-                        and (name == "fetch_web_page" or name.startswith("github_"))
+                        and (
+                            name in {"fetch_web_page", "send_web_image"}
+                            or name.startswith("github_")
+                        )
                         else 200
                     )
                     for key, value in args.items()
                 )
             ):
                 raise ValueError("Некорректные аргументы инструмента")
-            result = await asyncio.wait_for(tool.handler(args), self.timeout)
+            result = await asyncio.wait_for(
+                tool.handler(args),
+                tool.timeout if tool.timeout is not None else self.timeout,
+            )
             output = json.dumps({"ok": True, "data": result}, ensure_ascii=False)
             if len(output) > 16000:
                 raise ValueError("Ответ источника слишком большой")

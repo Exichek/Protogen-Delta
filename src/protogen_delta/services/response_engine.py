@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -51,6 +52,7 @@ from protogen_delta.core.user_state import (
     UserState,
     UserStateStore,
 )
+from protogen_delta.core.web_image_request import is_web_image_request
 from protogen_delta.handlers.outgoing_context import outgoing_kind
 from protogen_delta.repositories.outgoing_messages import (
     OutgoingMessage,
@@ -134,6 +136,11 @@ from protogen_delta.services.turn_contract import (
 from protogen_delta.services.visual_model import VisualModel
 from protogen_delta.services.visual_reply_context import append_visual_reply_context
 from protogen_delta.services.web_followup import resolve_web_followup
+from protogen_delta.services.web_images import (
+    ImageTurn,
+    WebImages,
+    web_image_delivery_available,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +323,7 @@ class ResponseEngine:
         github_reader: PublicGithubReader | None = None,
         code_reviews: CodeReviewService | None = None,
         outgoing_messages: OutgoingMessagesRepository | None = None,
+        web_images: WebImages | None = None,
         example_contract: ExampleContract = "legacy",
         example_guidance: ExampleGuidance | None = None,
     ) -> None:
@@ -364,6 +372,7 @@ class ResponseEngine:
         self._creator_messages = creator_messages
         self._release_journal = release_journal
         self._github_reader = github_reader
+        self._web_images = web_images
         self._outgoing_messages = outgoing_messages
         self._code_reviews = code_reviews
         self._reply_tasks: dict[StateKey, asyncio.Task[None]] = {}
@@ -620,21 +629,58 @@ class ResponseEngine:
                         or None
                     )
                 delivery_context_present |= bool(outgoing)
-                prepared = await self._respond_for_user(
-                    user_id=user_id,
-                    user_message=user_message,
-                    user_state=user_state,
-                    images=images,
-                    attachment_text=attachment_text,
-                    attachment_name=attachment_name,
-                    model_message_override=model_message_override,
-                    trusted_input_context=trusted_input_context,
-                    use_personal_facts=use_personal_facts and chat_id is None,
-                    remember_history=use_personal_facts or chat_id is not None,
-                    delivery_context_present=delivery_context_present,
-                    pending_review=pending_review,
-                    outgoing=outgoing,
+                image_allowed = bool(
+                    deliver is not None
+                    and chat_id is None
+                    and use_personal_facts
+                    and all(
+                        source.allow_controls
+                        for source in _reply_sources(
+                            user_id, user_message, model_message_override
+                        )
+                    )
+                    and any(
+                        is_web_image_request(source.text)
+                        for source in _reply_sources(
+                            user_id, user_message, model_message_override
+                        )
+                    )
                 )
+                image_scope = (
+                    self._web_images.turn(user_id, allowed=image_allowed)
+                    if self._web_images is not None
+                    else nullcontext(ImageTurn(user_id))
+                )
+                with image_scope as image_turn:
+                    prepared = await self._respond_for_user(
+                        user_id=user_id,
+                        user_message=user_message,
+                        user_state=user_state,
+                        images=images,
+                        attachment_text=attachment_text,
+                        attachment_name=attachment_name,
+                        model_message_override=model_message_override,
+                        trusted_input_context=trusted_input_context,
+                        use_personal_facts=use_personal_facts and chat_id is None,
+                        remember_history=use_personal_facts or chat_id is not None,
+                        delivery_context_present=delivery_context_present,
+                        pending_review=pending_review,
+                        outgoing=outgoing,
+                    )
+                if (
+                    image_turn.attempts
+                    and not image_turn.receipts
+                    and not prepared.error
+                ):
+                    prepared = replace(
+                        prepared,
+                        text=(
+                            "Отправку картинки подтвердить не удалось. "
+                            "Не повторяю её автоматически, чтобы не прислать дубль."
+                            if image_turn.delivery_uncertain
+                            else "Картинку с этого источника скачать не получилось. Можно попробовать другую страницу."
+                        ),
+                    )
                 reply = (
                     self._reply_transform(user_id, prepared.text)
                     if self._reply_transform is not None
@@ -682,6 +728,11 @@ class ResponseEngine:
                                 "Просьба забыть сведения обработана."
                                 if prepared.forgotten
                                 else with_reaction_receipt(reply)
+                                + (
+                                    "\n\n" + "\n".join(image_turn.receipts)
+                                    if image_turn.receipts
+                                    else ""
+                                )
                             ),
                             outgoing_id=seen_outgoing_id,
                             outgoing_chat_id=(
@@ -981,6 +1032,7 @@ class ResponseEngine:
         technical_topic = (
             outside_reply
             or capability_overview
+            or any(is_web_image_request(text) for text in controls)
             or (
                 (
                     PromptComposer.is_technical(user_message)
@@ -1742,6 +1794,16 @@ class ResponseEngine:
                     and bool(request.controls)
                 ),
             )
+            if not web_image_delivery_available():
+                tool_names -= {"send_web_image"}
+            if "send_web_image" in tool_names:
+                prompt += (
+                    "\nПользователь просит прислать реальное изображение. Используй web_search для страницы по теме "
+                    "и send_web_image для отправки файла. Не заменяй выполнимую отправку одной ссылкой "
+                    "и не заявляй, что не умеешь прикреплять картинки. Только status=sent подтверждает отправку; "
+                    "при not_sent честно объясни сбой. Не заявляй, что рассмотрел детали изображения: "
+                    "инструмент проверяет файл, но не выполняет vision-анализ."
+                )
             if web_followup is not None:
                 model_user_message = web_followup.model_message(user_message)
                 tool_names = frozenset({"fetch_web_page"})

@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from protogen_delta.core.user_state import ConversationTurn
+from protogen_delta.core.web_image_request import is_web_image_request
 from protogen_delta.services.prompt_assembly import PromptAssembly
 from protogen_delta.services.public_github import GITHUB_TOOLS, github_links
 from protogen_delta.services.turn_contract import (
@@ -370,6 +371,8 @@ class PromptComposer:
                 selected.update(PromptComposer.select_tools(turn.user_message))
                 if selected:
                     break
+        if is_web_image_request(user_message):
+            selected.update({"web_search", "send_web_image"})
         if web_search_forbidden(user_message):
             selected.discard("web_search")
         elif allow_web_fallback:
