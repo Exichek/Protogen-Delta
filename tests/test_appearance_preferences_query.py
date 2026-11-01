@@ -40,6 +40,72 @@ def test_explicit_queries_are_recognized(message: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "Какие предпочтения?)",
+        "Какие у тебя предпочтения?",
+        "не всмысле какие я для облика указал",
+        "Какие я указал для облика?",
+        "Покажи твой профиль",
+        "Какой у тебя характер?",
+    ],
+)
+@pytest.mark.parametrize("active", [False, True])
+def test_full_profile_questions_use_saved_values(question: str, active: bool) -> None:
+    engine, _, model, *_ = _create_engine()
+    state = engine._user_states.get(42)
+    state.delta_appearance = "Львица"
+    state.delta_appearance_profile = AppearanceProfile(
+        personality="SYNTHETIC_PERSONALITY",
+        behavior="SYNTHETIC_BEHAVIOR",
+        preferences="SYNTHETIC_PREFERENCES",
+        boundaries="SYNTHETIC_BOUNDARIES",
+        fetishes="SYNTHETIC_FIELD",
+    ).encode()
+    state.roleplay_active = active
+    result = asyncio.run(engine.respond(42, question))
+    for value in ("PERSONALITY", "BEHAVIOR", "PREFERENCES", "BOUNDARIES", "FIELD"):
+        assert "SYNTHETIC_" + value in result
+    assert state.roleplay_active is active
+    model.chat.assert_not_awaited()
+
+
+@pytest.mark.parametrize("chat_id", [None, -100])
+def test_conversation_profile_context_is_private(chat_id: int | None) -> None:
+    engine, _, model, *_ = _create_engine()
+    state = engine._user_states.get(42)
+    state.delta_appearance = "Синтетический облик"
+    state.delta_appearance_profile = AppearanceProfile(
+        personality="PRIVATE_PERSONALITY",
+        preferences="PRIVATE_PREFERENCES",
+        fetishes="PRIVATE_FIELD",
+    ).encode()
+    asyncio.run(engine.respond(42, "Что тебе нравится?", chat_id=chat_id))
+    prompt = model.chat.await_args.kwargs["system_prompt"]
+    assert ("PRIVATE_PERSONALITY" in prompt) == (chat_id is None)
+    assert ("PRIVATE_PREFERENCES" in prompt) == (chat_id is None)
+    assert "PRIVATE_FIELD" not in prompt
+    assert not state.roleplay_active
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_active_profile_and_unsaved_empty_fields(custom: bool) -> None:
+    engine, _, model, *_ = _create_engine()
+    state = engine._user_states.get(42)
+    state.delta_default_profile = AppearanceProfile(
+        preferences="DEFAULT_VALUE"
+    ).encode()
+    state.delta_appearance = "Облик" if custom else ""
+    result = asyncio.run(engine.respond(42, "Какие предпочтения?"))
+    if custom:
+        assert "пока ничего не записано" in result and "Сохранить" in result
+        assert "DEFAULT_VALUE" not in result
+    else:
+        assert "DEFAULT_VALUE" in result
+    model.chat.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     "message",
     [
         "Что такое фетиши?",
@@ -124,11 +190,12 @@ def test_absent_empty_invalid_and_unknown_values_are_reported(
     model.chat.assert_not_awaited()
 
 
+@pytest.mark.parametrize("question", [QUESTION, "Какие предпочтения?)"])
 @pytest.mark.parametrize(
     ("chat_id", "personal"), [(None, False), (-100, False), (-100, True)]
 )
 def test_nonpersonal_context_cannot_disclose_saved_fields(
-    chat_id: int | None, personal: bool
+    chat_id: int | None, personal: bool, question: str
 ) -> None:
     engine, _, model, *_ = _create_engine()
     private = engine._user_states.get(42)
@@ -144,7 +211,7 @@ def test_nonpersonal_context_cannot_disclose_saved_fields(
         ).encode()
         scoped.roleplay_active = True
     reply = asyncio.run(
-        engine.respond(42, QUESTION, chat_id=chat_id, use_personal_facts=personal)
+        engine.respond(42, question, chat_id=chat_id, use_personal_facts=personal)
     )
     assert "PRIVATE_VALUE" not in reply and "GROUP_VALUE" not in reply
     assert "в личном чате" in reply
@@ -153,7 +220,10 @@ def test_nonpersonal_context_cannot_disclose_saved_fields(
     model.chat.assert_not_awaited()
 
 
-def test_queries_follow_profile_edits_and_persisted_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize("question", [QUESTION, "Какие предпочтения?)"])
+def test_queries_follow_profile_edits_and_persisted_state(
+    tmp_path: Path, question: str
+) -> None:
     async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
         states = UserStateStore(persistence=UserStateRepository(tmp_path))
@@ -162,16 +232,16 @@ def test_queries_follow_profile_edits_and_persisted_state(tmp_path: Path) -> Non
         async with states.use(42) as state:
             state.delta_appearance = "Облик"
             state.delta_appearance_profile = original.encode()
-        assert "OLD_VALUE" in await engine.respond(42, QUESTION)
+        assert "OLD_VALUE" in await engine.respond(42, question)
         updated = AppearanceProfile(fetishes="NEW_VALUE")
         await engine.set_delta_appearance_profile(
             42, updated, expected_appearance="Облик", expected_profile=original
         )
-        reply = await engine.respond(42, QUESTION)
+        reply = await engine.respond(42, question)
         assert "NEW_VALUE" in reply and "OLD_VALUE" not in reply
         engine._user_states = UserStateStore(persistence=UserStateRepository(tmp_path))
-        assert "NEW_VALUE" in await engine.respond(42, QUESTION)
-        assert "NEW_VALUE" not in await engine.respond(7, QUESTION)
+        assert "NEW_VALUE" in await engine.respond(42, question)
+        assert "NEW_VALUE" not in await engine.respond(7, question)
         model.chat.assert_not_awaited()
 
     asyncio.run(scenario())
