@@ -28,19 +28,55 @@ _QUERY = re.compile(
     re.I,
 )
 
+_PROFILE_QUERY = re.compile(
+    r"(?:дельта[\s,]+)?(?:"
+    r"какие\s+(?:(?:у\s+(?:тебя|дельты)|твои|сохраненные|заданные)\s+)*предпочтения|"
+    r"(?:покажи|перечисли|напомни)\s+(?:мне\s+)?(?:твой\s+|сохраненный\s+)?"
+    r"(?:профиль|характер|предпочтения|границы)(?:\s+(?:дельты|облика))?|"
+    r"(?:какой\s+(?:у\s+тебя\s+|твой\s+)?характер)|"
+    r"(?:не\s+в\s*смысле[\s,]*)?(?:какие|что)\s+я\s+"
+    r"(?:для\s+(?:этого\s+)?облика\s+|в\s+профиле\s+|тебе\s+|там\s+)*"
+    r"(?:указал|написал|задал|сохранил)"
+    r"(?:\s+(?:для\s+(?:этого\s+)?облика|в\s+профиле))?"
+    r")[\s!?.,…)\]]*",
+    re.I,
+)
+
+
+def _normalized(message: str) -> str:
+    return message.strip().casefold().replace("ё", "е")
+
 
 def is_appearance_preferences_query(message: str) -> bool:
     """Только отдельный вопрос о собственных настройках, не цитата или сцена."""
     return len(message) <= 240 and bool(
-        _QUERY.fullmatch(message.strip().casefold().replace("ё", "е"))
+        _QUERY.fullmatch(_normalized(message))
+        or _PROFILE_QUERY.fullmatch(_normalized(message))
     )
 
 
 def appearance_preferences_reply(
-    state: UserState, triggers: FetishTriggers, names: dict[str, str]
+    state: UserState, triggers: FetishTriggers, names: dict[str, str], message: str = ""
 ) -> str:
     """Показать исходный текст и словарные метки активного образа владельца."""
     profile = active_appearance_profile(state)
+    if _PROFILE_QUERY.fullmatch(_normalized(message)):
+        if profile is None or not profile.encode():
+            return (
+                "В сохранённом профиле активного образа Дельты пока ничего не записано. "
+                "Заполни поля и нажми «Сохранить характер и поведение». "
+                "У стандартного и загруженного облика отдельные настройки."
+            )
+        fields = (
+            ("Характер", profile.personality),
+            ("Манера поведения", profile.behavior),
+            ("Предпочтения в сценах", profile.preferences),
+            ("Границы", profile.boundaries),
+            ("Фетиши и предпочтения", profile.fetishes),
+        )
+        return "В сохранённом профиле активного образа Дельты указано:\n\n" + "\n".join(
+            label + ": " + value for label, value in fields if value
+        )
     if profile is None or not profile.fetishes:
         return (
             "В поле «Фетиши и предпочтения» активного образа пока ничего не записано. "

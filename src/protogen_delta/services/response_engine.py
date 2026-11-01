@@ -969,7 +969,10 @@ class ResponseEngine:
         ):
             reply = (
                 appearance_preferences_reply(
-                    user_state, self._config.fetish_triggers, self._config.fetish_names
+                    user_state,
+                    self._config.fetish_triggers,
+                    self._config.fetish_names,
+                    user_message,
                 )
                 if use_personal_facts
                 else "Личные настройки облика показываю только по твоему отдельному "
@@ -1346,7 +1349,7 @@ class ResponseEngine:
                 "детали остаются неизвестными. Он заменяет несовместимые детали "
                 "базового тела. Назначение принято приложением: не отвергай его "
                 "из-за другого базового вида. Имя Дельты сохраняется. Внешность сама "
-                "по себе не задаёт характер; ручной профиль учитывается отдельно в RP. "
+                "по себе не задаёт характер; ручной профиль учитывается отдельно. "
                 "Источник называй «выбранный образ». Смена внешности не назначает "
                 "действия, место или продолжение старой сцены; обычный вопрос "
                 "об облике получает обычный ответ."
@@ -1644,6 +1647,12 @@ class ResponseEngine:
         is_rp = gates.is_rp
         is_new_rp = gates.is_new_rp
         fetish_context = ""
+
+        if not is_rp and use_personal_facts and not gates.capability_overview:
+            if profile_context := appearance_profile_context(
+                user_state, conversation=True
+            ):
+                state_context.append(profile_context)
 
         if is_rp:
             scene_context.append(
