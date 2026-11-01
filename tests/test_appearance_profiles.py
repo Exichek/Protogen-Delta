@@ -153,7 +153,7 @@ def test_delta_profile_rejects_invalid_stale_or_busy_writes() -> None:
     asyncio.run(scenario())
 
 
-def test_delta_profile_follows_identity_and_stays_outside_ordinary_chat() -> None:
+def test_delta_profile_follows_identity_and_is_available_in_ordinary_chat() -> None:
     async def scenario() -> None:
         engine, _, model, *_ = _create_engine()
         state = engine._user_states.get(42)
@@ -183,9 +183,17 @@ def test_delta_profile_follows_identity_and_stays_outside_ordinary_chat() -> Non
         await engine.disable_roleplay(42)
         await engine.respond(42, "Привет")
         call = model.chat.await_args
-        assert (
-            call is not None and "DELTA_PERSONALITY" not in call.kwargs["system_prompt"]
-        )
+        assert call is not None
+        prompt = call.kwargs["system_prompt"]
+        for marker in (
+            "DELTA_PERSONALITY",
+            "DELTA_BEHAVIOR",
+            "DELTA_PREF",
+            "DELTA_LIMIT",
+        ):
+            assert marker in prompt
+        assert "USER_PREF" not in prompt and "USER_LIMIT" not in prompt
+        assert not state.roleplay_active
         await engine.set_delta_species(
             42,
             "Дракон",
