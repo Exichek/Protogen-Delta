@@ -77,7 +77,10 @@ _FOLLOWUP_PATTERN = re.compile(
     r"трет\w*\b|именно\b|верно\b|город\b|москва\b|springfield\b)",
     re.I,
 )
-_WEATHER_PATTERN = re.compile(r"\b(?:погод\w*|температур\w*|прогноз\w*)\b", re.I)
+_WEATHER_PATTERN = re.compile(
+    r"\b(?:погод\w*|температур\w*|прогноз\w*|осадк\w*|дожд\w*|снег\w*|ливень|ливня\w*|гроз\w*|голол[её]д\w*|зонт\w*)\b",
+    re.I,
+)
 _RATE_PATTERN = re.compile(
     r"\b(?:курс\w*|валют\w*|доллар\w*|евро|рубл\w*|иен\w*|юан\w*|"
     r"usd|eur|rub|jpy|cny)\b",

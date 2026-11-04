@@ -35,6 +35,7 @@ from protogen_delta.miniapp.auth import (
 )
 from protogen_delta.miniapp.markets import MarketRoutes
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
+from protogen_delta.miniapp.weather import WeatherRoutes
 from protogen_delta.repositories.llm_usage import LlmUsageRepository
 from protogen_delta.services.appearance_analysis import (
     validate_reference_notes,
@@ -136,6 +137,7 @@ class MiniAppServer:
         fetish_names: dict[str, str] | None = None,
         media_converter: MediaConversionService | None = None,
         market_advisor: MarketAdvisor | None = None,
+        weather_proxy_url: str | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -169,6 +171,7 @@ class MiniAppServer:
         self._runner: web.AppRunner | None = None
         self._media_converter = media_converter or MediaConversionService()
         self._market_advisor = market_advisor
+        self._weather_routes = WeatherRoutes(self._authenticate, weather_proxy_url)
         if self._runtime_health is not None:
             self._runtime_health.add_diagnostics(
                 "converter", self._media_converter.snapshot
@@ -218,6 +221,7 @@ class MiniAppServer:
         application.add_routes(
             MarketRoutes(self._authenticate, self._market_advisor).routes()
         )
+        application.add_routes(self._weather_routes.routes())
         application.on_startup.append(self._start_converter)
         application.on_cleanup.append(self._close_converter)
         return application
@@ -399,7 +403,7 @@ class MiniAppServer:
                     "default-src 'self'; script-src 'self' https://telegram.org; "
                     "style-src 'self' 'unsafe-inline'; "
                     "connect-src 'self'; img-src 'self' data: blob: https:; "
-                    "object-src 'none'; base-uri 'none'"
+                    "frame-src https://embed.windy.com; object-src 'none'; base-uri 'none'"
                 ),
             },
         )

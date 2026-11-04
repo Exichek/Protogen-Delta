@@ -493,3 +493,151 @@ def test_public_page_allows_only_global_addresses(
     resolver.return_value = [(2, 1, 6, "", ("10.0.0.1", 443))]
     with pytest.raises(ValueError):
         asyncio.run(http_module._validate_public_url("https://example.org/page"))
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (0, "Ясно"),
+        (61, "Слабый дождь"),
+        (73, "Умеренный снег"),
+        (95, "Гроза"),
+        (999, None),
+        (None, None),
+        (True, None),
+        ("61", None),
+    ],
+)
+def test_weather_wmo_conditions(code: object, expected: str | None) -> None:
+    assert live_data_module._weather_condition(code) == expected
+
+
+def test_weather_hourly_precipitation_and_missing_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    place = {"name": "Москва", "latitude": 55.75, "longitude": 37.6}
+    weather = {
+        "timezone": "Europe/Moscow",
+        "utc_offset_seconds": 10800,
+        "current": {
+            "time": "2026-11-04T23:45",
+            "interval": 900,
+            "weather_code": 3,
+            "precipitation": 0.0,
+        },
+        "current_units": {"precipitation": "mm", "snowfall": "cm"},
+        "hourly": {
+            "time": ["2026-11-04T23:00", "2026-11-05T00:00", "2026-11-05T01:00"],
+            "weather_code": [3, 61, 73],
+            "precipitation_probability": [None, 80, 90],
+            "precipitation": [None, 1.2, 0.4],
+            "rain": [None, 1.2, 0.0],
+            "snowfall": [None, 0.0, 0.3],
+        },
+        "hourly_units": {
+            "precipitation_probability": "%",
+            "precipitation": "mm",
+            "snowfall": "cm",
+            "wind_speed_10m": "m/s",
+        },
+        "daily": {"weather_code": [61, 73], "precipitation_sum": [1.2, 4.0]},
+        "daily_units": {"precipitation_sum": "mm"},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": [place]}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    result = asyncio.run(get_weather({"city": "Москва"}))
+    assert result["hourly"] == weather["hourly"]
+    assert result["hourly_units"] == weather["hourly_units"]
+    assert result["current"]["precipitation"] == 0.0
+    assert result["hourly"]["precipitation"][0] is None
+    assert result["conditions"] == {
+        "current": "Пасмурно",
+        "hourly": ["Пасмурно", "Слабый дождь", "Умеренный снег"],
+        "daily": ["Слабый дождь", "Умеренный снег"],
+    }
+    assert result["utc_offset_seconds"] == 10800
+    query = fetch.await_args_list[-1].args[1]
+    assert query["forecast_hours"] == "24" and query["forecast_days"] == "2"
+    assert query["wind_speed_unit"] == "ms" and query["timezone"] == "auto"
+    assert {"rain", "showers", "snowfall", "precipitation_probability"} <= set(
+        query["hourly"].split(",")
+    )
+    assert {"precipitation_sum", "snowfall_sum"} <= set(query["daily"].split(","))
+
+
+@pytest.mark.parametrize("forecast_days", [1, 11, True])
+def test_weather_rejects_unsupported_forecast_horizon(forecast_days: int) -> None:
+    with pytest.raises(ValueError):
+        asyncio.run(get_weather({"city": "Москва"}, forecast_days=forecast_days))
+
+
+def test_weather_elista_is_city_not_airport_or_fuzzy_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    city = {
+        "id": 563514,
+        "name": "Элиста",
+        "latitude": 46.30794,
+        "longitude": 44.25537,
+        "population": 106971,
+        "feature_code": "PPLA",
+    }
+    airport = {**city, "id": 6300997, "feature_code": "AIRP", "latitude": 46.37393}
+    fuzzy = {**city, "id": 563512, "name": "Элистанжи"}
+    weather = {
+        "timezone": "Europe/Moscow",
+        "current": {},
+        "current_units": {},
+        "daily": {},
+        "daily_units": {},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": [city, airport, fuzzy]}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    result = asyncio.run(
+        get_weather({"city": "Элиста", "country_code": "RU"}, forecast_days=10)
+    )
+    assert result["coordinates"] == {"latitude": 46.30794, "longitude": 44.25537}
+    assert fetch.await_args_list[-1].args[1]["forecast_days"] == "10"
+
+
+def test_weather_location_id_selects_only_returned_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    places = [
+        {"id": i, "name": "Город", "admin1": "Область", "latitude": i, "longitude": 1}
+        for i in (1, 2)
+    ]
+    weather = {
+        "timezone": "UTC",
+        "current": {},
+        "current_units": {},
+        "daily": {},
+        "daily_units": {},
+    }
+    fetch = AsyncMock(
+        side_effect=[
+            json.dumps({"results": places}).encode(),
+            json.dumps(weather).encode(),
+        ]
+    )
+    monkeypatch.setattr(live_data_module, "fetch_provider", fetch)
+    result = asyncio.run(get_weather({"city": "Город", "location_id": "2"}))
+    assert result["coordinates"]["latitude"] == 2
+    fetch.side_effect = None
+    fetch.return_value = json.dumps({"results": places}).encode()
+    assert (
+        asyncio.run(get_weather({"city": "Город", "location_id": "999"}))["status"]
+        == "not_found"
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(get_weather({"city": "Город", "location_id": "invalid"}))

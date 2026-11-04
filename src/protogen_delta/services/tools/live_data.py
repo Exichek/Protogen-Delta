@@ -56,10 +56,47 @@ async def get_exchange_rate(
     }
 
 
+def _weather_condition(code: object) -> str | None:
+    """Расшифровать WMO-код без догадок при пропущенном значении."""
+    descriptions = {
+        0: "Ясно",
+        1: "Преимущественно ясно",
+        2: "Переменная облачность",
+        3: "Пасмурно",
+        45: "Туман",
+        48: "Туман с изморозью",
+        51: "Слабая морось",
+        53: "Умеренная морось",
+        55: "Сильная морось",
+        56: "Слабая переохлаждённая морось",
+        57: "Сильная переохлаждённая морось",
+        61: "Слабый дождь",
+        63: "Умеренный дождь",
+        65: "Сильный дождь",
+        66: "Слабый переохлаждённый дождь",
+        67: "Сильный переохлаждённый дождь",
+        71: "Слабый снег",
+        73: "Умеренный снег",
+        75: "Сильный снег",
+        77: "Снежные зёрна",
+        80: "Слабый ливень",
+        81: "Умеренный ливень",
+        82: "Сильный ливень",
+        85: "Слабый снежный ливень",
+        86: "Сильный снежный ливень",
+        95: "Гроза",
+        96: "Гроза со слабым градом",
+        99: "Гроза с сильным градом",
+    }
+    return descriptions.get(code) if type(code) is int else None
+
+
 async def get_weather(
-    args: dict[str, str], *, proxy_url: str | None = None
+    args: dict[str, str], *, proxy_url: str | None = None, forecast_days: int = 2
 ) -> dict[str, Any]:
-    """Получить текущую погоду и двухдневный прогноз Open-Meteo."""
+    """Получить условия сейчас, 24 часа осадков и двухдневный прогноз."""
+    if type(forecast_days) is not int or not 2 <= forecast_days <= 10:
+        raise ValueError("Прогноз доступен на 2–10 дней")
     city = args["city"].strip()
     country = args.get("country_code", "").upper()
     if len(city) < 2 or (country and not re.fullmatch("[A-Z]{2}", country)):
@@ -74,6 +111,22 @@ async def get_weather(
             proxy_url=proxy_url,
         )
     ).get("results", [])
+    # Геокодер возвращает также аэропорты и нечёткие совпадения.
+    locations = [
+        p
+        for p in locations
+        if not p.get("feature_code") or str(p["feature_code"]).startswith("PPL")
+    ]
+    exact = [
+        p for p in locations if str(p.get("name", "")).casefold() == city.casefold()
+    ]
+    if exact:
+        locations = exact
+    location_id = args.get("location_id", "")
+    if location_id:
+        if not re.fullmatch(r"[0-9]{1,20}", location_id):
+            raise ValueError("Некорректный ID города")
+        locations = [p for p in locations if str(p.get("id", "")) == location_id]
     region = args.get("region", "").strip().casefold()
     if region:
         chosen = [
@@ -117,7 +170,17 @@ async def get_weather(
             "status": "ambiguous",
             "instruction": "Уточни у пользователя страну/регион; не выбирай молча",
             "candidates": [
-                {key: place.get(key) for key in ("name", "country", "admin1")}
+                {
+                    key: place.get(key)
+                    for key in (
+                        "name",
+                        "country",
+                        "admin1",
+                        "country_code",
+                        "id",
+                        "admin2",
+                    )
+                }
                 for place in locations
             ],
         }
@@ -129,20 +192,53 @@ async def get_weather(
             {
                 "latitude": str(place["latitude"]),
                 "longitude": str(place["longitude"]),
-                "current": "temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m",
-                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-                "forecast_days": "2",
+                "current": (
+                    "temperature_2m,apparent_temperature,relative_humidity_2m,"
+                    "precipitation,rain,showers,snowfall,weather_code,surface_pressure,"
+                    "wind_speed_10m,wind_gusts_10m"
+                ),
+                "hourly": (
+                    "temperature_2m,apparent_temperature,precipitation_probability,"
+                    "precipitation,rain,showers,snowfall,weather_code,"
+                    "wind_speed_10m,wind_gusts_10m"
+                ),
+                "daily": (
+                    "weather_code,temperature_2m_max,temperature_2m_min,"
+                    "precipitation_probability_max,precipitation_sum,rain_sum,"
+                    "showers_sum,snowfall_sum,wind_gusts_10m_max"
+                ),
+                "forecast_hours": "24",
+                "wind_speed_unit": "ms",
+                "forecast_days": str(forecast_days),
                 "timezone": "auto",
             },
             proxy_url=proxy_url,
         )
     )
     return {
-        "place": {key: place.get(key) for key in ("name", "country", "admin1")},
+        "place": {
+            key: place.get(key)
+            for key in ("name", "country", "admin1", "country_code", "id", "admin2")
+        },
+        "coordinates": {"latitude": place["latitude"], "longitude": place["longitude"]},
         "timezone": weather["timezone"],
         "current": weather["current"],
         "current_units": weather["current_units"],
         "daily": weather["daily"],
         "daily_units": weather["daily_units"],
+        "hourly": weather.get("hourly", {}),
+        "hourly_units": weather.get("hourly_units", {}),
+        "conditions": {
+            "current": _weather_condition(weather["current"].get("weather_code")),
+            "hourly": [
+                _weather_condition(code)
+                for code in weather.get("hourly", {}).get("weather_code", [])
+            ],
+            "daily": [
+                _weather_condition(code)
+                for code in weather["daily"].get("weather_code", [])
+            ],
+        },
+        "utc_offset_seconds": weather.get("utc_offset_seconds"),
         "source": "https://open-meteo.com/",
     }
