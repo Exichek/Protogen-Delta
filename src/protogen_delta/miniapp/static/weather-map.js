@@ -58,7 +58,7 @@
     const firstLabel=map.getStyle().layers.find(l=>l.type==='symbol')?.id;
     map.addLayer({id:sourceId,type:'raster',source:sourceId,paint:{'raster-opacity':layer==='precip'?0.95:0.6,'raster-fade-duration':180}},firstLabel);
     note(`Загружаю: ${layers[layer].toLowerCase()} · ${fullTime()}`);
-    $('weather-map-legend').textContent=layer==='precip'?'Осадки: светлее — слабее, темнее — сильнее. Точное количество — в карточках.':`${layers[layer]}: цветовой прогноз. Точные значения — в карточках города.`;
+    $('weather-map-legend').textContent=layer==='precip'?'Зоны осадков показаны синим. Заливка условная; точное количество — в карточках города.':`${layers[layer]}: цветовой прогноз. Точные значения — в карточках города.`;
     $('weather-map-legend').classList.toggle('precip-legend',layer==='precip');
   }
   function create(){
