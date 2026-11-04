@@ -84,6 +84,9 @@ def test_prompt_composer_adds_all_physical_sections_for_roleplay() -> None:
     [
         ("Привет, как дела?", frozenset()),
         ("Какая погода в Москве?", frozenset({"get_weather"})),
+        ("Сегодня будет дождь в Москве?", frozenset({"get_weather"})),
+        ("Сколько осадков завтра в Казани?", frozenset({"get_weather"})),
+        ("Снег в Новосибирске ожидается?", frozenset({"get_weather"})),
         ("Курс доллара к рублю", frozenset({"get_exchange_rate"})),
         ("Сколько времени в Москве?", frozenset({"get_current_time"})),
         ("Найди последнюю версию Python", frozenset({"web_search", "fetch_web_page"})),
