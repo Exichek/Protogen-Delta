@@ -33,6 +33,11 @@ class WeatherRoutes:
         return [
             web.get("/api/weather", self.forecast),
             web.get("/static/weather.js", self.javascript),
+            web.get(
+                "/static/{asset:weather-map.js|weather-time.js|fullscreen.js|"
+                "maplibre.js|maplibre.css|weather-map-style.json|maplibre-LICENSE.txt}",
+                self.asset,
+            ),
         ]
 
     async def javascript(self, request: web.Request) -> web.Response:
@@ -41,6 +46,32 @@ class WeatherRoutes:
             .joinpath("weather.js")
             .read_text("utf-8"),
             content_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+        )
+
+    async def asset(self, request: web.Request) -> web.Response:
+        """Отдать только явно перечисленные ресурсы карты."""
+        name = request.match_info["asset"]
+        allowed = {
+            "weather-map.js",
+            "weather-time.js",
+            "fullscreen.js",
+            "maplibre.js",
+            "maplibre.css",
+            "weather-map-style.json",
+            "maplibre-LICENSE.txt",
+        }
+        if name not in allowed:
+            raise web.HTTPNotFound()
+        kinds = {
+            "css": "text/css",
+            "json": "application/json",
+            "txt": "text/plain",
+            "js": "application/javascript",
+        }
+        return web.Response(
+            body=files("protogen_delta.miniapp.static").joinpath(name).read_bytes(),
+            content_type=kinds[name.rsplit(".", 1)[-1]],
             headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
         )
 

@@ -1,48 +1,5 @@
 (() => {
   'use strict';
-  const app=window.Telegram?.WebApp, button=document.getElementById('market-fullscreen');
-  const label=document.getElementById('market-fullscreen-label'), note=document.getElementById('market-fullscreen-note');
-  const native=Boolean(app?.initData && app.isVersionAtLeast?.('8.0') && app.requestFullscreen && app.exitFullscreen);
-  let pending=null;
-  function sync(){
-    const active=Boolean(document.fullscreenElement || (native && app.isFullscreen));
-    button.setAttribute('aria-pressed',String(active));
-    label.textContent=active?'Свернуть экран':'На весь экран';
-    button.title=active?'Выйти из полноэкранного режима':'Развернуть Mini App на весь экран';
-  }
-  function complete(){
-    clearTimeout(pending);pending=null;button.disabled=false;sync();
-  }
-  function failed(){
-    complete();
-    note.textContent='Полный экран недоступен в этом окне. Попробуй развернуть окно Telegram или обновить приложение.';
-  }
-  button.addEventListener('click',async()=>{
-    if(pending!==null)return;
-    note.textContent='';
-    button.disabled=true;
-    try{
-      if(document.fullscreenElement){await document.exitFullscreen();complete();}
-      else if(native){
-        pending=setTimeout(failed,5000);
-        if(app.isFullscreen)app.exitFullscreen();else app.requestFullscreen();
-      }else if(document.fullscreenEnabled && document.documentElement.requestFullscreen){
-        await document.documentElement.requestFullscreen();complete();
-      }else{app?.expand?.();failed();}
-    }catch{failed();}
-  });
-  document.addEventListener('fullscreenchange',()=>{note.textContent='';complete();});
-  document.addEventListener('fullscreenerror',failed);
-  if(native){
-    app.onEvent('fullscreenChanged',()=>{note.textContent='';complete();});
-    app.onEvent('fullscreenFailed',failed);
-    app.onEvent('activated',sync);
-  }
-  sync();
-})();
-
-(() => {
-  'use strict';
   const q = id => document.getElementById(id), initData = window.Telegram?.WebApp?.initData || '';
   const number = value => value == null ? '—' : Number(value).toLocaleString('ru-RU', {maximumFractionDigits:6});
   const price = value => value == null ? '—' : Number(value).toLocaleString('ru-RU', {maximumFractionDigits:market()==='crypto'||Math.abs(value)<1?6:2});

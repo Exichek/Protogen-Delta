@@ -402,8 +402,9 @@ class MiniAppServer:
                 "Content-Security-Policy": (
                     "default-src 'self'; script-src 'self' https://telegram.org; "
                     "style-src 'self' 'unsafe-inline'; "
-                    "connect-src 'self'; img-src 'self' data: blob: https:; "
-                    "frame-src https://embed.windy.com; object-src 'none'; base-uri 'none'"
+                    "connect-src 'self' https://tiles.openfreemap.org "
+                    "https://weathermaps.weatherapi.com; img-src 'self' data: blob: https:; "
+                    "worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'"
                 ),
             },
         )
