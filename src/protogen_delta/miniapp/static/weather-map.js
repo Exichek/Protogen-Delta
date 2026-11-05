@@ -13,13 +13,17 @@
     try{return await task();}finally{requests--;waiting.shift()?.();}
   }
   function remember(store,key,value,limit=96){store.delete(key);store.set(key,value);while(store.size>limit)store.delete(store.keys().next().value);}
-  async function field(stamp,z,x,y){
+  async function field(stamp,z,x,y,signal){
+    signal.throwIfAborted();
     const count=2**z;x=(x%count+count)%count;y=Math.max(0,Math.min(count-1,y));
     const key=tileKey(stamp,z,x,y);
     if(fields.has(key))return fields.get(key);
-    if(pending.has(key))return pending.get(key);
-    const task=limited(async()=>{
-      const response=await fetch(`https://weathermaps.weatherapi.com/precip/tiles/${stamp}/${z}/${x}/${y}.png`,{signal:AbortSignal.timeout(10000)});
+    let entry=pending.get(key);
+    if(!entry||entry.controller.signal.aborted){
+      entry={controller:new AbortController(),consumers:0,settled:false};const current=entry;
+      entry.task=limited(async()=>{
+      current.controller.signal.throwIfAborted();
+      const response=await fetch(`https://weathermaps.weatherapi.com/precip/tiles/${stamp}/${z}/${x}/${y}.png`,{signal:AbortSignal.any([current.controller.signal,AbortSignal.timeout(10000)])});
       if(!response.ok)throw new Error('Данные карты на этот час недоступны');
       const bytes=await response.arrayBuffer();if(bytes.byteLength>1048576)throw new Error('Слишком большой участок карты');
       const image=await createImageBitmap(new Blob([bytes],{type:'image/png'}));
@@ -28,13 +32,18 @@
       const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0);image.close();
       const pixels=ctx.getImageData(0,0,256,256).data,values=new Uint8Array(256*256);
       for(let i=0;i<values.length;i++)values[i]=Math.round((255-Math.min(pixels[i*4],pixels[i*4+1],pixels[i*4+2]))*pixels[i*4+3]/255);
-      remember(fields,key,values);return values;
-    });
-    pending.set(key,task);try{return await task;}finally{pending.delete(key);}
+      current.controller.signal.throwIfAborted();remember(fields,key,values);return values;
+      }).finally(()=>{current.settled=true;if(pending.get(key)===current)pending.delete(key);});
+      pending.set(key,entry);
+    }
+    entry.consumers++;let released=false;
+    const release=()=>{if(released)return;released=true;entry.consumers--;if(!entry.consumers&&!entry.settled)entry.controller.abort();};
+    signal.addEventListener('abort',release,{once:true});
+    try{return await entry.task;}finally{signal.removeEventListener('abort',release);release();}
   }
   async function precipitation(stamp,z,x,y,signal){
     // Соседние данные дают одинаковое сглаживание по обе стороны границы тайла.
-    const neighbors=await Promise.all(Array.from({length:9},(_,i)=>field(stamp,z,x+i%3-1,y+Math.floor(i/3)-1)));
+    const neighbors=await Promise.all(Array.from({length:9},(_,i)=>field(stamp,z,x+i%3-1,y+Math.floor(i/3)-1,signal)));
     signal.throwIfAborted();
     const pad=8,size=256+pad*2,canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;
     const ctx=canvas.getContext('2d'),input=new Float32Array(size*size),horizontal=new Float32Array(size*size);
