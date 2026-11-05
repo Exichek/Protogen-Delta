@@ -563,7 +563,7 @@ def test_weather_hourly_precipitation_and_missing_values(
     assert result["utc_offset_seconds"] == 10800
     query = fetch.await_args_list[-1].args[1]
     assert query["forecast_hours"] == "24" and query["forecast_days"] == "2"
-    assert query["wind_speed_unit"] == "ms" and query["timezone"] == "auto"
+    assert query["wind_speed_unit"] == "ms" and query["timezone"] == "Europe/Moscow"
     assert {"rain", "showers", "snowfall", "precipitation_probability"} <= set(
         query["hourly"].split(",")
     )

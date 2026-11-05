@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="/static/maplibre.css">
   <title>ИИ-ассистент Протоген Дельта</title>
   <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
   <style>
@@ -202,8 +203,19 @@
     .weather-probability span { display:block; height:100%; background:#6dbbff; }
     .weather-map-toolbar { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
     .weather-map-toolbar select { width:auto; min-width:160px; } .weather-map-toolbar button { width:auto; margin:0; }
+    #weather-fullscreen { width:auto; margin:0; white-space:nowrap; }
+    .weather-layer-buttons { display:flex; flex-wrap:wrap; gap:6px; }
+    .weather-layer-buttons button { width:auto; margin:0; padding:10px 14px; background:#29364d; font-size:14px; }
+    .weather-layer-buttons button[aria-pressed="true"] { background:#405a82; outline:1px solid #7494bc; }
+    .weather-timeline { display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:12px; align-items:center; margin:14px 0; }
+    .weather-timeline button { margin:0; width:auto; padding:10px; background:#2b3c58; }
+    #weather-time { padding:0; accent-color:#73a4e5; outline:none; }
+    .weather-time-labels { display:flex; justify-content:space-between; font-size:11px; color:#a0b2ce; }
+    .precip-legend:before { content:''; display:inline-block; width:80px; height:8px; margin-right:8px; border-radius:3px; background:linear-gradient(90deg,#4169a4,#2b4e8b,#1c346d); }
+    #weather-map .maplibregl-ctrl-attrib { background:#172437df; color:#aabbd3; }
+    #weather-map .maplibregl-ctrl-attrib a { color:#b8ccec; }
     #weather-map { width:100%; height:clamp(340px,58vh,650px); border:0; border-radius:14px; background:#172435; }
-    #weather-map-card:fullscreen { padding:20px; background:#0c1420; overflow:auto; } #weather-map-card:fullscreen iframe { height:calc(100vh - 150px); }
+    #weather-map:focus-visible { outline:2px solid #73a4e5; }
     #weather-candidates button { text-align:left; margin-top:8px; }
     #weather-panel a { color:#8fc4ff; }
     #weather-panel h2 { font-size:20px; margin:0 0 10px; }
@@ -523,19 +535,24 @@
     </div>
   </div>
   <div id="weather-panel" role="tabpanel" aria-labelledby="tab-weather" hidden>
-    <div class="weather-heading"><div><h1>Погода</h1><p class="muted">Осадки, прогноз и карта рядом с тобой</p></div><span aria-hidden="true" class="weather-icon">🌦️</span></div>
+    <div class="weather-heading"><div><h1>Погода</h1><p class="muted">Осадки, прогноз и карта рядом с тобой</p></div><button id="weather-fullscreen" type="button" aria-pressed="false"><span id="weather-fullscreen-label">На весь экран</span></button></div>
+    <p id="weather-fullscreen-note" class="muted" role="status"></p>
     <section class="card"><form id="weather-search"><div><label for="weather-city">Город</label><input id="weather-city" maxlength="100" minlength="2" required placeholder="Например, Москва" autocomplete="off"></div><div><label for="weather-country">Страна</label><select id="weather-country"><option value="RU">Россия</option><option value="">Любая</option><option value="KZ">Казахстан</option><option value="BY">Беларусь</option><option value="DE">Германия</option><option value="US">США</option></select></div><button id="weather-submit" type="submit">Показать</button></form><p id="weather-status" role="status" aria-live="polite"></p><div id="weather-candidates"></div></section>
     <section id="weather-empty" class="card weather-empty"><div class="weather-icon">☁️</div><h2>Какая погода у тебя?</h2><p class="muted">Укажи город, чтобы увидеть ближайшие осадки и карту прогноза.</p></section>
     <div id="weather-results" hidden>
       <section class="card"><div class="weather-current"><div><h2 id="weather-place"></h2><div id="weather-temperature" class="weather-temperature"></div><p id="weather-condition"></p><p id="weather-feels" class="muted"></p></div><div class="weather-details" id="weather-details"></div></div><p id="weather-updated" class="muted"></p></section>
-      <section class="card"><h2>Ближайшие 24 часа</h2><p class="muted">Вероятность осадков и их количество по часам. Время местное; осадки относятся к часу перед указанной отметкой.</p><div id="weather-hours" class="weather-scroll" tabindex="0" aria-label="Почасовой прогноз"></div></section>
-      <section class="card" id="weather-map-card"><div class="weather-map-toolbar"><div><h2>Карта прогноза</h2><span class="muted">Слой осадков, температуры или ветра</span></div><select id="weather-layer" aria-label="Слой карты"><option value="rain">Дождь и снег</option><option value="temp">Температура</option><option value="wind">Ветер</option></select><button id="weather-fullscreen" type="button">На весь экран</button></div><iframe id="weather-map" title="Карта прогноза Windy" loading="lazy" referrerpolicy="no-referrer" allowfullscreen sandbox="allow-scripts allow-same-origin allow-popups"></iframe><p class="muted">Карта Windy показывает модельный прогноз. Она может отличаться от прогноза Open-Meteo выше. Если карта не загрузилась, <a id="weather-map-link" target="_blank" rel="noopener noreferrer">открой её отдельно</a>.</p></section>
-      <section class="card"><h2>Прогноз на 10 дней</h2><div id="weather-days" class="weather-scroll" tabindex="0" aria-label="Прогноз по дням"></div><p class="muted">Дальний прогноз может меняться. Данные: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>. Карта: <a href="https://www.windy.com/" target="_blank" rel="noopener noreferrer">Windy</a>.</p></section>
+      <section class="card"><h2>Ближайшие 24 часа</h2><p class="muted">Вероятность осадков и их количество по часам. Всё время — МСК, формат 24 часа. Осадки относятся к часу перед указанной отметкой.</p><div id="weather-hours" class="weather-scroll" tabindex="0" aria-label="Почасовой прогноз"></div></section>
+      <section class="card" id="weather-map-card"><div class="weather-map-toolbar"><h2>Карта погоды</h2><div class="weather-layer-buttons" role="group" aria-label="Слой карты"><button type="button" data-weather-layer="precip" aria-pressed="true">🌧 Осадки</button><button type="button" data-weather-layer="tmp2m" aria-pressed="false">🌡 Температура</button><button type="button" data-weather-layer="wind" aria-pressed="false">Ветер</button><button type="button" data-weather-layer="pressure" aria-pressed="false">Давление</button></div></div><div id="weather-map" role="region" aria-label="Интерактивная карта прогноза погоды"></div><div class="weather-timeline"><button id="weather-play" type="button" aria-label="Воспроизвести или приостановить прогноз" aria-pressed="false">▶</button><div><strong id="weather-map-time">— МСК</strong><input id="weather-time" type="range" min="0" max="48" step="1" value="0" aria-label="Время прогноза по Москве"><div class="weather-time-labels"><span>Сейчас</span><span>Через сутки</span><span>Через двое суток</span></div></div><button id="weather-now" type="button">Сейчас</button></div><p id="weather-map-status" class="muted" role="status" aria-live="polite"></p><p id="weather-map-legend" class="muted precip-legend"></p><p class="muted">Осадки WeatherAPI — почасовой модельный прогноз, не радар. Карточки Open-Meteo могут отличаться от карты.</p></section>
+      <section class="card"><h2>Прогноз на 10 дней</h2><div id="weather-days" class="weather-scroll" tabindex="0" aria-label="Прогноз по дням"></div><p class="muted">Дальний прогноз может меняться. Данные: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>. Осадки на карте: <a href="https://www.weatherapi.com/" target="_blank" rel="noopener noreferrer">WeatherAPI</a>. Основа: <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>.</p></section>
     </div>
   </div>
 </main>
 <script src="/static/app.js" defer></script>
+<script src="/static/fullscreen.js" defer></script>
 <script src="/static/markets.js" defer></script>
+<script src="/static/maplibre.js" defer></script>
+<script src="/static/weather-time.js" defer></script>
+<script src="/static/weather-map.js" defer></script>
 <script src="/static/weather.js" defer></script>
 </body>
 </html>

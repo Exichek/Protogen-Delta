@@ -210,7 +210,7 @@ async def get_weather(
                 "forecast_hours": "24",
                 "wind_speed_unit": "ms",
                 "forecast_days": str(forecast_days),
-                "timezone": "auto",
+                "timezone": "Europe/Moscow",
             },
             proxy_url=proxy_url,
         )
