@@ -30,6 +30,7 @@ class Settings:
     mini_app_host: str = "127.0.0.1"
     mini_app_port: int = 8080
     mini_app_auth_max_age_seconds: int = 3600
+    foreca_api_key: str | None = field(default=None, repr=False)
     message_reactions_enabled: bool = True
     reply_supplements_enabled: bool = True
     message_reaction_chance: float = 0.35
@@ -487,6 +488,7 @@ def load_settings() -> Settings:
         mini_app_host=mini_app_host,
         mini_app_port=mini_app_port,
         mini_app_auth_max_age_seconds=mini_app_auth_max_age_seconds,
+        foreca_api_key=os.getenv("FORECA_API_KEY", "").strip() or None,
         message_reactions_enabled=message_reactions_enabled,
         reply_supplements_enabled=_parse_bool(
             os.getenv("REPLY_SUPPLEMENTS_ENABLED", "true"), "REPLY_SUPPLEMENTS_ENABLED"

@@ -23,6 +23,8 @@
     detail('Осадки сейчас',display(c.precipitation,` ${u.precipitation||'мм'}`,1));
     detail('Снег сейчас',display(c.snowfall,` ${u.snowfall||'см'}`,1));
     detail('Давление',number(c.surface_pressure)?display(c.surface_pressure*0.750061683,' мм рт. ст.'):'—');
+    const storms=new Set([95,96,99]),stormHours=(h.time||[]).filter((_,i)=>storms.has(h.weather_code?.[i]));
+    $('weather-thunder').textContent=storms.has(c.weather_code)?'⛈ По данным погоды сейчас гроза.':stormHours.length?`⛈ Гроза в прогнозе: ${stormHours.slice(0,4).map(t=>window.DeltaWeatherTime.full(t)).join('; ')}${stormHours.length>4?' и позже':''}.`:'По часовому прогнозу данных о грозе пока нет.';
     $('weather-hours').replaceChildren();
     (h.time||[]).forEach((time,i)=>{
       const el=node('div',undefined,'weather-hour');

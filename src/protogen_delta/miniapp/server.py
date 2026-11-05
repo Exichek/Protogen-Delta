@@ -33,6 +33,7 @@ from protogen_delta.miniapp.auth import (
     MiniAppUser,
     validate_init_data,
 )
+from protogen_delta.miniapp.lightning import LightningRoutes
 from protogen_delta.miniapp.markets import MarketRoutes
 from protogen_delta.miniapp.tools import MiniAppTools, ToolsBusyError
 from protogen_delta.miniapp.weather import WeatherRoutes
@@ -138,6 +139,7 @@ class MiniAppServer:
         media_converter: MediaConversionService | None = None,
         market_advisor: MarketAdvisor | None = None,
         weather_proxy_url: str | None = None,
+        foreca_api_key: str | None = None,
     ) -> None:
         if not host.strip():
             raise ValueError("host не может быть пустым")
@@ -172,6 +174,9 @@ class MiniAppServer:
         self._media_converter = media_converter or MediaConversionService()
         self._market_advisor = market_advisor
         self._weather_routes = WeatherRoutes(self._authenticate, weather_proxy_url)
+        self._lightning_routes = LightningRoutes(
+            self._authenticate, foreca_api_key, weather_proxy_url
+        )
         if self._runtime_health is not None:
             self._runtime_health.add_diagnostics(
                 "converter", self._media_converter.snapshot
@@ -222,6 +227,7 @@ class MiniAppServer:
             MarketRoutes(self._authenticate, self._market_advisor).routes()
         )
         application.add_routes(self._weather_routes.routes())
+        application.add_routes(self._lightning_routes.routes())
         application.on_startup.append(self._start_converter)
         application.on_cleanup.append(self._close_converter)
         return application

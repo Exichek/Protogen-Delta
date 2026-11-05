@@ -754,6 +754,7 @@ async def main() -> None:
                 fetish_names=fetish_names,
                 market_advisor=market_advisor,
                 weather_proxy_url=settings.telegram_proxy_url,
+                foreca_api_key=settings.foreca_api_key,
             )
             await mini_app_server.start()
 

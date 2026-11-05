@@ -8,6 +8,17 @@ import protogen_delta.config.settings as settings_module
 from protogen_delta.config.settings import load_settings
 
 
+def test_foreca_key_stays_out_of_settings_repr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_dotenv(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_TOKEN", "test")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ART_CHAT_ID", "-1")
+    monkeypatch.setenv("FORECA_API_KEY", "  synthetic-foreca-secret  ")
+    settings = load_settings()
+    assert settings.foreca_api_key == "synthetic-foreca-secret"
+    assert "synthetic-foreca-secret" not in repr(settings)
+
+
 @pytest.mark.parametrize(
     "name,value",
     [
