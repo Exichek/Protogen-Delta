@@ -1,12 +1,14 @@
 """Настоящий экстрактор X с синтетическими метаданными, без сетевых запросов."""
 
 import json
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
+from protogen_delta.services.download_errors import DownloadFailure
 from protogen_delta.services.media_download_worker import download_one
 
 
@@ -148,3 +150,44 @@ def test_unexpected_x_playlist_still_rejected(
         with pytest.raises(ValueError):
             download_one(tmp_path, "https://x.com/synthetic/status/123")
     downloader.process_info.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "media_url, expected",
+    [
+        ("https://video.twimg.com/ext_tw_video/123/clip.mp4", True),
+        ("https://video.twimg.com.example.net/clip.mp4", False),
+    ],
+)
+def test_public_x_mp4_fallback_when_guest_api_has_no_video(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, media_url: str, expected: bool
+) -> None:
+    import yt_dlp
+    from yt_dlp.extractor.twitter import TwitterIE
+
+    monkeypatch.setattr(TwitterIE, "_extract_status", lambda self, twid: {})
+    response = {
+        "status": {
+            "type": "status",
+            "id": "123",
+            "media": {
+                "videos": [{"type": "video", "url": media_url, "duration": 58.683}]
+            },
+        }
+    }
+    fetch = Mock(return_value=BytesIO(json.dumps(response).encode()))
+    process = Mock()
+    monkeypatch.setattr(yt_dlp.YoutubeDL, "urlopen", fetch)
+    monkeypatch.setattr(yt_dlp.YoutubeDL, "process_info", process)
+
+    url = "https://x.com/synthetic/status/123"
+    if expected:
+        download_one(tmp_path, url)
+        info = process.call_args.args[0]
+        assert info["url"] == media_url and info["duration"] == 58.683
+        assert info["ext"] == "mp4"
+    else:
+        with pytest.raises(DownloadFailure, match="formats"):
+            download_one(tmp_path, url)
+        process.assert_not_called()
+    fetch.assert_called_once_with("https://api.fxtwitter.com/2/status/123")

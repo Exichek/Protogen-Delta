@@ -3,6 +3,7 @@
 import ipaddress
 import json
 import math
+import re
 import signal
 import socket
 import sys
@@ -100,6 +101,68 @@ def _twitter_gif(info: dict[str, Any]) -> bool:
         ):
             return True
     return False
+
+
+def _twitter_public_video(downloader: Any, url: str) -> dict[str, Any] | None:
+    """Получить первый публичный MP4 по ID поста, если X не вернул потоки."""
+    from yt_dlp.networking import exceptions  # type: ignore[import-untyped]
+
+    match = re.search(r"/(?:status|statuses)/([0-9]{1,25})/?$", urlsplit(url).path)
+    if not match:
+        return None
+    post_id = match[1]
+    try:
+        with downloader.urlopen(
+            f"https://api.fxtwitter.com/2/status/{post_id}"
+        ) as response:
+            body = response.read(1_048_577)
+        if len(body) > 1_048_576:
+            return None
+        payload = json.loads(body)
+    except exceptions.RequestError, OSError, ValueError:
+        return None
+
+    post = payload.get("status") if isinstance(payload, dict) else None
+    if (
+        not isinstance(post, dict)
+        or post.get("type") != "status"
+        or post.get("id") != post_id
+    ):
+        return None
+    media = post.get("media")
+    videos = media.get("videos") if isinstance(media, dict) else None
+    if not isinstance(videos, list) or not videos or not isinstance(videos[0], dict):
+        return None
+    video = videos[0]
+    source = video.get("url")
+    if video.get("type") not in ("video", "gif") or not isinstance(source, str):
+        return None
+    try:
+        parsed = urlsplit(source)
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "video.twimg.com"
+        or not parsed.path.endswith(".mp4")
+    ):
+        return None
+    duration = video.get("duration")
+    if type(duration) not in (int, float):
+        duration = None
+    info = downloader.process_ie_result(
+        {
+            "id": post_id,
+            "title": "Видео из X",
+            "duration": duration,
+            "webpage_url": url,
+            "extractor": "twitter",
+            "extractor_key": "Twitter",
+            "formats": [{"url": source, "ext": "mp4", "protocol": "https"}],
+        },
+        download=False,
+    )
+    return info if isinstance(info, dict) else None
 
 
 def _check_animation(directory: Path) -> None:
@@ -224,6 +287,15 @@ def download_one(
             if not isinstance(entries, (list, tuple)) or len(entries) != 1:
                 raise ValueError("Expected one selected video from the X post")
             info = entries[0]
+        if (
+            twitter
+            and info
+            and info.get("formats") == []
+            and not info.get("url")
+            and not info.get("requested_formats")
+            and diagnostics.failure_code in {None, "formats"}
+        ):
+            info = _twitter_public_video(downloader, url) or info
         if not info or info.get("_type", "video") != "video" or info.get("is_live"):
             raise ValueError("Not one recorded video")
         animation = twitter and _twitter_gif(info)
