@@ -105,7 +105,7 @@ def _twitter_gif(info: dict[str, Any]) -> bool:
 
 def _twitter_public_video(downloader: Any, url: str) -> dict[str, Any] | None:
     """Получить первый публичный MP4 по ID поста, если X не вернул потоки."""
-    from yt_dlp.networking.exceptions import RequestError  # type: ignore[import-untyped]
+    from yt_dlp.networking import exceptions  # type: ignore[import-untyped]
 
     match = re.search(r"/(?:status|statuses)/([0-9]{1,25})/?$", urlsplit(url).path)
     if not match:
@@ -119,7 +119,7 @@ def _twitter_public_video(downloader: Any, url: str) -> dict[str, Any] | None:
         if len(body) > 1_048_576:
             return None
         payload = json.loads(body)
-    except RequestError, OSError, ValueError:
+    except exceptions.RequestError, OSError, ValueError:
         return None
 
     post = payload.get("status") if isinstance(payload, dict) else None
